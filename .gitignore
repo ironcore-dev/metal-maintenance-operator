@@ -7,6 +7,8 @@
 *.dll
 *.so
 *.dylib
+bin/*
+Dockerfile.cross
 
 # Test binary, built with `go test -c`
 *.test
@@ -20,6 +22,22 @@
 # Go workspace file
 go.work
 go.work.sum
+
+# Kubernetes Generated files - skip generated files, except for vendored files
+!vendor/**/zz_generated.*
+
+# editor and IDE paraphernalia
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.idea/
+node_modules/
+docs/.vitepress/cache/*
+docs/.vitepress/dist/*
+.vitepress/
+.cache
 
 # env file
 .env
