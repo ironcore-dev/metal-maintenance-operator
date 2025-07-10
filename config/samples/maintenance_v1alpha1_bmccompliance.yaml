@@ -1,0 +1,19 @@
+apiVersion: maintenance.ironcore.dev/v1alpha1
+kind: BMCCompliance
+metadata:
+  labels:
+    app.kubernetes.io/name: maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bmccompliance-sample
+spec:
+  bmcRef:
+    name: bmc-sample
+  targetVersion: iLO 6 v1.68
+  compliancePolicy: Strict
+  criticalVersions:
+    - iLO 6 v1.67
+    - iLO 6 v1.61
+  versionRange:
+    min: iLO 6 v1.60
+    max: iLO 6 v1.67
+  outOfSupportVersion: iLO 6 v1.60

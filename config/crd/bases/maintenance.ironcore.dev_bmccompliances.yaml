@@ -1,0 +1,103 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: bmccompliances.maintenance.ironcore.dev
+spec:
+  group: maintenance.ironcore.dev
+  names:
+    kind: BMCCompliance
+    listKind: BMCComplianceList
+    plural: bmccompliances
+    singular: bmccompliance
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BMCCompliance is the Schema for the bmccompliances API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BMCComplianceSpec defines the desired state of BMCCompliance.
+            properties:
+              bmcRef:
+                description: BMCRef is a reference to a specific BMC to generate the
+                  compliance object.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverRef is immutable
+                  rule: self == oldSelf
+              compliancePolicy:
+                description: CompliancePolicy defines the compliance policy to use
+                  for the BMC.
+                type: string
+              criticalVersions:
+                description: CriticalVersions are the versions that are considered
+                  critical.
+                items:
+                  type: string
+                type: array
+              outOfSupportVersion:
+                description: OutOfSupportVersion is the version that is considered
+                  out of support. provided by the HW vendor
+                type: string
+              targetVersion:
+                description: TargetVersion is the exact version for Strict compliance
+                  policy.
+                type: string
+              versionRange:
+                description: VersionRange is the range of versions for Range compliance
+                  policy. Or the minimum version for Minimum compliance policy.
+                properties:
+                  max:
+                    description: Max defines the maximum version in the range.
+                    type: string
+                  min:
+                    description: Min defines the minimum version in the range.
+                    type: string
+                type: object
+            type: object
+          status:
+            description: BMCComplianceStatus defines the observed state of BMCCompliance.
+            properties:
+              state:
+                description: |-
+                  EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+                  NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
