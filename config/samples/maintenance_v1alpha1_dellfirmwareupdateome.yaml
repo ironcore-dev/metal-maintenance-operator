@@ -1,0 +1,9 @@
+apiVersion: maintenance.maintenance.ironcore.dev/v1alpha1
+kind: DELLFirmwareUpdateOME
+metadata:
+  labels:
+    app.kubernetes.io/name: maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: dellfirmwareupdateome-sample
+spec:
+  # TODO(user): Add fields here

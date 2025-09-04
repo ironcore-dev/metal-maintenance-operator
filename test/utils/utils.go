@@ -1,5 +1,18 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-// SPDX-License-Identifier: Apache-2.0
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package utils
 
@@ -11,7 +24,7 @@ import (
 	"os/exec"
 	"strings"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
+	. "github.com/onsi/ginkgo/v2" //nolint:golint,revive
 )
 
 const (
@@ -33,15 +46,15 @@ func Run(cmd *exec.Cmd) (string, error) {
 	cmd.Dir = dir
 
 	if err := os.Chdir(cmd.Dir); err != nil {
-		_, _ = fmt.Fprintf(GinkgoWriter, "chdir dir: %q\n", err)
+		_, _ = fmt.Fprintf(GinkgoWriter, "chdir dir: %s\n", err)
 	}
 
 	cmd.Env = append(os.Environ(), "GO111MODULE=on")
 	command := strings.Join(cmd.Args, " ")
-	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", command)
+	_, _ = fmt.Fprintf(GinkgoWriter, "running: %s\n", command)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(output), fmt.Errorf("%q failed with error %q: %w", command, string(output), err)
+		return string(output), fmt.Errorf("%s failed with error: (%v) %s", command, err, string(output))
 	}
 
 	return string(output), nil
@@ -182,9 +195,9 @@ func GetNonEmptyLines(output string) []string {
 func GetProjectDir() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return wd, fmt.Errorf("failed to get current working directory: %w", err)
+		return wd, err
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
+	wd = strings.Replace(wd, "/test/e2e", "", -1)
 	return wd, nil
 }
 
@@ -195,19 +208,19 @@ func UncommentCode(filename, target, prefix string) error {
 	// nolint:gosec
 	content, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("failed to read file %q: %w", filename, err)
+		return err
 	}
 	strContent := string(content)
 
 	idx := strings.Index(strContent, target)
 	if idx < 0 {
-		return fmt.Errorf("unable to find the code %q to be uncomment", target)
+		return fmt.Errorf("unable to find the code %s to be uncomment", target)
 	}
 
 	out := new(bytes.Buffer)
 	_, err = out.Write(content[:idx])
 	if err != nil {
-		return fmt.Errorf("failed to write to output: %w", err)
+		return err
 	}
 
 	scanner := bufio.NewScanner(bytes.NewBufferString(target))
@@ -215,27 +228,24 @@ func UncommentCode(filename, target, prefix string) error {
 		return nil
 	}
 	for {
-		if _, err = out.WriteString(strings.TrimPrefix(scanner.Text(), prefix)); err != nil {
-			return fmt.Errorf("failed to write to output: %w", err)
+		_, err := out.WriteString(strings.TrimPrefix(scanner.Text(), prefix))
+		if err != nil {
+			return err
 		}
 		// Avoid writing a newline in case the previous line was the last in target.
 		if !scanner.Scan() {
 			break
 		}
-		if _, err = out.WriteString("\n"); err != nil {
-			return fmt.Errorf("failed to write to output: %w", err)
+		if _, err := out.WriteString("\n"); err != nil {
+			return err
 		}
 	}
 
-	if _, err = out.Write(content[idx+len(target):]); err != nil {
-		return fmt.Errorf("failed to write to output: %w", err)
+	_, err = out.Write(content[idx+len(target):])
+	if err != nil {
+		return err
 	}
-
 	// false positive
 	// nolint:gosec
-	if err = os.WriteFile(filename, out.Bytes(), 0644); err != nil {
-		return fmt.Errorf("failed to write file %q: %w", filename, err)
-	}
-
-	return nil
+	return os.WriteFile(filename, out.Bytes(), 0644)
 }

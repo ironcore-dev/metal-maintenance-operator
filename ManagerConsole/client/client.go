@@ -1,0 +1,184 @@
+package client
+
+import (
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	neturl "net/url"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Client represents the ManagerConsole client.
+type ManagerClient struct {
+	Auth   *AuthToken
+	Client *http.Client
+	Config *Config
+}
+
+type Config struct {
+	URL                 *neturl.URL
+	InsecureSkipVerify  bool
+	TLSHandshakeTimeout time.Duration
+	ReuseConnections    bool
+	HeaderCustomization map[string]string
+}
+
+type AuthToken struct {
+	Token    string
+	Session  string
+	Username string
+	Password string
+	AuthType AuthMethod
+}
+
+func CreateClient(config *Config) *http.Client {
+	defaultTransport := http.DefaultTransport.(*http.Transport)
+	transport := &http.Transport{
+		Proxy:                 defaultTransport.Proxy,
+		DialContext:           defaultTransport.DialContext,
+		MaxIdleConns:          defaultTransport.MaxIdleConns,
+		IdleConnTimeout:       defaultTransport.IdleConnTimeout,
+		ExpectContinueTimeout: defaultTransport.ExpectContinueTimeout,
+		TLSHandshakeTimeout:   config.TLSHandshakeTimeout * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: config.InsecureSkipVerify,
+		},
+	}
+	if config.ReuseConnections {
+		transport.DisableKeepAlives = false
+		transport.IdleConnTimeout = 0
+	}
+	return &http.Client{Transport: transport}
+}
+
+func (c *ManagerClient) CreateSession(url *neturl.URL, body map[string]string, authMtd AuthMethod, okCodes []int) error {
+	bodyByte, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	if authMtd == BasicAuth {
+		c.Auth = &AuthToken{AuthType: authMtd}
+		c.Auth.Token = "Basic " + base64.StdEncoding.EncodeToString([]byte(body["Username"]+":"+body["Password"]))
+		return nil
+	}
+	req, err := c.CreateRequestWithAuth(url, http.MethodPost, strings.NewReader(string(bodyByte)), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.DoRequest(req, okCodes)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	c.Auth = &AuthToken{AuthType: authMtd}
+
+	c.Auth.Token = resp.Header.Get("X-Auth-Token")
+	c.Auth.Session = resp.Header.Get("Location")
+
+	if urlParser, err := neturl.ParseRequestURI(c.Auth.Session); err == nil {
+		c.Auth.Session = urlParser.RequestURI()
+	}
+
+	return err
+}
+
+// DoRequest performs an HTTP request and returns the response body or an error.
+func (c *ManagerClient) DoRequest(req *http.Request, okCodes []int) (*http.Response, error) {
+	res, err := c.Client.Do(req)
+	if err != nil {
+		return nil, nil
+	}
+	defer res.Body.Close() // nolint: errcheck
+	if !slices.Contains(okCodes, res.StatusCode) {
+		return res, fmt.Errorf("unexpected status code: %d", res.StatusCode)
+	}
+	return res, nil
+}
+
+// Get performs a GET request to the specified path and decodes the response
+func (c *ManagerClient) Get(url *neturl.URL, returnData any, okCodes []int) error {
+	resBody, err := c.GetResponseBody(url, okCodes)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(resBody, returnData); err != nil {
+		return fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), string(resBody), err)
+	}
+	return err
+}
+
+func (c *ManagerClient) GetResponseBody(url *neturl.URL, okCodes []int) ([]byte, error) {
+	req, err := c.CreateRequestWithAuth(
+		url,
+		http.MethodGet,
+		nil,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
+	}
+	response, err := c.DoRequest(req, okCodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed at http request %v \nresponse: %v \twith error: %v", url.String(), response, err)
+	}
+	resBody, err := io.ReadAll(response.Body)
+	return resBody, err
+}
+
+func (c *ManagerClient) Post(url *neturl.URL, body io.Reader, returnData any, okCodes []int) error {
+	response, err := c.PostWithResponse(url, body, okCodes)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(response, returnData); err != nil {
+		return fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), response, err)
+	}
+	return err
+}
+
+func (c *ManagerClient) PostWithResponse(url *neturl.URL, body io.Reader, okCodes []int) ([]byte, error) {
+	req, err := c.CreateRequestWithAuth(
+		url,
+		http.MethodPost,
+		body,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
+	}
+	response, err := c.DoRequest(req, okCodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed at http request %v \nresponse: %v \twith error: %v", url.String(), response, err)
+	}
+	resBody, err := io.ReadAll(response.Body)
+	return resBody, err
+}
+
+func (c *ManagerClient) CreateRequestWithAuth(url *neturl.URL, httpMethod string, body io.Reader, header http.Header) (*http.Request, error) {
+	req, err := http.NewRequest(httpMethod, url.String(), body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request for: %v. due to err %v", url.String(), err)
+	}
+
+	if c.Config.ReuseConnections {
+		req.Close = false
+		req.Header.Add("Connection", "keep-alive")
+	}
+	if c.Config.HeaderCustomization == nil {
+		req.Header = http.Header{
+			"Content-Type": []string{"application/json"},
+			"Accept":       []string{"application/json"},
+		}
+	} else {
+		req.Header = header
+	}
+	req.Header.Add(string(c.Auth.AuthType), c.Auth.Token)
+
+	return req, nil
+}
