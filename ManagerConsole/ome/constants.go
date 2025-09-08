@@ -7,14 +7,6 @@ const (
 	DellManagedStateManagedWithAlert DellManagedState = 6000
 )
 
-var (
-	DellAuthBody = map[string]string{
-		"UserName":    "",
-		"Password":    "",
-		"SessionType": "API",
-	}
-)
-
 type DellDeviceStatusCode int
 
 const (
@@ -71,6 +63,24 @@ var DeviceTypeMap = map[int]string{
 	4000: "NETWORK_IOM",
 	3000: "STORAGE",
 	8000: "STORAGE_IOM",
+}
+
+var JobTypeMap = map[string]int{
+	"DeviceAction_Task":     3,
+	"Update_Task":           5,
+	"Inventory_Task":        8,
+	"RollbackSoftware_Task": 15,
+	"DebugLogs_Task":        18,
+	"Restore_Task":          20,
+	"Backup_Task":           21,
+	"ChassisProfile_Task":   22,
+	"SettingsUpdate_Task":   25,
+	"Device_Config_Task":    50,
+	"MCMOnBoarding_Task":    37,
+	"MCMOffBoarding_Task":   38,
+	"MCMGroupCreation_Task": 39,
+	"ProfileUpdate_Task":    41,
+	"QuickDeploy_Task":      42,
 }
 
 var JobURL = "/api/JobService/Jobs" // (%s)

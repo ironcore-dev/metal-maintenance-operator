@@ -56,7 +56,12 @@ func CreateClient(config *Config) *http.Client {
 	return &http.Client{Transport: transport}
 }
 
-func (c *ManagerClient) CreateSession(url *neturl.URL, body map[string]string, authMtd AuthMethod, okCodes []int) error {
+func (c *ManagerClient) CreateSession(
+	url *neturl.URL,
+	body map[string]string,
+	authMtd AuthMethod,
+	okCodes []int,
+) error {
 	bodyByte, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -74,7 +79,7 @@ func (c *ManagerClient) CreateSession(url *neturl.URL, body map[string]string, a
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // nolint: errcheck
 
 	c.Auth = &AuthToken{AuthType: authMtd}
 
@@ -89,16 +94,28 @@ func (c *ManagerClient) CreateSession(url *neturl.URL, body map[string]string, a
 }
 
 // DoRequest performs an HTTP request and returns the response body or an error.
+// its caller is responsible to close the response body.
 func (c *ManagerClient) DoRequest(req *http.Request, okCodes []int) (*http.Response, error) {
 	res, err := c.Client.Do(req)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
-	defer res.Body.Close() // nolint: errcheck
-	if !slices.Contains(okCodes, res.StatusCode) {
+	// Check for expected status codes only if provided.
+	// else accept any status code.
+	if len(okCodes) > 0 && !slices.Contains(okCodes, res.StatusCode) {
 		return res, fmt.Errorf("unexpected status code: %d", res.StatusCode)
 	}
 	return res, nil
+}
+
+func (c *ManagerClient) GetBodyFromRequest(req *http.Request, okCodes []int) ([]byte, error) {
+	var resBody []byte
+	response, err := c.DoRequest(req, okCodes)
+	if response != nil {
+		defer response.Body.Close() // nolint: errcheck
+		resBody, err = io.ReadAll(response.Body)
+	}
+	return resBody, err
 }
 
 // Get performs a GET request to the specified path and decodes the response
@@ -108,7 +125,9 @@ func (c *ManagerClient) Get(url *neturl.URL, returnData any, okCodes []int) erro
 		return err
 	}
 	if err = json.Unmarshal(resBody, returnData); err != nil {
-		return fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), string(resBody), err)
+		return fmt.Errorf(
+			"failed to decode response from: %v. \nresponse: %v \twith error: %v",
+			url.String(), string(resBody), err)
 	}
 	return err
 }
@@ -123,12 +142,7 @@ func (c *ManagerClient) GetResponseBody(url *neturl.URL, okCodes []int) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
 	}
-	response, err := c.DoRequest(req, okCodes)
-	if err != nil {
-		return nil, fmt.Errorf("failed at http request %v \nresponse: %v \twith error: %v", url.String(), response, err)
-	}
-	resBody, err := io.ReadAll(response.Body)
-	return resBody, err
+	return c.GetBodyFromRequest(req, okCodes)
 }
 
 func (c *ManagerClient) Post(url *neturl.URL, body io.Reader, returnData any, okCodes []int) error {
@@ -142,6 +156,30 @@ func (c *ManagerClient) Post(url *neturl.URL, body io.Reader, returnData any, ok
 	return err
 }
 
+func (c *ManagerClient) Put(url *neturl.URL, body io.Reader, returnData any, okCodes []int) error {
+	response, err := c.PutWithResponse(url, body, okCodes)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(response, returnData); err != nil {
+		return fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), response, err)
+	}
+	return err
+}
+
+func (c *ManagerClient) PutWithResponse(url *neturl.URL, body io.Reader, okCodes []int) ([]byte, error) {
+	req, err := c.CreateRequestWithAuth(
+		url,
+		http.MethodPut,
+		body,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
+	}
+	return c.GetBodyFromRequest(req, okCodes)
+}
+
 func (c *ManagerClient) PostWithResponse(url *neturl.URL, body io.Reader, okCodes []int) ([]byte, error) {
 	req, err := c.CreateRequestWithAuth(
 		url,
@@ -152,15 +190,15 @@ func (c *ManagerClient) PostWithResponse(url *neturl.URL, body io.Reader, okCode
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
 	}
-	response, err := c.DoRequest(req, okCodes)
-	if err != nil {
-		return nil, fmt.Errorf("failed at http request %v \nresponse: %v \twith error: %v", url.String(), response, err)
-	}
-	resBody, err := io.ReadAll(response.Body)
-	return resBody, err
+	return c.GetBodyFromRequest(req, okCodes)
 }
 
-func (c *ManagerClient) CreateRequestWithAuth(url *neturl.URL, httpMethod string, body io.Reader, header http.Header) (*http.Request, error) {
+func (c *ManagerClient) CreateRequestWithAuth(
+	url *neturl.URL,
+	httpMethod string,
+	body io.Reader,
+	header http.Header,
+) (*http.Request, error) {
 	req, err := http.NewRequest(httpMethod, url.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request for: %v. due to err %v", url.String(), err)

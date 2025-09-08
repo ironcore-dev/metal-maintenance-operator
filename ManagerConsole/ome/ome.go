@@ -11,7 +11,7 @@ import (
 	"github.com/ironcore-dev/maintenance-operator/ManagerConsole/client"
 )
 
-// OME defines an interface for interacting with a Open Manager Enterprice (OME) for dell servers.
+// OME defines an interface for interacting with a Open Manager Enterprise (OME) for dell servers.
 type OME struct {
 	Client     *client.ManagerClient
 	AuthConfig *client.AuthToken
@@ -70,12 +70,13 @@ type DellTasksDetails struct {
 // }
 
 type DellDeviceData struct {
-	DeviceID           int                  `json:"Id"`
+	Id                 int                  `json:"Id"`
 	Name               string               `json:"DeviceName"`
-	UUID               string               `json:"Identifier"`
+	SKU                string               `json:"Identifier"`
 	ManagedState       DellManagedState     `json:"ManagedState"`
 	OverallHealthState DellDeviceStatusCode `json:"Status"`
 	AccessState        DellAccessState      `json:"ConnectionState"`
+	Type               int                  `json:"Type"`
 }
 
 // Example usage:
@@ -169,10 +170,11 @@ type DellBaseline struct {
 }
 
 type DellTarget struct {
-	Id    int            `json:"Id"`
-	JobId int            `json:"JobId,omitempty"`
-	Type  DellTargetType `json:"Type"`
-	Data  string         `json:"Data,omitempty"`
+	Id         int            `json:"Id"`
+	JobId      int            `json:"JobId,omitempty"`
+	Type       DellTargetType `json:"Type,omitempty"`
+	TargetType DellTargetType `json:"TargetType,omitempty"`
+	Data       string         `json:"Data,omitempty"`
 }
 
 type DellTargetType struct {
@@ -230,12 +232,6 @@ type DellJobHistory struct {
 	HistoryDetails string        `json:"ExecutionHistoryDetails@odata.navigationLink"`
 }
 
-type Dell struct {
-	DeviceID           int
-	UUID               string
-	RemoteBoardDNSName string
-}
-
 func (d *OME) GetTasksStatusMap() (statuses map[int]string, err error) {
 	url := d.Config.URL.JoinPath("api", "JobService", "JobStatuses")
 	statuslist := &ODataList[DellJobStatus]{}
@@ -282,7 +278,8 @@ func (d *OME) GetAllData(url *neturl.URL, returnData any, okCodes []int) (*OData
 
 		data := make(map[string]any)
 		if err = json.Unmarshal(resBody, &data); err != nil {
-			return nil, fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), string(resBody), err)
+			return nil, fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v",
+				url.String(), string(resBody), err)
 		}
 		if nextURL, ok := data["@odata.nextLink"]; ok {
 			nextURLStr, ok := nextURL.(string)
@@ -298,11 +295,34 @@ func (d *OME) GetAllData(url *neturl.URL, returnData any, okCodes []int) (*OData
 		}
 
 		if err = json.Unmarshal(resBody, returnData); err != nil {
-			return nil, fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), string(resBody), err)
+			return nil, fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v",
+				url.String(), string(resBody), err)
 		}
 		returnDataList.Value = append(returnDataList.Value, reflect.ValueOf(returnData).Elem())
 	}
 	return returnDataList, nil
+}
+
+func (d *OME) GetDevicesFromSKU(listSKU []string) (*ODataList[DellDeviceData], error) {
+	url := d.Config.URL.JoinPath("api", "DeviceService", "Devices")
+	query := url.Query()
+	for _, sku := range listSKU {
+		query.Add("Identifier", sku)
+	}
+	if DevicesDetails, err := d.GetAllData(url, DellDeviceData{}, []int{http.StatusOK}); err != nil {
+		return nil, fmt.Errorf("failed to fetch Device details from url: %v,\n with error %w", url, err)
+	} else {
+		DeviceDetails := &ODataList[DellDeviceData]{}
+		for _, v := range DevicesDetails.Value {
+			switch v := v.(type) {
+			case DellDeviceData:
+				DeviceDetails.Value = append(DeviceDetails.Value, v)
+			default:
+				return nil, fmt.Errorf("cannot convert type %T to DellDeviceData, data: %v", v, DevicesDetails)
+			}
+		}
+		return DeviceDetails, nil
+	}
 }
 
 func (d *OME) RefreshCatalog(CatalogIds []int) error {
@@ -346,14 +366,14 @@ func (d *OME) GetAllCatalogs() (*ODataList[DellCatalogDetails], error) {
 			case DellCatalogDetails:
 				catalogDetails.Value = append(catalogDetails.Value, v)
 			default:
-				return nil, fmt.Errorf("cannot convert type %T to DellDeviceData, data: %v", v, catalogDetailsFetched)
+				return nil, fmt.Errorf("cannot convert type %T to DellCatalogDetails, data: %v", v, catalogDetailsFetched)
 			}
 		}
 		return catalogDetails, nil
 	}
 }
 
-func (d *OME) CreateCatalog(payload DellCatalogDetails) (*DellCatalogDetails, error) {
+func (d *OME) CreateCatalog(payload *DellCatalogDetails) (*DellCatalogDetails, error) {
 	url := d.Config.URL.JoinPath("api", "UpdateService", "Catalogs")
 
 	payloadBody, err := json.Marshal(payload)
@@ -365,7 +385,7 @@ func (d *OME) CreateCatalog(payload DellCatalogDetails) (*DellCatalogDetails, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog with error %w", err)
 	}
-	return &payload, nil
+	return payload, nil
 }
 
 func (d *OME) GetJobDetails(JobId int) (*DellJob, error) {
@@ -421,7 +441,7 @@ func (d *OME) GetJobHistory(JobId int) (*ODataList[DellJobHistory], error) {
 	}
 }
 
-func (d *OME) CreateBaseline(payload DellBaseline) (*DellBaseline, error) {
+func (d *OME) CreateBaseline(payload *DellBaseline) (*DellBaseline, error) {
 	url := d.Config.URL.JoinPath("api", "UpdateService", "Baselines")
 
 	payloadBody, err := json.Marshal(payload)
@@ -433,11 +453,53 @@ func (d *OME) CreateBaseline(payload DellBaseline) (*DellBaseline, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Baselines with error %w", err)
 	}
-	return &payload, nil
+	return payload, nil
 }
 
-func (d *OME) GetComplianceReportForBaseline(baselineID string) (*ODataList[DellDeviceComplianceReport], error) {
-	url := d.Config.URL.JoinPath("api", "UpdateService", fmt.Sprintf("Baselines(%s)", baselineID), "DeviceComplianceReports")
+func (d *OME) GetAllBaseline() (*ODataList[DellBaseline], error) {
+	url := d.Config.URL.JoinPath("api", "UpdateService", "Baselines")
+
+	if baselinesDetails, err := d.GetAllData(url, DellBaseline{}, []int{http.StatusOK}); err != nil {
+		return nil, fmt.Errorf("failed to fetch Baseline details from url: %v,\n with error %w", url, err)
+	} else {
+		baselineInfo := &ODataList[DellBaseline]{}
+		for _, v := range baselinesDetails.Value {
+			switch v := v.(type) {
+			case DellBaseline:
+				baselineInfo.Value = append(baselineInfo.Value, v)
+			default:
+				return nil, fmt.Errorf("cannot convert type %T to DellBaseline, data: %v", v, baselinesDetails)
+			}
+		}
+		return baselineInfo, nil
+	}
+}
+
+func (d *OME) PatchBaseline(baselineId int, payload *DellBaseline) (*DellBaseline, error) {
+	url := d.Config.URL.JoinPath("api", "UpdateService", fmt.Sprintf("Baselines(%d)", baselineId))
+
+	payloadBody, err := json.Marshal(payload)
+	if err != nil {
+		err = fmt.Errorf("failed stringify CreateBaseline body with error: %v", err)
+		return nil, err
+	}
+	if _, err := d.Client.PutWithResponse(url, strings.NewReader(string(payloadBody)), []int{http.StatusOK}); err != nil {
+		return nil, fmt.Errorf("failed to Patch Baseline details from url: %v,\n with error %w", url, err)
+	}
+	baselineDetails := &DellBaseline{}
+	if err := d.Client.Get(url, baselineDetails, []int{http.StatusOK}); err != nil {
+		return nil, fmt.Errorf("failed to fetch Baseline details for %v: from url: %v,\n with error %w", baselineId, url, err)
+	}
+	return baselineDetails, nil
+}
+
+func (d *OME) GetComplianceReportForBaseline(baselineID int) (*ODataList[DellDeviceComplianceReport], error) {
+	url := d.Config.URL.JoinPath(
+		"api",
+		"UpdateService",
+		fmt.Sprintf("Baselines(%d)", baselineID),
+		"DeviceComplianceReports",
+	)
 
 	if complianceReports, err := d.GetAllData(url, DellDeviceComplianceReport{}, []int{http.StatusOK}); err != nil {
 		return nil, fmt.Errorf("failed to fetch Device Compliance Report details from url: %v,\n with error %w", url, err)
@@ -455,7 +517,7 @@ func (d *OME) GetComplianceReportForBaseline(baselineID string) (*ODataList[Dell
 	}
 }
 
-func (d *OME) CreateFirmwareUpdateJob(payload DellFirmwareUpdatePayload) (*DellJob, error) {
+func (d *OME) CreateFirmwareUpdateJob(payload *DellFirmwareUpdatePayload) (*DellJob, error) {
 	url := d.Config.URL.JoinPath("api", "JobService", "Jobs")
 
 	payloadBody, err := json.Marshal(payload)

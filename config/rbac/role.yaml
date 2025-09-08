@@ -1,11 +1,69 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: maintenance-operator
-    app.kubernetes.io/managed-by: kustomize
   name: manager-role
 rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - maintenance.maintenance.ironcore.dev
+  resources:
+  - dellfirmwareupdateomes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maintenance.maintenance.ironcore.dev
+  resources:
+  - dellfirmwareupdateomes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - maintenance.maintenance.ironcore.dev
+  resources:
+  - dellfirmwareupdateomes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - servermaintenances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - servermaintenances/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - servers
+  verbs:
+  - get
+  - list
+  - watch
