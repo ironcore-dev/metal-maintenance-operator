@@ -21,7 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -40,21 +40,27 @@ var _ = Describe("DELLFirmwareUpdateOME Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		dellfirmwareupdateome := &maintenancev1alpha1.DELLFirmwareUpdateOME{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind DELLFirmwareUpdateOME")
-			err := k8sClient.Get(ctx, typeNamespacedName, dellfirmwareupdateome)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &maintenancev1alpha1.DELLFirmwareUpdateOME{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+			resource := &maintenancev1alpha1.DELLFirmwareUpdateOME{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: maintenancev1alpha1.DELLFirmwareUpdateOMESpec{
+					OMEURL: "https://example.com/ome",
+					SecretRef: &v1.LocalObjectReference{
+						Name: "example-secret",
 					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+					ServerSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"metal.ironcore.dev/Manufacturer": "bar",
+						},
+					},
+				},
 			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		})
 
 		AfterEach(func() {
