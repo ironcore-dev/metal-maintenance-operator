@@ -1,7 +1,7 @@
 # This rule is not used by the project maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to maintenance.maintenance.ironcore.dev resources.
+# Grants read-only access to maintenance.ironcore.dev resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 
@@ -14,7 +14,7 @@ metadata:
   name: dellfirmwareupdateome-viewer-role
 rules:
 - apiGroups:
-  - maintenance.maintenance.ironcore.dev
+  - firmware.maintenance.ironcore.dev
   resources:
   - dellfirmwareupdateomes
   verbs:
@@ -22,7 +22,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - maintenance.maintenance.ironcore.dev
+  - firmware.maintenance.ironcore.dev
   resources:
   - dellfirmwareupdateomes/status
   verbs:

@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	DellFirmwareUpdateFinalizer = "maintenance.ironcore.dev/dellfirmwareupdateome"
+	DellFirmwareUpdateFinalizer = "firmware.maintenance.ironcore.dev/dellfirmwareupdateome"
 )
 
 // DELLFirmwareUpdateOMEReconciler reconciles a DELLFirmwareUpdateOME object
@@ -45,9 +45,9 @@ type DELLFirmwareUpdateOMEReconciler struct {
 	ResyncInterval   time.Duration
 }
 
-// +kubebuilder:rbac:groups=maintenance.maintenance.ironcore.dev,resources=dellfirmwareupdateomes,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=maintenance.maintenance.ironcore.dev,resources=dellfirmwareupdateomes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=maintenance.maintenance.ironcore.dev,resources=dellfirmwareupdateomes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=firmware.maintenance.ironcore.dev,resources=dellfirmwareupdateomes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=firmware.maintenance.ironcore.dev,resources=dellfirmwareupdateomes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=firmware.maintenance.ironcore.dev,resources=dellfirmwareupdateomes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch

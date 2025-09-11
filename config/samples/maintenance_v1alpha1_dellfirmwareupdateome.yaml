@@ -1,4 +1,4 @@
-apiVersion: maintenance.maintenance.ironcore.dev/v1alpha1
+apiVersion: firmware.maintenance.ironcore.dev/v1alpha1
 kind: DELLFirmwareUpdateOME
 metadata:
   labels:

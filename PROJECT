@@ -2,7 +2,7 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-domain: maintenance.ironcore.dev
+domain: ironcore.dev
 layout:
 - go.kubebuilder.io/v4
 projectName: maintenance-operator
@@ -11,8 +11,8 @@ resources:
 - api:
     crdVersion: v1
   controller: true
-  domain: maintenance.ironcore.dev
-  group: maintenance
+  domain: ironcore.dev
+  group: firmware.maintenance
   kind: DELLFirmwareUpdateOME
   path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
   version: v1alpha1

@@ -14,7 +14,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - maintenance.maintenance.ironcore.dev
+  - firmware.maintenance.ironcore.dev
   resources:
   - dellfirmwareupdateomes
   verbs:
@@ -26,13 +26,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.maintenance.ironcore.dev
+  - firmware.maintenance.ironcore.dev
   resources:
   - dellfirmwareupdateomes/finalizers
   verbs:
   - update
 - apiGroups:
-  - maintenance.maintenance.ironcore.dev
+  - firmware.maintenance.ironcore.dev
   resources:
   - dellfirmwareupdateomes/status
   verbs:
