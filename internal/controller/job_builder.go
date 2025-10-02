@@ -76,99 +76,63 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.An
 }
 
 func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Container {
-	var initContainers []corev1.Container
-
-	// Init container to clone playbook repository
-	initContainers = append(initContainers, corev1.Container{
-		Name:    "clone-playbooks",
-		Image:   "alpine/git:latest",
-		Command: []string{"/bin/sh", "-c"},
-		Args: []string{
-			fmt.Sprintf(`
-				git clone %s /tmp/playbooks
-				if [ -n "%s" ]; then
-					cd /tmp/playbooks && git checkout %s
-				fi
-			`, ansibleJob.Spec.PlaybookRepo, ansibleJob.Spec.PlaybookGitRef, ansibleJob.Spec.PlaybookGitRef),
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "repos",
-				MountPath: "/tmp",
-			},
-		},
-	})
-
-	// Init container to clone roles repository if specified
-	if ansibleJob.Spec.RolesRepo != "" {
-		initContainers = append(initContainers, corev1.Container{
-			Name:    "clone-roles",
-			Image:   "alpine/git:latest",
-			Command: []string{"/bin/sh", "-c"},
-			Args: []string{
-				fmt.Sprintf(`
-					git clone %s /tmp/roles
-					if [ -n "%s" ]; then
-						cd /tmp/roles && git checkout %s
-					fi
-				`, ansibleJob.Spec.RolesRepo, ansibleJob.Spec.RolesGitRef, ansibleJob.Spec.RolesGitRef),
-			},
-			VolumeMounts: []corev1.VolumeMount{
-				{
-					Name:      "repos",
-					MountPath: "/tmp",
-				},
-			},
-		})
-	}
-
-	// Init container to setup ansible-runner directory structure
-	setupCommand := `
+	// Single init container to prepare ansible-runner environment
+	setupCommand := fmt.Sprintf(`
+		# Create ansible-runner directory structure
 		mkdir -p /runner/project /runner/inventory /runner/env
-		# Copy playbooks to the project root directory (not in a playbooks subdirectory)
-		cp -r /tmp/playbooks/* /runner/project/ 2>/dev/null || true
-		if [ -d "/tmp/roles" ]; then
-			mkdir -p /runner/project/roles
-			cp -r /tmp/roles/roles/* /runner/project/roles/ 2>/dev/null || true
-		fi
-	`
 
-	// Add extra vars to the setup if they exist
+		# Clone playbook repository directly to project
+		git clone %s /runner/project
+		cd /runner/project
+		if [ -n "%s" ]; then
+			git checkout %s
+		fi
+
+		# Clone roles if specified
+		if [ -n "%s" ]; then
+			mkdir -p /runner/project/roles
+			git clone %s /tmp/roles
+			cd /tmp/roles
+			if [ -n "%s" ]; then
+				git checkout %s
+			fi
+			# Copy roles to project (assuming standard roles/ structure)
+			cp -r roles/* /runner/project/roles/ 2>/dev/null || cp -r . /runner/project/roles/
+		fi`,
+		ansibleJob.Spec.PlaybookRepo,
+		ansibleJob.Spec.PlaybookGitRef,
+		ansibleJob.Spec.PlaybookGitRef,
+		ansibleJob.Spec.RolesRepo,
+		ansibleJob.Spec.RolesRepo,
+		ansibleJob.Spec.RolesGitRef,
+		ansibleJob.Spec.RolesGitRef,
+	)
+
+	// Add extra vars if they exist
 	if len(ansibleJob.Spec.ExtraVars) > 0 {
-		// Convert KeyValue list to map for JSON marshaling
 		extraVarsMap := make(map[string]string)
 		for _, kv := range ansibleJob.Spec.ExtraVars {
 			extraVarsMap[kv.Name] = kv.Value
 		}
-		extraVarsJSON, err := json.Marshal(extraVarsMap)
-		if err == nil {
-			// Create the extravars file that ansible-runner will automatically pick up
+		if extraVarsJSON, err := json.Marshal(extraVarsMap); err == nil {
 			setupCommand += fmt.Sprintf(`
+		# Create extravars file for ansible-runner
 		cat > /runner/env/extravars << 'EOF'
 %s
-EOF
-			`, string(extraVarsJSON))
+EOF`, string(extraVarsJSON))
 		}
 	}
 
-	initContainers = append(initContainers, corev1.Container{
-		Name:    "setup-runner",
-		Image:   "busybox:latest",
+	return []corev1.Container{{
+		Name:    "setup-ansible-runner",
+		Image:   "alpine/git:latest",
 		Command: []string{"/bin/sh", "-c"},
 		Args:    []string{setupCommand},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "repos",
-				MountPath: "/tmp",
-			},
-			{
-				Name:      "runner-input",
-				MountPath: "/runner",
-			},
-		},
-	})
-
-	return initContainers
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      "runner-workspace",
+			MountPath: "/runner",
+		}},
+	}}
 }
 
 func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintencev1alpha1.AnsibleJob, image string) []corev1.Container {
@@ -178,8 +142,12 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 		"--playbook", ansibleJob.Spec.Playbook,
 	}
 
-	// Add inventory if specified
+	// Add inventory source
 	if ansibleJob.Spec.Inventory.Inline != "" {
+		args = append(args, "--inventory", "/runner/inventory/hosts")
+	} else if ansibleJob.Spec.Inventory.ConfigMapRef != nil {
+		args = append(args, "--inventory", "/runner/inventory/hosts")
+	} else if ansibleJob.Spec.Inventory.SecretRef != nil {
 		args = append(args, "--inventory", "/runner/inventory/hosts")
 	}
 
@@ -188,24 +156,19 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 		args = append(args, "--limit", ansibleJob.Spec.Limit)
 	}
 
-	// Note: Extra vars are handled via the extra_vars.json file created in init container
-	// ansible-runner will automatically pick up /runner/env/extravars if it exists
-
 	container := corev1.Container{
 		Name:    "ansible-runner",
 		Image:   image,
 		Command: []string{"ansible-runner"},
 		Args:    args,
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "runner-input",
-				MountPath: "/runner",
-			},
-		},
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      "runner-workspace",
+			MountPath: "/runner",
+		}},
 	}
 
-	// Add inventory volume mount if using inline inventory
-	if ansibleJob.Spec.Inventory.Inline != "" {
+	// Add inventory volume mount if needed
+	if r.needsInventoryMount(ansibleJob) {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "inventory",
 			MountPath: "/runner/inventory",
@@ -223,23 +186,21 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 	return []corev1.Container{container}
 }
 
-func (r *AnsibleJobReconciler) createVolumes(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Volume {
-	volumes := []corev1.Volume{
-		{
-			Name: "repos",
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		},
-		{
-			Name: "runner-input",
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		},
-	}
+func (r *AnsibleJobReconciler) needsInventoryMount(ansibleJob *maintencev1alpha1.AnsibleJob) bool {
+	return ansibleJob.Spec.Inventory.Inline != "" ||
+		ansibleJob.Spec.Inventory.ConfigMapRef != nil ||
+		ansibleJob.Spec.Inventory.SecretRef != nil
+}
 
-	// Add inventory volume if inline inventory is specified
+func (r *AnsibleJobReconciler) createVolumes(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Volume {
+	volumes := []corev1.Volume{{
+		Name: "runner-workspace",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	}}
+
+	// Add inventory volume based on source type
 	if ansibleJob.Spec.Inventory.Inline != "" {
 		volumes = append(volumes, corev1.Volume{
 			Name: "inventory",
@@ -248,6 +209,26 @@ func (r *AnsibleJobReconciler) createVolumes(ansibleJob *maintencev1alpha1.Ansib
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: fmt.Sprintf("%s-inventory", ansibleJob.Name),
 					},
+				},
+			},
+		})
+	} else if ansibleJob.Spec.Inventory.ConfigMapRef != nil {
+		volumes = append(volumes, corev1.Volume{
+			Name: "inventory",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: ansibleJob.Spec.Inventory.ConfigMapRef.Name,
+					},
+				},
+			},
+		})
+	} else if ansibleJob.Spec.Inventory.SecretRef != nil {
+		volumes = append(volumes, corev1.Volume{
+			Name: "inventory",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: ansibleJob.Spec.Inventory.SecretRef.Name,
 				},
 			},
 		})

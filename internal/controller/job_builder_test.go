@@ -56,25 +56,19 @@ var _ = Describe("Job Builder", func() {
 			Expect(job.Labels["app"]).To(Equal("ansible-runner"))
 		})
 
-		It("should create init containers for repository cloning", func() {
+		It("should create streamlined init container for ansible-runner setup", func() {
 			job := reconciler.createAnsibleJob(ansibleJob)
 
 			initContainers := job.Spec.Template.Spec.InitContainers
-			Expect(initContainers).To(HaveLen(3))
+			Expect(initContainers).To(HaveLen(1))
 
-			// Check clone-playbooks container
-			Expect(initContainers[0].Name).To(Equal("clone-playbooks"))
-			Expect(initContainers[0].Image).To(Equal("alpine/git:latest"))
-			Expect(initContainers[0].Args[0]).To(ContainSubstring("git clone https://github.com/test/playbooks.git"))
-
-			// Check clone-roles container
-			Expect(initContainers[1].Name).To(Equal("clone-roles"))
-			Expect(initContainers[1].Image).To(Equal("alpine/git:latest"))
-			Expect(initContainers[1].Args[0]).To(ContainSubstring("git clone https://github.com/test/roles.git"))
-
-			// Check setup-runner container
-			Expect(initContainers[2].Name).To(Equal("setup-runner"))
-			Expect(initContainers[2].Image).To(Equal("busybox:latest"))
+			// Check single streamlined setup container
+			setupContainer := initContainers[0]
+			Expect(setupContainer.Name).To(Equal("setup-ansible-runner"))
+			Expect(setupContainer.Image).To(Equal("alpine/git:latest"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/playbooks.git"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/roles.git"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("mkdir -p /runner/project"))
 		})
 
 		It("should create ansible-runner container with correct arguments", func() {
@@ -99,14 +93,13 @@ var _ = Describe("Job Builder", func() {
 			job := reconciler.createAnsibleJob(ansibleJob)
 
 			volumes := job.Spec.Template.Spec.Volumes
-			Expect(volumes).To(HaveLen(3)) // repos, runner-input, inventory
+			Expect(volumes).To(HaveLen(2)) // runner-workspace, inventory
 
 			volumeNames := make([]string, len(volumes))
 			for i, vol := range volumes {
 				volumeNames[i] = vol.Name
 			}
-			Expect(volumeNames).To(ContainElement("repos"))
-			Expect(volumeNames).To(ContainElement("runner-input"))
+			Expect(volumeNames).To(ContainElement("runner-workspace"))
 			Expect(volumeNames).To(ContainElement("inventory"))
 		})
 
@@ -143,13 +136,12 @@ var _ = Describe("Job Builder", func() {
 		It("should create basic volumes for ansible-runner", func() {
 			volumes := reconciler.createVolumes(ansibleJob)
 
-			Expect(volumes).To(HaveLen(3))
+			Expect(volumes).To(HaveLen(2))
 			volumeNames := make([]string, len(volumes))
 			for i, vol := range volumes {
 				volumeNames[i] = vol.Name
 			}
-			Expect(volumeNames).To(ContainElement("repos"))
-			Expect(volumeNames).To(ContainElement("runner-input"))
+			Expect(volumeNames).To(ContainElement("runner-workspace"))
 			Expect(volumeNames).To(ContainElement("inventory"))
 		})
 
@@ -157,13 +149,12 @@ var _ = Describe("Job Builder", func() {
 			ansibleJob.Spec.Inventory.Inline = ""
 			volumes := reconciler.createVolumes(ansibleJob)
 
-			Expect(volumes).To(HaveLen(2))
+			Expect(volumes).To(HaveLen(1))
 			volumeNames := make([]string, len(volumes))
 			for i, vol := range volumes {
 				volumeNames[i] = vol.Name
 			}
-			Expect(volumeNames).To(ContainElement("repos"))
-			Expect(volumeNames).To(ContainElement("runner-input"))
+			Expect(volumeNames).To(ContainElement("runner-workspace"))
 			Expect(volumeNames).NotTo(ContainElement("inventory"))
 		})
 	})
@@ -172,22 +163,13 @@ var _ = Describe("Job Builder", func() {
 		It("should create init containers with correct git commands", func() {
 			initContainers := reconciler.createInitContainers(ansibleJob)
 
-			Expect(initContainers).To(HaveLen(3))
+			Expect(initContainers).To(HaveLen(1))
 
-			// Test playbook clone container
-			playbookContainer := initContainers[0]
-			Expect(playbookContainer.Name).To(Equal("clone-playbooks"))
-			Expect(playbookContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/playbooks.git"))
-
-			// Test roles clone container
-			rolesContainer := initContainers[1]
-			Expect(rolesContainer.Name).To(Equal("clone-roles"))
-			Expect(rolesContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/roles.git"))
-
-			// Test setup container
-			setupContainer := initContainers[2]
-			Expect(setupContainer.Name).To(Equal("setup-runner"))
-			Expect(setupContainer.Args[0]).To(ContainSubstring("mkdir -p /runner/project"))
+			// Test single streamlined setup container
+			setupContainer := initContainers[0]
+			Expect(setupContainer.Name).To(Equal("setup-ansible-runner"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/playbooks.git"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/roles.git"))
 		})
 
 		It("should handle git ref in clone commands", func() {
@@ -195,20 +177,16 @@ var _ = Describe("Job Builder", func() {
 			ansibleJob.Spec.RolesGitRef = "v1.0.0"
 			initContainers := reconciler.createInitContainers(ansibleJob)
 
-			playbookContainer := initContainers[0]
-			Expect(playbookContainer.Args[0]).To(ContainSubstring("git checkout v1.0.0"))
-
-			rolesContainer := initContainers[1]
-			Expect(rolesContainer.Args[0]).To(ContainSubstring("git checkout v1.0.0"))
+			setupContainer := initContainers[0]
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git checkout v1.0.0"))
 		})
 
-		It("should create only 2 containers when no roles repo", func() {
+		It("should create only 1 container when no roles repo", func() {
 			ansibleJob.Spec.RolesRepo = ""
 			initContainers := reconciler.createInitContainers(ansibleJob)
 
-			Expect(initContainers).To(HaveLen(2))
-			Expect(initContainers[0].Name).To(Equal("clone-playbooks"))
-			Expect(initContainers[1].Name).To(Equal("setup-runner"))
+			Expect(initContainers).To(HaveLen(1))
+			Expect(initContainers[0].Name).To(Equal("setup-ansible-runner"))
 		})
 	})
 

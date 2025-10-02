@@ -267,7 +267,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(job.Labels["ansible-job"]).To(Equal(AnsibleJobName))
 			Expect(job.Labels["app"]).To(Equal("ansible-runner"))
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(job.Spec.Template.Spec.InitContainers).To(HaveLen(3)) // clone-playbooks, clone-roles, setup-runner
+			Expect(job.Spec.Template.Spec.InitContainers).To(HaveLen(1)) // single streamlined setup container
 		})
 
 		It("should update status when job completes", func() {
@@ -373,7 +373,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking basic volume mounts")
 			Expect(container.VolumeMounts).To(HaveLen(1))
-			Expect(container.VolumeMounts[0].Name).To(Equal("runner-input"))
+			Expect(container.VolumeMounts[0].Name).To(Equal("runner-workspace"))
 			Expect(container.VolumeMounts[0].MountPath).To(Equal("/runner"))
 		})
 
@@ -402,11 +402,11 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(container.VolumeMounts).To(HaveLen(2))
 			volumeMounts := container.VolumeMounts
 
-			// Check for runner-input mount
+			// Check for runner-workspace mount
 			runnerMount := false
 			inventoryMount := false
 			for _, mount := range volumeMounts {
-				if mount.Name == "runner-input" && mount.MountPath == "/runner" {
+				if mount.Name == "runner-workspace" && mount.MountPath == "/runner" {
 					runnerMount = true
 				}
 				if mount.Name == "inventory" && mount.MountPath == "/runner/inventory" {
@@ -440,7 +440,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking no inventory volume mount")
 			Expect(container.VolumeMounts).To(HaveLen(1))
-			Expect(container.VolumeMounts[0].Name).To(Equal("runner-input"))
+			Expect(container.VolumeMounts[0].Name).To(Equal("runner-workspace"))
 		})
 
 		It("should create container with limit parameter", func() {
@@ -668,7 +668,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			for i, mount := range container.VolumeMounts {
 				volumeMountNames[i] = mount.Name
 			}
-			Expect(volumeMountNames).To(ContainElements("runner-input", "inventory"))
+			Expect(volumeMountNames).To(ContainElements("runner-workspace", "inventory"))
 
 			By("Checking resource specifications")
 			limits := container.Resources.Limits
