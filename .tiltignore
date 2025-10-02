@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Tiltignore file - tells Tilt which files to ignore when watching for changes
+
+# Git
+.git/
+.gitignore
+
+# Build artifacts
+bin/
+dist/
+*.o
+*.a
+*.so
+
+# Test artifacts
+coverage.out
+coverage.html
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation
+*.md
+docs/
+README*
+LICENSE*
+LICENSES/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Vendor
+vendor/
+
+# Config samples (only trigger rebuild on actual code changes)
+config/samples/
+
+# Helm charts
+chart/
+charts/
+
+# Temporary files
+tmp/
+temp/

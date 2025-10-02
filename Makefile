@@ -1,3 +1,9 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 
@@ -46,8 +52,24 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen goimports ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(GOIMPORTS) -w api/v1alpha1/zz_generated.deepcopy.go
+
+.PHONY: dev
+dev: ## Start development environment with Tilt
+	@echo "Starting development environment with Tilt..."
+	@if command -v tilt >/dev/null 2>&1; then \
+		./scripts/dev-setup.sh start; \
+	else \
+		echo "Tilt not found. Please install Tilt: https://docs.tilt.dev/install.html"; \
+		exit 1; \
+	fi
+
+.PHONY: dev-stop
+dev-stop: ## Stop development environment
+	@echo "Stopping development environment..."
+	@./scripts/dev-setup.sh stop
 
 .PHONY: fmt
 fmt: goimports ## Run goimports against code.
@@ -58,8 +80,10 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate vet setup-envtest ## Run tests.
+	@echo "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
+	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path | head -1
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path | tr -d '\n')" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
@@ -109,6 +133,25 @@ add-license: addlicense ## Add license headers to all go files.
 .PHONY: check-license
 check-license: addlicense ## Check that every file has a license header present.
 	find . -name '*.go' -exec $(ADDLICENSE) -check -c 'IronCore authors' {} +
+
+.PHONY: license-check
+license-check: check-license ## Alias for check-license (style guide compatibility)
+
+.PHONY: license-fix
+license-fix: add-license ## Alias for add-license (style guide compatibility)
+
+.PHONY: style-check
+style-check: fmt vet lint ## Check code style compliance
+	@echo "Running style checks..."
+	@echo "✓ Code formatting checked"
+	@echo "✓ Go vet passed"
+	@echo "✓ Linting passed"
+
+.PHONY: style-fix
+style-fix: fmt lint-fix ## Fix code style issues
+	@echo "Running style fixes..."
+	@echo "✓ Code formatting applied"
+	@echo "✓ Linting fixes applied"
 
 .PHONY: check
 check: generate manifests add-license fmt lint test # Generate manifests, code, lint, add licenses, test
@@ -180,6 +223,17 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
 
+.PHONY: deploy-yaml
+deploy-yaml: manifests kustomize ## Generate deployment YAML without applying (used by Tilt).
+	@cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG} >/dev/null
+	@$(KUSTOMIZE) build config/default
+
+.PHONY: tilt-yaml
+tilt-yaml: kustomize ## Generate deployment YAML silently for Tilt (no verbose output).
+	@$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases >/dev/null 2>&1
+	@cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG} >/dev/null
+	@$(KUSTOMIZE) build config/default
+
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
@@ -205,7 +259,7 @@ GOIMPORTS ?= $(LOCALBIN)/goimports
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
-CONTROLLER_TOOLS_VERSION ?= v0.18.0
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)

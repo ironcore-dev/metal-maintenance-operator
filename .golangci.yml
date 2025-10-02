@@ -1,45 +1,110 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# golangci-lint configuration for maintenance-operator
+# Based on Kubernetes community guidelines and best practices
+
 version: "2"
+
 run:
+  timeout: 5m
   allow-parallel-runners: true
+
 linters:
   default: none
   enable:
-    - copyloopvar
-    - dupl
-    - errcheck
-    - ginkgolinter
-    - goconst
-    - gocyclo
-    - govet
-    - ineffassign
-    - lll
-    - misspell
-    - nakedret
-    - prealloc
-    - revive
-    - staticcheck
-    - unconvert
-    - unparam
-    - unused
+    # Code quality and style (keeping existing + adding new)
+    - copyloopvar    # Loop variable issues (Go 1.22+)
+    - dupl           # Code duplication
+    - errcheck       # Error checking
+    - ginkgolinter   # Ginkgo-specific lints
+    - goconst        # Detect repeated strings that could be constants
+    - gocyclo        # Cyclomatic complexity
+    - govet          # Go vet
+    - ineffassign    # Ineffectual assignments
+    - lll            # Line length
+    - misspell       # Spell checking
+    - nakedret       # Naked returns
+    - prealloc       # Slice preallocation
+    - revive         # Enhanced golint
+    - staticcheck    # Static analysis
+    - unconvert      # Unnecessary type conversions
+    - unparam        # Unused function parameters
+    - unused         # Unused code
+
+    # Additional useful linters
+    - gosec          # Security issues
+    - nolintlint     # Validate //nolint directives
+    - bodyclose      # HTTP response body close
+    - rowserrcheck   # SQL rows.Err check
+
   settings:
+    # Line length: Maximum 120 characters as per style guide
+    lll:
+      line-length: 120
+
+    # Gocyclo - cyclomatic complexity
+    gocyclo:
+      min-complexity: 15
+
+    # Revive configuration (enhanced golint)
     revive:
       rules:
         - name: comment-spacings
         - name: import-shadowing
+        - name: exported
+        - name: var-naming
+        - name: package-comments
+        - name: blank-imports
+
+    # Gosec - security issues
+    gosec:
+      excludes:
+        - G404 # Use of weak random number generator is acceptable for non-crypto use
+
+    # Misspell - spell checking
+    misspell:
+      locale: US
+
   exclusions:
     generated: lax
     rules:
+      # Exclude some linters from running on tests files
+      - linters:
+          - gocyclo
+          - errcheck
+          - gosec
+          - unparam
+          - dupl
+        path: _test\.go
+
+      # Allow long lines in API types due to kubebuilder annotations
       - linters:
           - lll
-        path: api/*
+        path: api/
+
+      # Allow some duplication in internal controller files
       - linters:
           - dupl
           - lll
-        path: internal/*
+        path: internal/
+
+      # Exclude certain gosec rules in test files
+      - linters:
+          - gosec
+        path: _test\.go
+        text: "G101|G102|G103|G104|G301|G302|G304|G404"
+
+      # Allow long lines in examples
+      - linters:
+          - lll
+        path: examples/
+
     paths:
       - third_party$
       - builtin$
       - examples$
+
 formatters:
   enable:
     - gofmt

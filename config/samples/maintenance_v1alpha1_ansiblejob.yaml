@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  labels:
+    app.kubernetes.io/name: maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: sample-ansible-job
+spec:
+  playbook: "site.yml"
+  playbookRepo: "https://github.com/example/ansible-playbooks.git"
+  playbookGitRef: "main"
+  rolesRepo: "https://github.com/example/ansible-roles.git"
+  rolesGitRef: "v1.5.0"
+  inventory:
+    inline: |
+      [servers]
+      server1 ansible_host=192.168.1.10
+      server2 ansible_host=192.168.1.11
+
+      [servers:vars]
+      ansible_user=ansible
+      ansible_ssh_private_key_file=/etc/ansible/ssh_key
+  extraVars:
+    environment: "production"
+    version: "1.0.0"
+  limit: "servers"
+  timeoutSeconds: 3600
+  jobTemplate:
+    image: "quay.io/ansible/ansible-runner:latest"
+    serviceAccountName: "ansible-runner"
+    backoffLimit: 3
+    resources:
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"

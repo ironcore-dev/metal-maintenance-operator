@@ -1,3 +1,9 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # Build the manager binary
 FROM --platform=$BUILDPLATFORM golang:1.25.0 AS builder
 ARG TARGETOS
@@ -13,8 +19,8 @@ RUN go mod download
 
 # Copy the go source
 COPY cmd/main.go cmd/main.go
-#COPY api/ api/
-#COPY internal/ internal/
+COPY api/ api/
+COPY internal/ internal/
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command

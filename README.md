@@ -5,10 +5,19 @@
 [![GitHub License](https://img.shields.io/static/v1?label=License&message=Apache-2.0&color=blue)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://makeapullrequest.com)
 
-// TODO(user): Add simple overview of use/purpose
+A Kubernetes operator for running Ansible jobs using ansible-runner for infrastructure maintenance tasks.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+The Maintenance Operator provides a Kubernetes-native way to execute Ansible playbooks for infrastructure maintenance tasks using ansible-runner.
+
+## Features
+
+- 🚀 **Ansible Execution**: Execute playbooks using ansible-runner
+- 🔧 **Git Repository Integration**: Automatic cloning of playbook and role repositories
+- 📊 **Job Status Tracking**: Comprehensive status reporting and logging
+- 🛡️ **RBAC Ready**: Complete role-based access control configuration
+- 🔐 **Secure Inventory Management**: Support for inline, ConfigMap, and Secret-based inventories
 
 ## Getting Started
 
@@ -17,6 +26,144 @@
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
+
+### Installation
+
+1. Install the CRDs:
+```bash
+make install
+```
+
+2. Deploy the controller:
+```bash
+make deploy IMG=ghcr.io/ironcore-dev/maintenance-operator:latest
+```
+§
+### Development Setup
+
+For fast local development with hot reloading, we recommend using [Tilt](https://tilt.dev/):
+
+1. **Install Tilt**: Follow the [installation guide](https://docs.tilt.dev/install.html)
+
+2. **Quick start with our helper script**:
+```bash
+./scripts/dev-setup.sh start
+```
+
+3. **Or manually with Tilt**:
+```bash
+tilt up
+```
+
+4. **Using an existing registry** (if you already have one running):
+```bash
+# With environment variables
+REGISTRY=localhost:5001 SKIP_REGISTRY=true ./scripts/dev-setup.sh start
+
+# Or with Tilt directly
+tilt up -- --registry=localhost:5001 --skip-registry-setup=true
+```
+
+This will:
+- Set up a local Docker registry (unless you skip it)
+- Build and deploy the operator with live reload
+- Provide a web UI at http://localhost:10350
+- Forward metrics ports (8080) and health endpoints (8081)
+
+For detailed development instructions, see [docs/development.md](docs/development.md).
+
+## Usage
+
+Create an AnsibleJob that executes playbooks using ansible-runner:
+
+```yaml
+apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: maintenance-job
+  namespace: default
+spec:
+  playbook: site.yml
+  playbookRepo: "https://github.com/example/ansible-playbooks.git"
+  playbookGitRef: "main"
+  rolesRepo: "https://github.com/example/ansible-roles.git"
+  rolesGitRef: "v1.0.0"
+  inventory:
+    inline: |
+      [webservers]
+      web1.example.com
+      web2.example.com
+
+      [databases]
+      db1.example.com
+
+      [all:vars]
+      ansible_user=admin
+  extraVars:
+    environment: production
+    backup_enabled: "true"
+    maintenance_window: "02:00-04:00"
+  limit: "webservers"
+  timeoutSeconds: 3600
+  jobTemplate:
+    image: "quay.io/ansible/ansible-runner:latest"
+    serviceAccountName: "ansible-runner"
+    backoffLimit: 3
+    resources:
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+```
+
+### Inventory Options
+
+You can specify inventory in multiple ways:
+
+#### Inline Inventory
+```yaml
+spec:
+  inventory:
+    inline: |
+      [servers]
+      server1.example.com
+      server2.example.com
+```
+
+#### ConfigMap Reference
+```yaml
+spec:
+  inventory:
+    configMapRef:
+      name: my-inventory
+      key: inventory.ini
+```
+
+#### Secret Reference
+```yaml
+spec:
+  inventory:
+    secretRef:
+      name: my-inventory-secret
+      key: inventory.yml
+```
+
+## Monitoring Jobs
+
+Check the status of your AnsibleJob:
+
+```bash
+kubectl get ansiblejob -o wide
+kubectl describe ansiblejob <job-name>
+```
+
+View job logs:
+
+```bash
+kubectl logs -l ansiblejob=<job-name>
+```
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**

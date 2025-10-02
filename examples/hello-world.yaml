@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+---
+apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: hello-world
+  namespace: default
+spec:
+  # Runs ansible-runner to execute playbooks
+
+  # Use example playbook for demonstration
+  playbook: "hello_world.yml"
+
+  # Use ansible samples repository
+  playbookRepo: "https://github.com/ansible/ansible-tower-samples"
+
+  # Use git reference for playbook repository
+  playbookGitRef: "master"
+
+  # Simple inventory targeting localhost
+  inventory:
+    inline: |
+      [web]
+      localhost ansible_connection=local
+
+      [web:vars]
+      ansible_python_interpreter=/usr/bin/python3
+
+  # Extra variables (passed to the playbook)
+  extraVars:
+    environment: "kubernetes"
+    message: "Hello from maintenance-operator!"
+
+  # Timeout in seconds
+  timeoutSeconds: 300
+
+  # Job template configuration
+  jobTemplate:
+    image: "quay.io/ansible/ansible-runner:latest"
+    backoffLimit: 1
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"

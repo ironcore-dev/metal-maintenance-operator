@@ -1,0 +1,234 @@
+// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
+package v1alpha1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// AnsibleJobSpec defines the desired state of AnsibleJob
+type AnsibleJobSpec struct {
+	// Playbook specifies the playbook to run
+	// +required
+	Playbook string `json:"playbook"`
+
+	// PlaybookRepo is the repository containing playbooks
+	// +required
+	PlaybookRepo string `json:"playbookRepo"`
+
+	// PlaybookGitRef specifies the branch, tag, or commit to use for the playbook repository
+	// +optional
+	PlaybookGitRef string `json:"playbookGitRef,omitempty"`
+
+	// RolesRepo is the repository containing roles
+	// +optional
+	RolesRepo string `json:"rolesRepo,omitempty"`
+
+	// RolesGitRef specifies the branch, tag, or commit to use for the roles repository
+	// +optional
+	RolesGitRef string `json:"rolesGitRef,omitempty"`
+
+	// Inventory defines the target hosts
+	// +required
+	Inventory AnsibleInventory `json:"inventory"`
+
+	// ExtraVars are additional variables to pass to the playbook
+	// +optional
+	// +listType=atomic
+	ExtraVars []KeyValue `json:"extraVars,omitempty"`
+
+	// Limit restricts the playbook run to specific hosts
+	// +optional
+	Limit string `json:"limit,omitempty"`
+
+	// TimeoutSeconds specifies the job timeout
+	// +optional
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+
+	// JobTemplate allows customization of the Kubernetes Job
+	// +optional
+	JobTemplate *JobTemplateSpec `json:"jobTemplate,omitempty"`
+}
+
+// AnsibleInventory defines the target hosts for playbook execution
+type AnsibleInventory struct {
+	// Inline inventory as YAML/JSON string
+	// +optional
+	Inline string `json:"inline,omitempty"`
+
+	// ConfigMapRef references a ConfigMap containing the inventory
+	// +optional
+	ConfigMapRef *ConfigMapReference `json:"configMapRef,omitempty"`
+
+	// SecretRef references a Secret containing the inventory
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
+}
+
+// ConfigMapReference references a ConfigMap
+type ConfigMapReference struct {
+	// +required
+	Name string `json:"name"`
+	// +required
+	Key string `json:"key"`
+}
+
+// SecretReference references a Secret
+type SecretReference struct {
+	// +required
+	Name string `json:"name"`
+	// +required
+	Key string `json:"key"`
+}
+
+// JobTemplateSpec allows customization of the Kubernetes Job
+type JobTemplateSpec struct {
+	// Image is the container image to use for ansible-runner
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// ServiceAccountName for the Job
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// BackoffLimit specifies the number of retries before marking this job failed
+	// +optional
+	BackoffLimit *int32 `json:"backoffLimit,omitempty"`
+
+	// Resources specifies the compute resource requirements
+	// +optional
+	Resources *ResourceRequirements `json:"resources,omitempty"`
+}
+
+// ResourceRequirements specifies compute resource requirements
+type ResourceRequirements struct {
+	// Limits describes the maximum amount of compute resources allowed
+	// +optional
+	// +listType=atomic
+	Limits []ResourceQuantity `json:"limits,omitempty"`
+
+	// Requests describes the minimum amount of compute resources required
+	// +optional
+	// +listType=atomic
+	Requests []ResourceQuantity `json:"requests,omitempty"`
+}
+
+// KeyValue represents a key-value pair for extra variables
+type KeyValue struct {
+	// Name is the variable name
+	// +required
+	Name string `json:"name"`
+
+	// Value is the variable value
+	// +required
+	Value string `json:"value"`
+}
+
+// ResourceQuantity represents a named resource quantity
+type ResourceQuantity struct {
+	// Name is the resource name (e.g., "cpu", "memory")
+	// +required
+	Name string `json:"name"`
+
+	// Quantity is the resource quantity (e.g., "100m", "512Mi")
+	// +required
+	Quantity string `json:"quantity"`
+}
+
+// AnsibleJobStatus defines the observed state of AnsibleJob
+type AnsibleJobStatus struct {
+	// Phase represents the current phase of the job
+	// +optional
+	Phase AnsibleJobPhase `json:"phase,omitempty"`
+
+	// JobName is the name of the created Kubernetes Job
+	// +optional
+	JobName string `json:"jobName,omitempty"`
+
+	// StartTime is when the job started
+	// +optional
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+
+	// CompletionTime is when the job completed
+	// +optional
+	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+
+	// JobID is the ansible-runner job ID
+	// +optional
+	JobID string `json:"jobId,omitempty"`
+
+	// Message provides additional details about the job status
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +patchStrategy=merge
+	// +patchMergeKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// Results contains the results from the ansible execution
+	// +optional
+	Results *AnsibleResults `json:"results,omitempty"`
+}
+
+// AnsibleJobPhase represents the current phase of the job
+type AnsibleJobPhase string
+
+const (
+	// AnsibleJobPhasePending indicates the job is waiting to be scheduled
+	AnsibleJobPhasePending AnsibleJobPhase = "Pending"
+	// AnsibleJobPhaseRunning indicates the job is currently executing
+	AnsibleJobPhaseRunning AnsibleJobPhase = "Running"
+	// AnsibleJobPhaseSucceeded indicates the job completed successfully
+	AnsibleJobPhaseSucceeded AnsibleJobPhase = "Succeeded"
+	// AnsibleJobPhaseFailed indicates the job failed
+	AnsibleJobPhaseFailed AnsibleJobPhase = "Failed"
+)
+
+// AnsibleResults contains the results from the ansible execution
+type AnsibleResults struct {
+	// ExitCode from the ansible-runner execution
+	// +optional
+	ExitCode int32 `json:"exitCode,omitempty"`
+
+	// Stats contains the execution statistics as JSON string
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	Stats string `json:"stats,omitempty"`
+
+	// ArtifactsPath is the path to the artifacts from the run
+	// +optional
+	ArtifactsPath string `json:"artifactsPath,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Playbook",type=string,JSONPath=`.spec.playbook`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// AnsibleJob is the Schema for the ansiblejobs API
+type AnsibleJob struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   AnsibleJobSpec   `json:"spec,omitempty"`
+	Status AnsibleJobStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// AnsibleJobList contains a list of AnsibleJob
+type AnsibleJobList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []AnsibleJob `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&AnsibleJob{}, &AnsibleJobList{})
+}

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # Adds namespace to all resources.
 namespace: maintenance-operator-system
 
@@ -15,7 +18,7 @@ namePrefix: maintenance-operator-
 #    someName: someValue
 
 resources:
-#- ../crd
+- ../crd
 - ../rbac
 - ../manager
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
