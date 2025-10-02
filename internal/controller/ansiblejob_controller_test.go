@@ -576,7 +576,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(requests.Memory().String()).To(Equal("1Gi"))
 		})
 
-		It("should create container without resources when not specified", func() {
+		It("should create container with default resources when not specified", func() {
 			ansibleJob := &maintencev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-resources",
@@ -592,13 +592,18 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			containers := reconciler.createAnsibleRunnerContainer(ansibleJob, "test-image")
 
-			By("Checking container has no resource specifications")
+			By("Checking container has default resource specifications")
 			container := containers[0]
-			Expect(container.Resources.Limits).To(BeNil())
-			Expect(container.Resources.Requests).To(BeNil())
+			Expect(container.Resources.Limits).ToNot(BeNil())
+			Expect(container.Resources.Requests).ToNot(BeNil())
+			// Verify default CPU and memory limits/requests
+			Expect(container.Resources.Requests.Cpu().String()).To(Equal("100m"))
+			Expect(container.Resources.Requests.Memory().String()).To(Equal("256Mi"))
+			Expect(container.Resources.Limits.Cpu().String()).To(Equal("500m"))
+			Expect(container.Resources.Limits.Memory().String()).To(Equal("512Mi"))
 		})
 
-		It("should create container without resources when JobTemplate is nil", func() {
+		It("should create container with default resources when JobTemplate is nil", func() {
 			ansibleJob := &maintencev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-nil-job-template",
@@ -612,10 +617,15 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			containers := reconciler.createAnsibleRunnerContainer(ansibleJob, "test-image")
 
-			By("Checking container has no resource specifications")
+			By("Checking container has default resource specifications")
 			container := containers[0]
-			Expect(container.Resources.Limits).To(BeNil())
-			Expect(container.Resources.Requests).To(BeNil())
+			Expect(container.Resources.Limits).ToNot(BeNil())
+			Expect(container.Resources.Requests).ToNot(BeNil())
+			// Verify default CPU and memory limits/requests
+			Expect(container.Resources.Requests.Cpu().String()).To(Equal("100m"))
+			Expect(container.Resources.Requests.Memory().String()).To(Equal("256Mi"))
+			Expect(container.Resources.Limits.Cpu().String()).To(Equal("500m"))
+			Expect(container.Resources.Limits.Memory().String()).To(Equal("512Mi"))
 		})
 
 		It("should handle complex scenarios with all features", func() {
@@ -833,10 +843,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			By("Calling initializeJob with failing status writer")
 			result, err := reconciler.initializeJob(ctx, ansibleJob)
 
-			By("Checking the error is propagated correctly")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("simulated status update failure"))
-			Expect(result.RequeueAfter).To(BeZero())
+			By("Checking exponential backoff is used for status failures")
+			Expect(err).ToNot(HaveOccurred()) // No error returned, uses backoff instead
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0)) // Should have backoff delay
+			Expect(result.RequeueAfter).To(BeNumerically("<=", 5*time.Minute)) // Capped at max delay
 		})
 
 		It("should set correct timestamps and phases", func() {
@@ -1205,7 +1215,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking successful creation")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 
 			By("Verifying Job was created")
 			jobName := fmt.Sprintf("%s-job", ansibleJob.Name)
@@ -1266,7 +1276,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking existing Job is handled")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 
 			By("Verifying status was updated to Running")
 			updatedJob := &maintencev1alpha1.AnsibleJob{}
@@ -1394,7 +1404,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking successful creation")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 
 			By("Verifying inventory ConfigMap was created")
 			configMapName := fmt.Sprintf("%s-inventory", ansibleJob.Name)

@@ -132,6 +132,17 @@ EOF`, string(extraVarsJSON))
 			Name:      "runner-workspace",
 			MountPath: "/runner",
 		}},
+		// Resource constraints for init container
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    *parseQuantity("50m"),
+				corev1.ResourceMemory: *parseQuantity("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    *parseQuantity("200m"),
+				corev1.ResourceMemory: *parseQuantity("256Mi"),
+			},
+		},
 	}}
 }
 
@@ -175,11 +186,23 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 		})
 	}
 
-	// Add resources if specified
+	// Add resources if specified, otherwise use sensible defaults
 	if ansibleJob.Spec.JobTemplate != nil && ansibleJob.Spec.JobTemplate.Resources != nil {
 		container.Resources = corev1.ResourceRequirements{
 			Limits:   convertToResourceList(ansibleJob.Spec.JobTemplate.Resources.Limits),
 			Requests: convertToResourceList(ansibleJob.Spec.JobTemplate.Resources.Requests),
+		}
+	} else {
+		// Apply sensible default resource constraints to prevent resource exhaustion
+		container.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    *parseQuantity("100m"),
+				corev1.ResourceMemory: *parseQuantity("256Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    *parseQuantity("500m"),
+				corev1.ResourceMemory: *parseQuantity("512Mi"),
+			},
 		}
 	}
 

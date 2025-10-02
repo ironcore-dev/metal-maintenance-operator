@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -83,7 +84,9 @@ func (r *AnsibleJobReconciler) initializeJob(ctx context.Context, ansibleJob *ma
 
 	if err := r.Status().Update(ctx, ansibleJob); err != nil {
 		logger.Error(err, "Failed to update AnsibleJob status")
-		return ctrl.Result{}, err
+		// Use exponential backoff for initialization failures
+		retryCount := r.getRetryCountFromConditions(ansibleJob)
+		return ctrl.Result{RequeueAfter: r.calculateBackoffDelay(retryCount)}, nil
 	}
 
 	return ctrl.Result{Requeue: true}, nil
@@ -104,7 +107,7 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 		if err := r.Status().Update(ctx, ansibleJob); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: r.calculateRequeueAfter(ansibleJob)}, nil
 	}
 
 	if !errors.IsNotFound(err) {
@@ -137,14 +140,14 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 
 	logger.Info("Created Kubernetes Job", "job", job.Name)
 
-	// Update status
+	// Update status with both job name and phase in single call
 	ansibleJob.Status.JobName = job.Name
 	ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseRunning
 	if err := r.Status().Update(ctx, ansibleJob); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: r.calculateRequeueAfter(ansibleJob)}, nil
 }
 
 func (r *AnsibleJobReconciler) monitorJob(ctx context.Context, ansibleJob *maintencev1alpha1.AnsibleJob) (ctrl.Result, error) {
@@ -158,25 +161,40 @@ func (r *AnsibleJobReconciler) monitorJob(ctx context.Context, ansibleJob *maint
 		return ctrl.Result{}, err
 	}
 
-	// Check job status
+	// Check job status and update only if phase changes
+	var statusChanged bool
+	var newPhase maintencev1alpha1.AnsibleJobPhase
+	var message string
+	var completionTime *metav1.Time
+
 	if job.Status.CompletionTime != nil {
 		// Job completed successfully
-		ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseSucceeded
-		ansibleJob.Status.CompletionTime = job.Status.CompletionTime
-		ansibleJob.Status.Message = "Job completed successfully"
+		newPhase = maintencev1alpha1.AnsibleJobPhaseSucceeded
+		completionTime = job.Status.CompletionTime
+		message = "Job completed successfully"
 	} else if job.Status.Failed > 0 {
 		// Job failed
-		ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseFailed
-		ansibleJob.Status.CompletionTime = &metav1.Time{Time: time.Now()}
-		ansibleJob.Status.Message = "Job failed"
+		newPhase = maintencev1alpha1.AnsibleJobPhaseFailed
+		completionTime = &metav1.Time{Time: time.Now()}
+		message = "Job failed"
 	} else {
-		// Job still running
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		// Job still running - no status update needed
+		return ctrl.Result{RequeueAfter: r.calculateRequeueAfter(ansibleJob)}, nil
 	}
 
-	// Update status
-	if err := r.Status().Update(ctx, ansibleJob); err != nil {
-		return ctrl.Result{}, err
+	// Only update status if phase actually changed
+	if ansibleJob.Status.Phase != newPhase {
+		ansibleJob.Status.Phase = newPhase
+		ansibleJob.Status.CompletionTime = completionTime
+		ansibleJob.Status.Message = message
+		statusChanged = true
+	}
+
+	// Update status only if it changed
+	if statusChanged {
+		if err := r.Status().Update(ctx, ansibleJob); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	logger.Info("Job monitoring complete", "phase", ansibleJob.Status.Phase)
@@ -231,10 +249,61 @@ func (r *AnsibleJobReconciler) createInventoryConfigMap(ctx context.Context, ans
 	return nil
 }
 
+// calculateRequeueAfter returns adaptive requeue timing based on job age and phase
+func (r *AnsibleJobReconciler) calculateRequeueAfter(ansibleJob *maintencev1alpha1.AnsibleJob) time.Duration {
+	if ansibleJob.Status.StartTime == nil {
+		return 5 * time.Second // Quick initial check for new jobs
+	}
+
+	age := time.Since(ansibleJob.Status.StartTime.Time)
+	switch {
+	case age < 2*time.Minute:
+		return 10 * time.Second // Poll frequently for new jobs
+	case age < 10*time.Minute:
+		return 30 * time.Second // Standard polling for active jobs
+	default:
+		return 60 * time.Second // Slower polling for long-running jobs
+	}
+}
+
+// calculateBackoffDelay returns exponential backoff delay for error scenarios
+func (r *AnsibleJobReconciler) calculateBackoffDelay(retryCount int) time.Duration {
+	if retryCount <= 0 {
+		return 5 * time.Second
+	}
+	
+	// Exponential backoff: 5s, 10s, 20s, 40s, capped at 5 minutes
+	delay := time.Duration(5) * time.Second * time.Duration(1<<uint(retryCount-1))
+	maxDelay := 5 * time.Minute
+	if delay > maxDelay {
+		return maxDelay
+	}
+	return delay
+}
+
+// getRetryCountFromConditions extracts retry count from conditions for exponential backoff
+func (r *AnsibleJobReconciler) getRetryCountFromConditions(ansibleJob *maintencev1alpha1.AnsibleJob) int {
+	// For now, use a simple heuristic based on existing status
+	// In a more complete implementation, this would track retry attempts in conditions
+	if ansibleJob.Status.StartTime != nil {
+		age := time.Since(ansibleJob.Status.StartTime.Time)
+		// Rough estimate: more failed attempts for older jobs that haven't progressed
+		if age > 5*time.Minute && ansibleJob.Status.Phase == maintencev1alpha1.AnsibleJobPhasePending {
+			return 3 // High retry count for stuck jobs
+		} else if age > 2*time.Minute && ansibleJob.Status.Phase == maintencev1alpha1.AnsibleJobPhasePending {
+			return 1 // Some retries for slow jobs
+		}
+	}
+	return 0 // No retries for new jobs
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *AnsibleJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&maintencev1alpha1.AnsibleJob{}).
 		Owns(&batchv1.Job{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 5, // Optimize for concurrent ansible job reconciliation
+		}).
 		Complete(r)
 }
