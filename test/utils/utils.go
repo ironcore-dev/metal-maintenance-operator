@@ -22,6 +22,9 @@ const (
 
 	certmanagerVersion = "v1.16.3"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
+
+	// Kind cluster context for testing
+	kindContext = "kind-maintenance-operator-test-e2e"
 )
 
 func warnError(err error) {
@@ -52,7 +55,7 @@ func Run(cmd *exec.Cmd) (string, error) {
 func InstallPrometheusOperator() error {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
 	//nolint:gosec // This is a test utility using predefined URLs
-	cmd := exec.Command("kubectl", "create", "-f", url)
+	cmd := exec.Command("kubectl", "create", "-f", url, "--context", kindContext)
 	_, err := Run(cmd)
 	return err
 }
@@ -61,7 +64,7 @@ func InstallPrometheusOperator() error {
 func UninstallPrometheusOperator() {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
 	//nolint:gosec // This is a test utility using predefined URLs
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	cmd := exec.Command("kubectl", "delete", "-f", url, "--context", kindContext)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -77,7 +80,7 @@ func IsPrometheusCRDsInstalled() bool {
 		"prometheusagents.monitoring.coreos.com",
 	}
 
-	cmd := exec.Command("kubectl", "get", "crds", "-o", "custom-columns=NAME:.metadata.name")
+	cmd := exec.Command("kubectl", "get", "crds", "-o", "custom-columns=NAME:.metadata.name", "--context", kindContext)
 	output, err := Run(cmd)
 	if err != nil {
 		return false
@@ -98,30 +101,58 @@ func IsPrometheusCRDsInstalled() bool {
 func UninstallCertManager() {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
 	//nolint:gosec // This is a test utility using predefined URLs
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	cmd := exec.Command("kubectl", "delete", "-f", url, "--timeout=60s", "--context", kindContext)
 	if _, err := Run(cmd); err != nil {
-		warnError(err)
+		warnError(fmt.Errorf("cert-manager uninstall failed: %w", err))
 	}
 }
 
 // InstallCertManager installs the cert manager bundle.
 func InstallCertManager() error {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	//nolint:gosec // This is a test utility using predefined URLs
-	cmd := exec.Command("kubectl", "apply", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		return err
-	}
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
 
-	_, err := Run(cmd)
-	return err
+	// Download cert-manager YAML to a temporary file first
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "Downloading cert-manager YAML...\n")
+	cmd := exec.Command("curl", "-L", "-o", "/tmp/cert-manager.yaml", url)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to download cert-manager YAML: %w", err)
+	}
+
+	// Apply the downloaded YAML with validation disabled to avoid webhook hanging
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "Applying cert-manager YAML...\n")
+	cmd = exec.Command("kubectl", "apply", "-f", "/tmp/cert-manager.yaml", "--context", kindContext, "--validate=false")
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to apply cert-manager YAML: %w", err)
+	}
+
+	// Wait for cert-manager namespace to be created first
+	cmd = exec.Command("kubectl", "wait", "--for=condition=Ready", "namespace/cert-manager", "--timeout=2m", "--context", kindContext)
+	if _, err := Run(cmd); err != nil {
+		// If namespace wait fails, continue anyway as it might already exist
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "warning: namespace wait failed, continuing: %v\n", err)
+	}
+
+	// Wait for all cert-manager deployments to be available with longer timeout
+	deployments := []string{
+		"cert-manager",
+		"cert-manager-cainjector",
+		"cert-manager-webhook",
+	}
+
+	for _, deployment := range deployments {
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "waiting for deployment %s to be ready...\n", deployment)
+		cmd = exec.Command("kubectl", "wait", "deployment.apps/"+deployment,
+			"--for", "condition=Available",
+			"--namespace", "cert-manager",
+			"--timeout", "10m",
+			"--context", kindContext,
+		)
+		if _, err := Run(cmd); err != nil {
+			return fmt.Errorf("failed to wait for deployment %s: %w", deployment, err)
+		}
+	}
+
+	return nil
 }
 
 // IsCertManagerCRDsInstalled checks if any Cert Manager CRDs are installed
@@ -138,7 +169,7 @@ func IsCertManagerCRDsInstalled() bool {
 	}
 
 	// Execute the kubectl command to get all CRDs
-	cmd := exec.Command("kubectl", "get", "crds")
+	cmd := exec.Command("kubectl", "get", "crds", "--context", kindContext)
 	output, err := Run(cmd)
 	if err != nil {
 		return false

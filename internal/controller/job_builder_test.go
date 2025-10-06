@@ -65,10 +65,10 @@ var _ = Describe("Job Builder", func() {
 			// Check single streamlined setup container
 			setupContainer := initContainers[0]
 			Expect(setupContainer.Name).To(Equal("setup-ansible-runner"))
-			Expect(setupContainer.Image).To(Equal("alpine/git:latest"))
-			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/playbooks.git"))
-			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/roles.git"))
-			Expect(setupContainer.Args[0]).To(ContainSubstring("mkdir -p /runner/project"))
+			Expect(setupContainer.Image).To(Equal("alpine/git@sha256:1dd70a5eed7f9b17aecd66756d138137d6818061c4fefefa5859b07f760e68fe"))
+			// Git cloning is handled in init container since ansible-runner doesn't support --scm-url
+			Expect(setupContainer.Args[0]).To(ContainSubstring("mkdir -p /runner/inventory /runner/env"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone"))
 		})
 
 		It("should create ansible-runner container with correct arguments", func() {
@@ -85,7 +85,9 @@ var _ = Describe("Job Builder", func() {
 			Expect(container.Args).To(ContainElement("/runner"))
 			Expect(container.Args).To(ContainElement("--playbook"))
 			Expect(container.Args).To(ContainElement("site.yml"))
-			// Note: Extra vars are now handled via /runner/env/extravars file, not command line arguments
+			// ansible-runner doesn't support SCM arguments, git cloning handled in init container
+			Expect(container.Args).NotTo(ContainElement("--scm-url"))
+			// Extra vars are now handled via /runner/env/extravars file, not command line arguments
 			Expect(container.Args).NotTo(ContainElement("--extra-vars"))
 		})
 
@@ -93,13 +95,14 @@ var _ = Describe("Job Builder", func() {
 			job := reconciler.createAnsibleJob(ansibleJob)
 
 			volumes := job.Spec.Template.Spec.Volumes
-			Expect(volumes).To(HaveLen(2)) // runner-workspace, inventory
+			Expect(volumes).To(HaveLen(3)) // runner-workspace, tmp, inventory
 
 			volumeNames := make([]string, len(volumes))
 			for i, vol := range volumes {
 				volumeNames[i] = vol.Name
 			}
 			Expect(volumeNames).To(ContainElement("runner-workspace"))
+			Expect(volumeNames).To(ContainElement("tmp"))
 			Expect(volumeNames).To(ContainElement("inventory"))
 		})
 
@@ -136,12 +139,13 @@ var _ = Describe("Job Builder", func() {
 		It("should create basic volumes for ansible-runner", func() {
 			volumes := reconciler.createVolumes(ansibleJob)
 
-			Expect(volumes).To(HaveLen(2))
+			Expect(volumes).To(HaveLen(3))
 			volumeNames := make([]string, len(volumes))
 			for i, vol := range volumes {
 				volumeNames[i] = vol.Name
 			}
 			Expect(volumeNames).To(ContainElement("runner-workspace"))
+			Expect(volumeNames).To(ContainElement("tmp"))
 			Expect(volumeNames).To(ContainElement("inventory"))
 		})
 
@@ -149,18 +153,19 @@ var _ = Describe("Job Builder", func() {
 			ansibleJob.Spec.Inventory.Inline = ""
 			volumes := reconciler.createVolumes(ansibleJob)
 
-			Expect(volumes).To(HaveLen(1))
+			Expect(volumes).To(HaveLen(2)) // runner-workspace + tmp only
 			volumeNames := make([]string, len(volumes))
 			for i, vol := range volumes {
 				volumeNames[i] = vol.Name
 			}
 			Expect(volumeNames).To(ContainElement("runner-workspace"))
+			Expect(volumeNames).To(ContainElement("tmp"))
 			Expect(volumeNames).NotTo(ContainElement("inventory"))
 		})
 	})
 
 	Context("Init Container Creation", func() {
-		It("should create init containers with correct git commands", func() {
+		It("should create init containers with correct setup commands", func() {
 			initContainers := reconciler.createInitContainers(ansibleJob)
 
 			Expect(initContainers).To(HaveLen(1))
@@ -168,14 +173,18 @@ var _ = Describe("Job Builder", func() {
 			// Test single streamlined setup container
 			setupContainer := initContainers[0]
 			Expect(setupContainer.Name).To(Equal("setup-ansible-runner"))
-			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/playbooks.git"))
-			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone https://github.com/test/roles.git"))
+			// Git cloning is handled in init container since ansible-runner doesn't support --scm-url
+			Expect(setupContainer.Args[0]).To(ContainSubstring("mkdir -p /runner/inventory /runner/env"))
+			Expect(setupContainer.Args[0]).To(ContainSubstring("git clone"))
 		})
 
-		It("should handle git ref in clone commands", func() {
+		It("should handle git ref in init container git clone", func() {
 			ansibleJob.Spec.PlaybookGitRef = "v1.0.0"
 			ansibleJob.Spec.RolesGitRef = "v1.0.0"
+
+			// Check that init container handles git checkout of specific ref
 			initContainers := reconciler.createInitContainers(ansibleJob)
+			Expect(initContainers).To(HaveLen(1))
 
 			setupContainer := initContainers[0]
 			Expect(setupContainer.Args[0]).To(ContainSubstring("git checkout v1.0.0"))
@@ -292,6 +301,135 @@ var _ = Describe("Job Builder", func() {
 				Expect(memoryQuantity.String()).To(Equal("512Mi"))
 				Expect(storageQuantity.String()).To(Equal("1Gi"))
 				Expect(gpuQuantity.String()).To(Equal("1"))
+			})
+		})
+
+		Describe("Utility Functions", func() {
+			Describe("shellEscape", func() {
+				It("should wrap strings in single quotes", func() {
+					Expect(shellEscape("hello world")).To(Equal("'hello world'"))
+					Expect(shellEscape("hello'world")).To(Equal("'hello'world'"))
+					Expect(shellEscape("hello\"world")).To(Equal("'hello\"world'"))
+					Expect(shellEscape("hello$world")).To(Equal("'hello$world'"))
+					Expect(shellEscape("hello`world")).To(Equal("'hello`world'"))
+				})
+
+				It("should handle empty strings", func() {
+					Expect(shellEscape("")).To(Equal("''"))
+				})
+
+				It("should handle strings with only special characters", func() {
+					Expect(shellEscape("'")).To(Equal("'''"))
+					Expect(shellEscape("''")).To(Equal("''''"))
+				})
+			})
+
+			Describe("getInitContainerImage", func() {
+				It("should return default image when none specified", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{}
+					image := getInitContainerImage(ansibleJob)
+					Expect(image).To(Equal("alpine/git@sha256:1dd70a5eed7f9b17aecd66756d138137d6818061c4fefefa5859b07f760e68fe"))
+				})
+
+				It("should return custom image when specified", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+								InitImage: "custom-git:latest",
+							},
+						},
+					}
+					image := getInitContainerImage(ansibleJob)
+					Expect(image).To(Equal("custom-git:latest"))
+				})
+
+				It("should handle empty JobTemplate", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							JobTemplate: &maintencev1alpha1.JobTemplateSpec{},
+						},
+					}
+					image := getInitContainerImage(ansibleJob)
+					Expect(image).To(Equal("alpine/git@sha256:1dd70a5eed7f9b17aecd66756d138137d6818061c4fefefa5859b07f760e68fe"))
+				})
+			})
+
+			Describe("validateGitURL", func() {
+				It("should accept valid HTTPS URLs", func() {
+					Expect(validateGitURL("https://github.com/user/repo.git")).To(Succeed())
+					Expect(validateGitURL("https://gitlab.com/user/repo")).To(Succeed())
+					Expect(validateGitURL("https://bitbucket.org/user/repo.git")).To(Succeed())
+				})
+
+				It("should accept valid SSH URLs", func() {
+					Expect(validateGitURL("git@github.com:user/repo.git")).To(Succeed())
+					Expect(validateGitURL("ssh://git@gitlab.com/user/repo.git")).To(Succeed())
+				})
+
+				It("should accept valid git protocol URLs", func() {
+					Expect(validateGitURL("git://github.com/user/repo.git")).To(Succeed())
+				})
+
+				It("should reject invalid protocols", func() {
+					Expect(validateGitURL("ftp://example.com/repo.git")).To(HaveOccurred())
+					Expect(validateGitURL("file:///local/repo")).To(HaveOccurred())
+				})
+
+				It("should reject malformed URLs", func() {
+					Expect(validateGitURL("not-a-url")).To(HaveOccurred())
+					Expect(validateGitURL("")).To(Succeed()) // Empty URLs are allowed
+					Expect(validateGitURL("http://")).To(HaveOccurred())
+				})
+
+				It("should reject URLs that are too short", func() {
+					Expect(validateGitURL("git")).To(HaveOccurred())
+					Expect(validateGitURL("a")).To(HaveOccurred())
+					Expect(validateGitURL("ab")).To(HaveOccurred())
+					Expect(validateGitURL("abc")).To(HaveOccurred())
+				})
+
+				It("should reject URLs with suspicious patterns", func() {
+					Expect(validateGitURL("https://github.com/user/repo.git; rm -rf /")).To(HaveOccurred())
+					Expect(validateGitURL("https://github.com/user/repo.git && malicious-command")).To(HaveOccurred())
+					Expect(validateGitURL("https://github.com/user/repo.git | cat")).To(HaveOccurred())
+					Expect(validateGitURL("https://github.com/user/repo.git$PWD")).To(HaveOccurred())
+					Expect(validateGitURL("https://github.com/user/repo.git`whoami`")).To(HaveOccurred())
+					Expect(validateGitURL("https://github.com/user/repo.git$(whoami)")).To(HaveOccurred())
+					Expect(validateGitURL("https://github.com/user/repo.git || echo")).To(HaveOccurred())
+				})
+			})
+
+			Describe("createVolumes edge cases", func() {
+				It("should handle multiple volume mount scenarios", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								ConfigMapRef: &maintencev1alpha1.ConfigMapReference{
+									Name: "test-configmap",
+									Key:  "hosts",
+								},
+								SecretRef: &maintencev1alpha1.SecretReference{
+									Name: "test-secret",
+									Key:  "hosts",
+								},
+							},
+						},
+					}
+					reconciler := &AnsibleJobReconciler{}
+					volumes := reconciler.createVolumes(ansibleJob)
+
+					// Should include runner-workspace, tmp, and inventory volumes
+					Expect(len(volumes)).To(BeNumerically(">=", 3))
+
+					// Check for required volume names
+					volumeNames := make([]string, len(volumes))
+					for i, vol := range volumes {
+						volumeNames[i] = vol.Name
+					}
+					Expect(volumeNames).To(ContainElement("runner-workspace"))
+					Expect(volumeNames).To(ContainElement("tmp"))
+					Expect(volumeNames).To(ContainElement("inventory"))
+				})
 			})
 		})
 	})

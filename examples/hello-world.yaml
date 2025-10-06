@@ -30,8 +30,10 @@ spec:
 
   # Extra variables (passed to the playbook)
   extraVars:
-    environment: "kubernetes"
-    message: "Hello from maintenance-operator!"
+    - name: deployment_environment
+      value: "kubernetes"
+    - name: message
+      value: "Hello from maintenance-operator!"
 
   # Timeout in seconds
   timeoutSeconds: 300
@@ -42,8 +44,12 @@ spec:
     backoffLimit: 1
     resources:
       limits:
-        cpu: "500m"
-        memory: "512Mi"
+        - name: cpu
+          quantity: "500m"
+        - name: memory
+          quantity: "512Mi"
       requests:
-        cpu: "100m"
-        memory: "128Mi"
+        - name: cpu
+          quantity: "100m"
+        - name: memory
+          quantity: "128Mi"

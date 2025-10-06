@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Example AnsibleJob with custom container images for security and air-gapped environments
+apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: custom-images-example
+  namespace: default
+spec:
+  # Ansible playbook configuration
+  playbook: site.yml
+  playbookRepo: https://github.com/your-org/secure-playbooks.git
+  playbookGitRef: v1.2.3
+  rolesRepo: https://github.com/your-org/secure-roles.git
+  rolesGitRef: v2.1.0
+
+  # Inventory configuration
+  inventory:
+    inline: |
+      [servers]
+      server1.example.com
+      server2.example.com
+
+  # Custom container images for security/air-gapped environments
+  jobTemplate:
+    # Custom ansible-runner image (use your organization's scanned/approved image)
+    image: "your-registry.com/ansible/ansible-runner:v2.3.4@sha256:abcd1234..."
+
+    # Custom init container image (use your organization's scanned/approved image)
+    initImage: "your-registry.com/alpine/git:v2.40.1@sha256:efgh5678..."
+
+    # Service account with appropriate RBAC
+    serviceAccountName: "ansible-job-runner"
+
+    # Retry configuration
+    backoffLimit: 3
+
+    # Resource limits for production workloads
+    resources:
+      requests:
+        - name: cpu
+          quantity: "200m"
+        - name: memory
+          quantity: "512Mi"
+      limits:
+        - name: cpu
+          quantity: "1"
+        - name: memory
+          quantity: "1Gi"
+
+  # Extra variables
+  extraVars:
+    - name: environment
+      value: production
+    - name: backup_enabled
+      value: "true"

@@ -41,9 +41,12 @@ spec:
 
   # Extra variables to pass to the playbook
   extraVars:
-    environment: production
-    backup_enabled: "true"
-    maintenance_window: "02:00-04:00"
+    - name: environment
+      value: production
+    - name: backup_enabled
+      value: "true"
+    - name: maintenance_window
+      value: "02:00-04:00"
 
   # Job template configuration
   jobTemplate:
@@ -52,8 +55,12 @@ spec:
     backoffLimit: 2
     resources:
       limits:
-        cpu: 1000m
-        memory: 1Gi
+        - name: cpu
+          quantity: 1000m
+        - name: memory
+          quantity: 1Gi
       requests:
-        cpu: 100m
-        memory: 256Mi
+        - name: cpu
+          quantity: 100m
+        - name: memory
+          quantity: 256Mi

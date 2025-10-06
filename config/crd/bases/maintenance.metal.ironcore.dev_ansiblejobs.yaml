@@ -107,6 +107,11 @@ spec:
                   image:
                     description: Image is the container image to use for ansible-runner
                     type: string
+                  initImage:
+                    description: |-
+                      InitImage is the container image to use for the init container (git setup)
+                      Defaults to alpine/git with pinned digest for security
+                    type: string
                   resources:
                     description: Resources specifies the compute resource requirements
                     properties:

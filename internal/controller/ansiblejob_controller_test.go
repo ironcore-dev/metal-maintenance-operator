@@ -225,8 +225,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			By("Checking the AnsibleJob status is updated")
 			ansibleJob := &maintencev1alpha1.AnsibleJob{}
 			Eventually(func() string {
-				err := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
-				if err != nil {
+				getErr := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
+				if getErr != nil {
 					return ""
 				}
 				return string(ansibleJob.Status.Phase)
@@ -255,8 +255,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			By("Checking that a Job was created")
 			jobList := &batchv1.JobList{}
 			Eventually(func() int {
-				err := k8sClient.List(ctx, jobList, client.InNamespace(AnsibleJobNamespace))
-				if err != nil {
+				listErr := k8sClient.List(ctx, jobList, client.InNamespace(AnsibleJobNamespace))
+				if listErr != nil {
 					return 0
 				}
 				return len(jobList.Items)
@@ -328,8 +328,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			By("Checking AnsibleJob status is updated to Succeeded")
 			ansibleJob := &maintencev1alpha1.AnsibleJob{}
 			Eventually(func() string {
-				err := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
-				if err != nil {
+				getErr := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
+				if getErr != nil {
 					return ""
 				}
 				return string(ansibleJob.Status.Phase)
@@ -372,9 +372,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(args).To(ContainElements("run", "/runner", "--playbook", "site.yml"))
 
 			By("Checking basic volume mounts")
-			Expect(container.VolumeMounts).To(HaveLen(1))
-			Expect(container.VolumeMounts[0].Name).To(Equal("runner-workspace"))
-			Expect(container.VolumeMounts[0].MountPath).To(Equal("/runner"))
+			Expect(container.VolumeMounts).To(HaveLen(2)) // runner-workspace + tmp
+			mountNames := make([]string, len(container.VolumeMounts))
+			for i, mount := range container.VolumeMounts {
+				mountNames[i] = mount.Name
+			}
+			Expect(mountNames).To(ContainElement("runner-workspace"))
+			Expect(mountNames).To(ContainElement("tmp"))
 		})
 
 		It("should create container with inline inventory", func() {
@@ -399,7 +403,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(args).To(ContainElements("--inventory", "/runner/inventory/hosts"))
 
 			By("Checking inventory volume mount is added")
-			Expect(container.VolumeMounts).To(HaveLen(2))
+			Expect(container.VolumeMounts).To(HaveLen(3)) // runner-workspace + tmp + inventory
 			volumeMounts := container.VolumeMounts
 
 			// Check for runner-workspace mount
@@ -439,8 +443,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(args).NotTo(ContainElement("--inventory"))
 
 			By("Checking no inventory volume mount")
-			Expect(container.VolumeMounts).To(HaveLen(1))
-			Expect(container.VolumeMounts[0].Name).To(Equal("runner-workspace"))
+			Expect(container.VolumeMounts).To(HaveLen(2)) // runner-workspace + tmp
+			mountNames := make([]string, len(container.VolumeMounts))
+			for i, mount := range container.VolumeMounts {
+				mountNames[i] = mount.Name
+			}
+			Expect(mountNames).To(ContainElement("runner-workspace"))
+			Expect(mountNames).To(ContainElement("tmp"))
+			Expect(mountNames).NotTo(ContainElement("inventory"))
 		})
 
 		It("should create container with limit parameter", func() {
@@ -673,7 +683,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(args).To(ContainElements("--limit", "production:!server2.prod.com"))
 
 			By("Checking volume mounts")
-			Expect(container.VolumeMounts).To(HaveLen(2))
+			Expect(container.VolumeMounts).To(HaveLen(3)) // runner-workspace + tmp + inventory
 			volumeMountNames := make([]string, len(container.VolumeMounts))
 			for i, mount := range container.VolumeMounts {
 				volumeMountNames[i] = mount.Name
@@ -844,8 +854,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			result, err := reconciler.initializeJob(ctx, ansibleJob)
 
 			By("Checking exponential backoff is used for status failures")
-			Expect(err).ToNot(HaveOccurred()) // No error returned, uses backoff instead
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0)) // Should have backoff delay
+			Expect(err).ToNot(HaveOccurred())                                  // No error returned, uses backoff instead
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))              // Should have backoff delay
 			Expect(result.RequeueAfter).To(BeNumerically("<=", 5*time.Minute)) // Capped at max delay
 		})
 
@@ -2049,6 +2059,141 @@ var _ = Describe("AnsibleJob Controller", func() {
 				ContainSubstring("failed to create ConfigMap"),
 				ContainSubstring("uid must not be empty"),
 			))
+		})
+	})
+
+	Context("Utility Functions", func() {
+		var reconciler *AnsibleJobReconciler
+
+		BeforeEach(func() {
+			reconciler = &AnsibleJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+		})
+
+		Describe("calculateBackoffDelay", func() {
+			It("should return 5 seconds for retry count <= 0", func() {
+				Expect(reconciler.calculateBackoffDelay(0)).To(Equal(5 * time.Second))
+				Expect(reconciler.calculateBackoffDelay(-1)).To(Equal(5 * time.Second))
+			})
+
+			It("should return exponential backoff delays", func() {
+				Expect(reconciler.calculateBackoffDelay(1)).To(Equal(5 * time.Second))
+				Expect(reconciler.calculateBackoffDelay(2)).To(Equal(10 * time.Second))
+				Expect(reconciler.calculateBackoffDelay(3)).To(Equal(20 * time.Second))
+				Expect(reconciler.calculateBackoffDelay(4)).To(Equal(40 * time.Second))
+			})
+
+			It("should cap delay at 5 minutes for high retry counts", func() {
+				Expect(reconciler.calculateBackoffDelay(10)).To(Equal(5 * time.Minute))
+				Expect(reconciler.calculateBackoffDelay(100)).To(Equal(5 * time.Minute))
+			})
+		})
+
+		Describe("getRetryCountFromConditions", func() {
+			It("should return 0 for AnsibleJob with no StartTime", func() {
+				ansibleJob := &maintencev1alpha1.AnsibleJob{}
+				count := reconciler.getRetryCountFromConditions(ansibleJob)
+				Expect(count).To(Equal(0))
+			})
+
+			It("should return 0 for new jobs", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+						StartTime: &metav1.Time{Time: now.Add(-30 * time.Second)}, // 30 seconds ago
+					},
+				}
+				count := reconciler.getRetryCountFromConditions(ansibleJob)
+				Expect(count).To(Equal(0))
+			})
+
+			It("should return 1 for jobs older than 2 minutes in Pending phase", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+						StartTime: &metav1.Time{Time: now.Add(-3 * time.Minute)}, // 3 minutes ago
+					},
+				}
+				count := reconciler.getRetryCountFromConditions(ansibleJob)
+				Expect(count).To(Equal(1))
+			})
+
+			It("should return 3 for jobs older than 5 minutes in Pending phase", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+						StartTime: &metav1.Time{Time: now.Add(-7 * time.Minute)}, // 7 minutes ago
+					},
+				}
+				count := reconciler.getRetryCountFromConditions(ansibleJob)
+				Expect(count).To(Equal(3))
+			})
+
+			It("should return 0 for old jobs not in Pending phase", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+						StartTime: &metav1.Time{Time: now.Add(-7 * time.Minute)}, // 7 minutes ago
+					},
+				}
+				count := reconciler.getRetryCountFromConditions(ansibleJob)
+				Expect(count).To(Equal(0))
+			})
+		})
+
+		Describe("calculateRequeueAfter", func() {
+			It("should return 5 seconds when StartTime is nil", func() {
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase: maintencev1alpha1.AnsibleJobPhasePending,
+						// StartTime is nil
+					},
+				}
+				duration := reconciler.calculateRequeueAfter(ansibleJob)
+				Expect(duration).To(Equal(5 * time.Second))
+			})
+
+			It("should return 10 seconds for jobs less than 2 minutes old", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+						StartTime: &metav1.Time{Time: now.Add(-1 * time.Minute)}, // 1 minute ago
+					},
+				}
+				duration := reconciler.calculateRequeueAfter(ansibleJob)
+				Expect(duration).To(Equal(10 * time.Second))
+			})
+
+			It("should return 30 seconds for jobs 2-10 minutes old", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+						StartTime: &metav1.Time{Time: now.Add(-5 * time.Minute)}, // 5 minutes ago
+					},
+				}
+				duration := reconciler.calculateRequeueAfter(ansibleJob)
+				Expect(duration).To(Equal(30 * time.Second))
+			})
+
+			It("should return 60 seconds for jobs older than 10 minutes", func() {
+				now := time.Now()
+				ansibleJob := &maintencev1alpha1.AnsibleJob{
+					Status: maintencev1alpha1.AnsibleJobStatus{
+						Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+						StartTime: &metav1.Time{Time: now.Add(-15 * time.Minute)}, // 15 minutes ago
+					},
+				}
+				duration := reconciler.calculateRequeueAfter(ansibleJob)
+				Expect(duration).To(Equal(60 * time.Second))
+			})
 		})
 	})
 })

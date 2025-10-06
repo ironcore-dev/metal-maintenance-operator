@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,7 +40,10 @@ var _ = Describe("Manager", Ordered, func() {
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", namespace)
 		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		// Ignore AlreadyExists error since namespace may have been created in BeforeSuite
+		if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
+			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		}
 
 		By("labeling the namespace to enforce the restricted security policy")
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,

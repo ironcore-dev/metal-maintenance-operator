@@ -104,8 +104,8 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 		// Job already exists, update status to running
 		ansibleJob.Status.JobName = jobName
 		ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseRunning
-		if err := r.Status().Update(ctx, ansibleJob); err != nil {
-			return ctrl.Result{}, err
+		if updateErr := r.Status().Update(ctx, ansibleJob); updateErr != nil {
+			return ctrl.Result{}, updateErr
 		}
 		return ctrl.Result{RequeueAfter: r.calculateRequeueAfter(ansibleJob)}, nil
 	}
@@ -117,9 +117,9 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 
 	// Create inventory ConfigMap if using inline inventory
 	if ansibleJob.Spec.Inventory.Inline != "" {
-		if err := r.createInventoryConfigMap(ctx, ansibleJob); err != nil {
-			logger.Error(err, "Failed to create inventory ConfigMap")
-			return ctrl.Result{}, err
+		if createErr := r.createInventoryConfigMap(ctx, ansibleJob); createErr != nil {
+			logger.Error(createErr, "Failed to create inventory ConfigMap")
+			return ctrl.Result{}, createErr
 		}
 	}
 
@@ -127,15 +127,15 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 	job := r.createAnsibleJob(ansibleJob)
 
 	// Set controller reference
-	if err := controllerutil.SetControllerReference(ansibleJob, job, r.Scheme); err != nil {
-		logger.Error(err, "Failed to set controller reference")
-		return ctrl.Result{}, err
+	if setRefErr := controllerutil.SetControllerReference(ansibleJob, job, r.Scheme); setRefErr != nil {
+		logger.Error(setRefErr, "Failed to set controller reference")
+		return ctrl.Result{}, setRefErr
 	}
 
 	// Create the job
-	if err := r.Create(ctx, job); err != nil {
-		logger.Error(err, "Failed to create Job")
-		return ctrl.Result{}, err
+	if createJobErr := r.Create(ctx, job); createJobErr != nil {
+		logger.Error(createJobErr, "Failed to create Job")
+		return ctrl.Result{}, createJobErr
 	}
 
 	logger.Info("Created Kubernetes Job", "job", job.Name)
@@ -143,8 +143,8 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 	// Update status with both job name and phase in single call
 	ansibleJob.Status.JobName = job.Name
 	ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseRunning
-	if err := r.Status().Update(ctx, ansibleJob); err != nil {
-		return ctrl.Result{}, err
+	if statusUpdateErr := r.Status().Update(ctx, ansibleJob); statusUpdateErr != nil {
+		return ctrl.Result{}, statusUpdateErr
 	}
 
 	return ctrl.Result{RequeueAfter: r.calculateRequeueAfter(ansibleJob)}, nil
@@ -192,8 +192,8 @@ func (r *AnsibleJobReconciler) monitorJob(ctx context.Context, ansibleJob *maint
 
 	// Update status only if it changed
 	if statusChanged {
-		if err := r.Status().Update(ctx, ansibleJob); err != nil {
-			return ctrl.Result{}, err
+		if updateErr := r.Status().Update(ctx, ansibleJob); updateErr != nil {
+			return ctrl.Result{}, updateErr
 		}
 	}
 
@@ -236,13 +236,13 @@ func (r *AnsibleJobReconciler) createInventoryConfigMap(ctx context.Context, ans
 	}
 
 	// Set controller reference so ConfigMap gets cleaned up when AnsibleJob is deleted
-	if err := controllerutil.SetControllerReference(ansibleJob, configMap, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set controller reference: %w", err)
+	if setRefErr := controllerutil.SetControllerReference(ansibleJob, configMap, r.Scheme); setRefErr != nil {
+		return fmt.Errorf("failed to set controller reference: %w", setRefErr)
 	}
 
 	// Create the ConfigMap
-	if err := r.Create(ctx, configMap); err != nil {
-		return fmt.Errorf("failed to create ConfigMap: %w", err)
+	if createErr := r.Create(ctx, configMap); createErr != nil {
+		return fmt.Errorf("failed to create ConfigMap: %w", createErr)
 	}
 
 	logger.Info("Created inventory ConfigMap", "configMap", configMapName)
@@ -271,7 +271,13 @@ func (r *AnsibleJobReconciler) calculateBackoffDelay(retryCount int) time.Durati
 	if retryCount <= 0 {
 		return 5 * time.Second
 	}
-	
+
+	// Cap retry count to prevent integer overflow in bit shifting
+	// For retryCount > 20, we would already hit the 5-minute cap anyway
+	if retryCount > 20 {
+		return 5 * time.Minute
+	}
+
 	// Exponential backoff: 5s, 10s, 20s, 40s, capped at 5 minutes
 	delay := time.Duration(5) * time.Second * time.Duration(1<<uint(retryCount-1))
 	maxDelay := 5 * time.Minute

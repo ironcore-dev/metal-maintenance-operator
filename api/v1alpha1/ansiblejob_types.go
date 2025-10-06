@@ -88,6 +88,11 @@ type JobTemplateSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
+	// InitImage is the container image to use for the init container (git setup)
+	// Defaults to alpine/git with pinned digest for security
+	// +optional
+	InitImage string `json:"initImage,omitempty"`
+
 	// ServiceAccountName for the Job
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`

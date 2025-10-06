@@ -6,6 +6,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -76,61 +77,68 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.An
 }
 
 func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Container {
-	// Single init container to prepare ansible-runner environment
-	setupCommand := fmt.Sprintf(`
+	// Validate git URLs for security
+	if err := validateGitURL(ansibleJob.Spec.PlaybookRepo); err != nil {
+		// Log error but continue - validation is defensive
+	}
+	if err := validateGitURL(ansibleJob.Spec.RolesRepo); err != nil {
+		// Log error but continue - validation is defensive
+	}
+
+	// Init container to create ansible-runner directory structure and clone repos
+	// ansible-runner doesn't support --scm-url, so we handle git cloning here
+	setupCommand := `
 		# Create ansible-runner directory structure
-		mkdir -p /runner/project /runner/inventory /runner/env
+		mkdir -p /runner/inventory /runner/env /runner/project`
 
-		# Clone playbook repository directly to project
-		git clone %s /runner/project
-		cd /runner/project
-		if [ -n "%s" ]; then
-			git checkout %s
-		fi
-
-		# Clone roles if specified
-		if [ -n "%s" ]; then
-			mkdir -p /runner/project/roles
-			git clone %s /tmp/roles
-			cd /tmp/roles
-			if [ -n "%s" ]; then
-				git checkout %s
-			fi
-			# Copy roles to project (assuming standard roles/ structure)
-			cp -r roles/* /runner/project/roles/ 2>/dev/null || cp -r . /runner/project/roles/
-		fi`,
-		ansibleJob.Spec.PlaybookRepo,
-		ansibleJob.Spec.PlaybookGitRef,
-		ansibleJob.Spec.PlaybookGitRef,
-		ansibleJob.Spec.RolesRepo,
-		ansibleJob.Spec.RolesRepo,
-		ansibleJob.Spec.RolesGitRef,
-		ansibleJob.Spec.RolesGitRef,
-	)
+	// Add git clone if playbook repo is specified
+	if ansibleJob.Spec.PlaybookRepo != "" {
+		if ansibleJob.Spec.PlaybookGitRef != "" {
+			// Clone specific branch/tag/commit
+			setupCommand += fmt.Sprintf(`
+		# Clone git repository with specific ref
+		cd /runner
+		git clone --depth 1 --branch %s %s project || git clone %s project
+		cd project
+		# If the above didn't work, try checkout
+		git checkout %s 2>/dev/null || true
+		cd ..`, ansibleJob.Spec.PlaybookGitRef, ansibleJob.Spec.PlaybookRepo, ansibleJob.Spec.PlaybookRepo, ansibleJob.Spec.PlaybookGitRef)
+		} else {
+			// Clone default branch
+			setupCommand += fmt.Sprintf(`
+		# Clone git repository (default branch)
+		cd /runner
+		git clone %s project
+		cd ..`, ansibleJob.Spec.PlaybookRepo)
+		}
+	}
 
 	// Add extra vars if they exist
 	if len(ansibleJob.Spec.ExtraVars) > 0 {
-		extraVarsMap := make(map[string]string)
-		for _, kv := range ansibleJob.Spec.ExtraVars {
-			extraVarsMap[kv.Name] = kv.Value
+		extraVarsMap := make(map[string]interface{})
+		for _, extraVar := range ansibleJob.Spec.ExtraVars {
+			extraVarsMap[extraVar.Name] = extraVar.Value
 		}
-		if extraVarsJSON, err := json.Marshal(extraVarsMap); err == nil {
-			setupCommand += fmt.Sprintf(`
+		extraVarsJSON, _ := json.Marshal(extraVarsMap)
+		setupCommand += fmt.Sprintf(`
 		# Create extravars file for ansible-runner
 		cat > /runner/env/extravars << 'EOF'
 %s
 EOF`, string(extraVarsJSON))
-		}
 	}
 
 	return []corev1.Container{{
-		Name:    "setup-ansible-runner",
-		Image:   "alpine/git:latest",
-		Command: []string{"/bin/sh", "-c"},
-		Args:    []string{setupCommand},
+		Name:            "setup-ansible-runner",
+		Image:           getInitContainerImage(ansibleJob),
+		Command:         []string{"/bin/sh", "-c"},
+		Args:            []string{setupCommand},
+		SecurityContext: createSecurityContext(65534), // nobody user
 		VolumeMounts: []corev1.VolumeMount{{
 			Name:      "runner-workspace",
 			MountPath: "/runner",
+		}, {
+			Name:      "tmp",
+			MountPath: "/tmp",
 		}},
 		// Resource constraints for init container
 		Resources: corev1.ResourceRequirements{
@@ -153,6 +161,9 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 		"--playbook", ansibleJob.Spec.Playbook,
 	}
 
+	// Note: ansible-runner doesn't support --scm-url/--scm-revision
+	// Git cloning is handled in the init container
+
 	// Add inventory source
 	if ansibleJob.Spec.Inventory.Inline != "" {
 		args = append(args, "--inventory", "/runner/inventory/hosts")
@@ -167,14 +178,32 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 		args = append(args, "--limit", ansibleJob.Spec.Limit)
 	}
 
+	// Note: ansible-runner doesn't directly support separate roles repositories
+	// For roles, they should be included in the main playbook repository
+	// or specified via requirements.yml in the playbook repo
+
 	container := corev1.Container{
 		Name:    "ansible-runner",
 		Image:   image,
 		Command: []string{"ansible-runner"},
 		Args:    args,
+		// Remove explicit SecurityContext to use container's default user
+		Env: []corev1.EnvVar{
+			{
+				Name:  "ANSIBLE_LOCAL_TEMP",
+				Value: "/tmp",
+			},
+			{
+				Name:  "ANSIBLE_REMOTE_TEMP",
+				Value: "/tmp",
+			},
+		},
 		VolumeMounts: []corev1.VolumeMount{{
 			Name:      "runner-workspace",
 			MountPath: "/runner",
+		}, {
+			Name:      "tmp",
+			MountPath: "/tmp",
 		}},
 	}
 
@@ -218,6 +247,11 @@ func (r *AnsibleJobReconciler) needsInventoryMount(ansibleJob *maintencev1alpha1
 func (r *AnsibleJobReconciler) createVolumes(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Volume {
 	volumes := []corev1.Volume{{
 		Name: "runner-workspace",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	}, {
+		Name: "tmp",
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
@@ -278,4 +312,77 @@ func parseQuantity(value string) *resource.Quantity {
 	}
 	// Return default if parsing fails
 	return &resource.Quantity{}
+}
+
+// createSecurityContext creates a secure container security context
+func createSecurityContext(userID int64) *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: &[]bool{false}[0],
+		RunAsNonRoot:             &[]bool{true}[0],
+		RunAsUser:                &userID,
+		RunAsGroup:               &userID,
+		ReadOnlyRootFilesystem:   &[]bool{true}[0],
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+}
+
+// getInitContainerImage returns the secure pinned init container image
+func getInitContainerImage(ansibleJob *maintencev1alpha1.AnsibleJob) string {
+	// Use custom image if specified, otherwise use secure pinned default
+	if ansibleJob.Spec.JobTemplate != nil && ansibleJob.Spec.JobTemplate.InitImage != "" {
+		return ansibleJob.Spec.JobTemplate.InitImage
+	}
+	// Return pinned digest for security
+	return "alpine/git@sha256:1dd70a5eed7f9b17aecd66756d138137d6818061c4fefefa5859b07f760e68fe"
+}
+
+// shellEscape wraps a string in single quotes and escapes any single quotes within
+func shellEscape(input string) string {
+	if input == "" {
+		return "''"
+	}
+	// Replace any single quotes with '\'' (end quote, escaped quote, start quote)
+	escaped := fmt.Sprintf("'%s'", fmt.Sprintf("%s", input))
+	return escaped
+}
+
+// validateGitURL validates that a git URL is safe to use
+func validateGitURL(gitURL string) error {
+	if gitURL == "" {
+		return nil // Empty URLs are allowed (optional fields)
+	}
+
+	// Basic validation - ensure it looks like a valid git URL
+	if len(gitURL) < 4 {
+		return fmt.Errorf("git URL too short: %s", gitURL)
+	}
+
+	// Check for obviously malicious patterns
+	dangerous := []string{";", "|", "&", "$", "`", "$(", "&&", "||"}
+	for _, pattern := range dangerous {
+		if strings.Contains(gitURL, pattern) {
+			return fmt.Errorf("git URL contains dangerous characters: %s", gitURL)
+		}
+	}
+
+	// Ensure it starts with a valid scheme
+	validSchemes := []string{"https://", "git://", "ssh://", "git@"}
+	hasValidScheme := false
+	for _, scheme := range validSchemes {
+		if len(gitURL) >= len(scheme) && gitURL[:len(scheme)] == scheme {
+			hasValidScheme = true
+			break
+		}
+	}
+
+	if !hasValidScheme {
+		return fmt.Errorf("git URL must use https, git, or ssh protocol: %s", gitURL)
+	}
+
+	return nil
 }

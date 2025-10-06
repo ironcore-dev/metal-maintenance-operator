@@ -110,9 +110,20 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-e2e-standalone
+test-e2e-standalone: ## Run e2e tests with clean Docker config (no credential store issues)
+	@echo 'Running e2e tests with clean Docker config...'
+	@DOCKER_CONFIG=$$(mktemp -d) && echo '{}' > $$DOCKER_CONFIG/config.json && \
+	DOCKER_CONFIG=$$DOCKER_CONFIG CERT_MANAGER_INSTALL_SKIP=true KIND_CLUSTER=$(KIND_CLUSTER) $(MAKE) test-e2e; \
+	test_result=$$?; \
+	rm -rf $$DOCKER_CONFIG; \
+	exit $$test_result
+
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+	@echo "Cleaning up temporary e2e test files..."
+	@rm -f /tmp/e2e-test*.yaml /tmp/inventory-configmap.yaml /tmp/*maintenance-operator* 2>/dev/null || true
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

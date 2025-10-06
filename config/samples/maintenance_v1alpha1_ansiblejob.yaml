@@ -24,8 +24,10 @@ spec:
       ansible_user=ansible
       ansible_ssh_private_key_file=/etc/ansible/ssh_key
   extraVars:
-    environment: "production"
-    version: "1.0.0"
+    - name: environment
+      value: "production"
+    - name: version
+      value: "1.0.0"
   limit: "servers"
   timeoutSeconds: 3600
   jobTemplate:
@@ -34,8 +36,12 @@ spec:
     backoffLimit: 3
     resources:
       limits:
-        cpu: "1"
-        memory: "2Gi"
+        - name: cpu
+          quantity: "1"
+        - name: memory
+          quantity: "2Gi"
       requests:
-        cpu: "500m"
-        memory: "1Gi"
+        - name: cpu
+          quantity: "500m"
+        - name: memory
+          quantity: "1Gi"
