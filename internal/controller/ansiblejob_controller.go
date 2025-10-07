@@ -279,7 +279,16 @@ func (r *AnsibleJobReconciler) calculateBackoffDelay(retryCount int) time.Durati
 	}
 
 	// Exponential backoff: 5s, 10s, 20s, 40s, capped at 5 minutes
-	delay := time.Duration(5) * time.Second * time.Duration(1<<uint(retryCount-1))
+	// Use safer bit shifting to avoid gosec G115 integer overflow warning
+	if retryCount <= 1 {
+		return 5 * time.Second
+	}
+	//nolint:gosec // retryCount is already bounds-checked above
+	shiftValue := uint(retryCount - 1)
+	if shiftValue > 63 { // Cap to prevent overflow on 64-bit systems
+		shiftValue = 63
+	}
+	delay := time.Duration(5) * time.Second * time.Duration(1<<shiftValue)
 	maxDelay := 5 * time.Minute
 	if delay > maxDelay {
 		return maxDelay

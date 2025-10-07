@@ -113,6 +113,7 @@ func InstallCertManager() error {
 
 	// Download cert-manager YAML to a temporary file first
 	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "Downloading cert-manager YAML...\n")
+	//nolint:gosec // URL is constructed from const template, safe in test context
 	cmd := exec.Command("curl", "-L", "-o", "/tmp/cert-manager.yaml", url)
 	if _, err := Run(cmd); err != nil {
 		return fmt.Errorf("failed to download cert-manager YAML: %w", err)
@@ -126,7 +127,8 @@ func InstallCertManager() error {
 	}
 
 	// Wait for cert-manager namespace to be created first
-	cmd = exec.Command("kubectl", "wait", "--for=condition=Ready", "namespace/cert-manager", "--timeout=2m", "--context", kindContext)
+	cmd = exec.Command("kubectl", "wait", "--for=condition=Ready", "namespace/cert-manager",
+		"--timeout=2m", "--context", kindContext)
 	if _, err := Run(cmd); err != nil {
 		// If namespace wait fails, continue anyway as it might already exist
 		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "warning: namespace wait failed, continuing: %v\n", err)
@@ -141,6 +143,7 @@ func InstallCertManager() error {
 
 	for _, deployment := range deployments {
 		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "waiting for deployment %s to be ready...\n", deployment)
+		//nolint:gosec // kubectl command with safe deployment names and context
 		cmd = exec.Command("kubectl", "wait", "deployment.apps/"+deployment,
 			"--for", "condition=Available",
 			"--namespace", "cert-manager",

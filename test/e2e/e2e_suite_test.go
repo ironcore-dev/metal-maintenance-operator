@@ -93,13 +93,21 @@ var _ = BeforeSuite(func() {
 	// Wait for the operator to be ready
 	By("waiting for maintenance-operator to be ready")
 	Eventually(func() error {
-		cmd := exec.Command("kubectl", "get", "deployment", "maintenance-operator-controller-manager", "-n", "maintenance-operator-system", "--context", "kind-maintenance-operator-test-e2e")
+		cmd := exec.Command("kubectl", "get", "deployment",
+			"maintenance-operator-controller-manager",
+			"-n", "maintenance-operator-system",
+			"--context", "kind-maintenance-operator-test-e2e")
 		_, err := utils.Run(cmd)
 		return err
-	}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Succeed(), "maintenance-operator deployment should be created")
+	}).WithTimeout(2*time.Minute).WithPolling(5*time.Second).Should(Succeed(),
+		"maintenance-operator deployment should be created")
 
 	Eventually(func() bool {
-		cmd := exec.Command("kubectl", "get", "deployment", "maintenance-operator-controller-manager", "-n", "maintenance-operator-system", "--context", "kind-maintenance-operator-test-e2e", "-o", "jsonpath={.status.readyReplicas}")
+		cmd := exec.Command("kubectl", "get", "deployment",
+			"maintenance-operator-controller-manager",
+			"-n", "maintenance-operator-system",
+			"--context", "kind-maintenance-operator-test-e2e",
+			"-o", "jsonpath={.status.readyReplicas}")
 		output, err := utils.Run(cmd)
 		if err != nil {
 			return false

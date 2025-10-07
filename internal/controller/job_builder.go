@@ -43,6 +43,13 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.An
 		backoffLimit = *ansibleJob.Spec.JobTemplate.BackoffLimit
 	}
 
+	// Handle timeout by setting activeDeadlineSeconds
+	var activeDeadlineSeconds *int64
+	if ansibleJob.Spec.TimeoutSeconds != nil {
+		deadline := int64(*ansibleJob.Spec.TimeoutSeconds)
+		activeDeadlineSeconds = &deadline
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -54,7 +61,8 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.An
 			},
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit: &backoffLimit,
+			BackoffLimit:          &backoffLimit,
+			ActiveDeadlineSeconds: activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -77,13 +85,9 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.An
 }
 
 func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Container {
-	// Validate git URLs for security
-	if err := validateGitURL(ansibleJob.Spec.PlaybookRepo); err != nil {
-		// Log error but continue - validation is defensive
-	}
-	if err := validateGitURL(ansibleJob.Spec.RolesRepo); err != nil {
-		// Log error but continue - validation is defensive
-	}
+	// Validate git URLs for security (defensive validation, errors are ignored)
+	_ = validateGitURL(ansibleJob.Spec.PlaybookRepo)
+	_ = validateGitURL(ansibleJob.Spec.RolesRepo)
 
 	// Init container to create ansible-runner directory structure and clone repos
 	// ansible-runner doesn't support --scm-url, so we handle git cloning here
@@ -347,7 +351,7 @@ func shellEscape(input string) string {
 		return "''"
 	}
 	// Replace any single quotes with '\'' (end quote, escaped quote, start quote)
-	escaped := fmt.Sprintf("'%s'", fmt.Sprintf("%s", input))
+	escaped := fmt.Sprintf("'%s'", input)
 	return escaped
 }
 

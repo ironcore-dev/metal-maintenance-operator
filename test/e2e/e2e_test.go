@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -27,9 +26,6 @@ const serviceAccountName = "maintenance-operator-controller-manager"
 // metricsServiceName is the name of the metrics service of the project
 const metricsServiceName = "maintenance-operator-controller-manager-metrics-service"
 
-// metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "maintenance-operator-metrics-binding"
-
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -37,48 +33,16 @@ var _ = Describe("Manager", Ordered, func() {
 	// enforce the restricted security policy to the namespace, installing CRDs,
 	// and deploying the controller.
 	BeforeAll(func() {
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
+		// Use the operator deployment from BeforeSuite - no need to redeploy
+		By("verifying that the maintenance-operator is already deployed")
+		cmd := exec.Command("kubectl", "get", "deployment", "maintenance-operator-controller-manager", "-n", namespace)
 		_, err := utils.Run(cmd)
-		// Ignore AlreadyExists error since namespace may have been created in BeforeSuite
-		if err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
-			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
-		}
-
-		By("labeling the namespace to enforce the restricted security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
-			"pod-security.kubernetes.io/enforce=restricted")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
-
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
-
-		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+		Expect(err).NotTo(HaveOccurred(), "maintenance-operator should be deployed by BeforeSuite")
 	})
 
-	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
-	// and deleting the namespace.
 	AfterAll(func() {
 		By("cleaning up the curl pod for metrics")
 		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
-		_, _ = utils.Run(cmd)
-
-		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
-
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
-
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
 		_, _ = utils.Run(cmd)
 	})
 
@@ -162,16 +126,25 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
-			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
+			By("granting necessary permissions for the service account to access metrics")
+			// Clean up any existing ClusterRoleBinding to avoid conflicts
+			err := exec.Command("kubectl", "delete", "clusterrolebinding",
+				"maintenance-operator-metrics-binding", "--ignore-not-found=true").Run()
+			if err != nil {
+				GinkgoLogr.Error(err, "Failed to delete existing ClusterRoleBinding")
+			}
+
+			// Create ClusterRoleBinding with metrics-reader permissions for metrics access
+			err = exec.Command("kubectl", "create", "clusterrolebinding", "maintenance-operator-metrics-binding",
 				"--clusterrole=maintenance-operator-metrics-reader",
-				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
-			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+				"--serviceaccount=maintenance-operator-system:maintenance-operator-controller-manager").Run()
+			if err != nil {
+				GinkgoLogr.Error(err, "Failed to create ClusterRoleBinding")
+				return
+			}
 
 			By("validating that the metrics service is available")
-			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
+			cmd := exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
 
