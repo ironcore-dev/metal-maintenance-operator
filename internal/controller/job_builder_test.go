@@ -430,6 +430,248 @@ var _ = Describe("Job Builder", func() {
 					Expect(volumeNames).To(ContainElement("tmp"))
 					Expect(volumeNames).To(ContainElement("inventory"))
 				})
+
+				It("should handle empty inventory configuration", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								// No inline, ConfigMapRef, or SecretRef
+							},
+						},
+					}
+					reconciler := &AnsibleJobReconciler{}
+					volumes := reconciler.createVolumes(ansibleJob)
+
+					// Should only include runner-workspace and tmp volumes
+					Expect(len(volumes)).To(Equal(2))
+
+					volumeNames := make([]string, len(volumes))
+					for i, vol := range volumes {
+						volumeNames[i] = vol.Name
+					}
+					Expect(volumeNames).To(ContainElement("runner-workspace"))
+					Expect(volumeNames).To(ContainElement("tmp"))
+					Expect(volumeNames).NotTo(ContainElement("inventory"))
+				})
+			})
+
+			Describe("createAnsibleJob edge cases", func() {
+				It("should handle JobTemplate with all nil/empty fields", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "edge-case-job",
+							Namespace: "test-namespace",
+						},
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:     "playbook.yml",
+							PlaybookRepo: "https://github.com/test/repo.git",
+							JobTemplate:  &maintencev1alpha1.JobTemplateSpec{
+								// All fields empty/nil
+							},
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								Inline: "test-inventory",
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					job := reconciler.createAnsibleJob(ansibleJob)
+
+					// Should use defaults when JobTemplate fields are empty
+					Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal(defaultServiceAccount))
+					Expect(*job.Spec.BackoffLimit).To(Equal(defaultBackoffLimit))
+					Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(defaultAnsibleRunnerImage))
+					Expect(job.Spec.ActiveDeadlineSeconds).To(BeNil()) // No timeout specified
+				})
+
+				It("should handle JobTemplate with empty strings", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "empty-strings-job",
+							Namespace: "test-namespace",
+						},
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:     "playbook.yml",
+							PlaybookRepo: "https://github.com/test/repo.git",
+							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+								Image:              "", // Empty string
+								ServiceAccountName: "", // Empty string
+							},
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								Inline: "test-inventory",
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					job := reconciler.createAnsibleJob(ansibleJob)
+
+					// Should use defaults when strings are empty
+					Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal(defaultServiceAccount))
+					Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(defaultAnsibleRunnerImage))
+				})
+
+				It("should handle zero timeout correctly", func() {
+					timeout := int32(0)
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "zero-timeout-job",
+							Namespace: "test-namespace",
+						},
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:       "playbook.yml",
+							PlaybookRepo:   "https://github.com/test/repo.git",
+							TimeoutSeconds: &timeout,
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								Inline: "test-inventory",
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					job := reconciler.createAnsibleJob(ansibleJob)
+
+					// Should set ActiveDeadlineSeconds to 0
+					Expect(job.Spec.ActiveDeadlineSeconds).NotTo(BeNil())
+					Expect(*job.Spec.ActiveDeadlineSeconds).To(Equal(int64(0)))
+				})
+			})
+
+			Describe("createAnsibleRunnerContainer edge cases", func() {
+				It("should handle inventory without any mount when needsInventoryMount returns false", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:     "test.yml",
+							PlaybookRepo: "https://github.com/test/repo.git",
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								// No inline, ConfigMapRef, or SecretRef
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					containers := reconciler.createAnsibleRunnerContainer(ansibleJob, "test-image")
+
+					Expect(containers).To(HaveLen(1))
+					container := containers[0]
+
+					// Should only have runner-workspace and tmp mounts, no inventory mount
+					Expect(container.VolumeMounts).To(HaveLen(2))
+					mountPaths := make([]string, len(container.VolumeMounts))
+					for i, mount := range container.VolumeMounts {
+						mountPaths[i] = mount.MountPath
+					}
+					Expect(mountPaths).To(ContainElement("/runner"))
+					Expect(mountPaths).To(ContainElement("/tmp"))
+					Expect(mountPaths).NotTo(ContainElement("/runner/inventory"))
+				})
+
+				It("should handle custom resource requirements correctly", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:     "test.yml",
+							PlaybookRepo: "https://github.com/test/repo.git",
+							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+								Resources: &maintencev1alpha1.ResourceRequirements{
+									Limits: []maintencev1alpha1.ResourceQuantity{
+										{Name: "cpu", Quantity: "2"},
+										{Name: "memory", Quantity: "4Gi"},
+									},
+									Requests: []maintencev1alpha1.ResourceQuantity{
+										{Name: "cpu", Quantity: "1"},
+										{Name: "memory", Quantity: "2Gi"},
+									},
+								},
+							},
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								Inline: "test-inventory",
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					containers := reconciler.createAnsibleRunnerContainer(ansibleJob, "test-image")
+
+					Expect(containers).To(HaveLen(1))
+					container := containers[0]
+
+					// Should have custom resource requirements
+					Expect(container.Resources.Limits).NotTo(BeEmpty())
+					Expect(container.Resources.Requests).NotTo(BeEmpty())
+					
+					// Check specific resource values
+					cpuLimit := container.Resources.Limits[corev1.ResourceCPU]
+					memLimit := container.Resources.Limits[corev1.ResourceMemory]
+					cpuRequest := container.Resources.Requests[corev1.ResourceCPU]
+					memRequest := container.Resources.Requests[corev1.ResourceMemory]
+					
+					Expect(cpuLimit.String()).To(Equal("2"))
+					Expect(memLimit.String()).To(Equal("4Gi"))
+					Expect(cpuRequest.String()).To(Equal("1"))
+					Expect(memRequest.String()).To(Equal("2Gi"))
+				})
+
+				It("should use default resources when JobTemplate.Resources is nil", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:     "test.yml",
+							PlaybookRepo: "https://github.com/test/repo.git",
+							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+								Resources: nil, // Explicitly nil
+							},
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								Inline: "test-inventory",
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					containers := reconciler.createAnsibleRunnerContainer(ansibleJob, "test-image")
+
+					Expect(containers).To(HaveLen(1))
+					container := containers[0]
+
+					// Should have default resource requirements
+					cpuRequest := container.Resources.Requests[corev1.ResourceCPU]
+					memRequest := container.Resources.Requests[corev1.ResourceMemory]
+					cpuLimit := container.Resources.Limits[corev1.ResourceCPU]
+					memLimit := container.Resources.Limits[corev1.ResourceMemory]
+					
+					Expect(cpuRequest.String()).To(Equal("100m"))
+					Expect(memRequest.String()).To(Equal("256Mi"))
+					Expect(cpuLimit.String()).To(Equal("500m"))
+					Expect(memLimit.String()).To(Equal("512Mi"))
+				})
+
+				It("should use default resources when JobTemplate is nil", func() {
+					ansibleJob := &maintencev1alpha1.AnsibleJob{
+						Spec: maintencev1alpha1.AnsibleJobSpec{
+							Playbook:     "test.yml",
+							PlaybookRepo: "https://github.com/test/repo.git",
+							JobTemplate:  nil, // Explicitly nil
+							Inventory: maintencev1alpha1.AnsibleInventory{
+								Inline: "test-inventory",
+							},
+						},
+					}
+
+					reconciler := &AnsibleJobReconciler{}
+					containers := reconciler.createAnsibleRunnerContainer(ansibleJob, "test-image")
+
+					Expect(containers).To(HaveLen(1))
+					container := containers[0]
+
+					// Should have default resource requirements
+					cpuRequest := container.Resources.Requests[corev1.ResourceCPU]
+					memRequest := container.Resources.Requests[corev1.ResourceMemory]
+					cpuLimit := container.Resources.Limits[corev1.ResourceCPU]
+					memLimit := container.Resources.Limits[corev1.ResourceMemory]
+					
+					Expect(cpuRequest.String()).To(Equal("100m"))
+					Expect(memRequest.String()).To(Equal("256Mi"))
+					Expect(cpuLimit.String()).To(Equal("500m"))
+					Expect(memLimit.String()).To(Equal("512Mi"))
+				})
 			})
 		})
 	})

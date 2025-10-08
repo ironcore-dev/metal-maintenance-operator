@@ -30,6 +30,58 @@ type AnsibleJobReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+// setCondition sets or updates a condition in the AnsibleJob status
+func (r *AnsibleJobReconciler) setCondition(ansibleJob *maintencev1alpha1.AnsibleJob, conditionType string, status metav1.ConditionStatus, reason, message string) {
+	now := metav1.NewTime(time.Now())
+
+	// Find existing condition
+	for i, condition := range ansibleJob.Status.Conditions {
+		if condition.Type == conditionType {
+			// Update existing condition if status or reason changed
+			if condition.Status != status || condition.Reason != reason {
+				ansibleJob.Status.Conditions[i].Status = status
+				ansibleJob.Status.Conditions[i].Reason = reason
+				ansibleJob.Status.Conditions[i].Message = message
+				ansibleJob.Status.Conditions[i].LastTransitionTime = now
+			}
+			// Always update ObservedGeneration
+			ansibleJob.Status.Conditions[i].ObservedGeneration = ansibleJob.Generation
+			return
+		}
+	}
+
+	// Add new condition
+	newCondition := metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: now,
+		ObservedGeneration: ansibleJob.Generation,
+	}
+	ansibleJob.Status.Conditions = append(ansibleJob.Status.Conditions, newCondition)
+}
+
+// updateConditionsForPhase updates all relevant conditions based on the current phase
+func (r *AnsibleJobReconciler) updateConditionsForPhase(ansibleJob *maintencev1alpha1.AnsibleJob, phase maintencev1alpha1.AnsibleJobPhase) {
+	switch phase {
+	case maintencev1alpha1.AnsibleJobPhasePending:
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionReady, metav1.ConditionFalse, maintencev1alpha1.ReasonJobCreated, "Job is being created")
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionTrue, maintencev1alpha1.ReasonJobCreated, "Job creation in progress")
+	case maintencev1alpha1.AnsibleJobPhaseRunning:
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionReady, metav1.ConditionFalse, maintencev1alpha1.ReasonJobRunning, "Job is running")
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionTrue, maintencev1alpha1.ReasonJobRunning, "Job is actively running")
+	case maintencev1alpha1.AnsibleJobPhaseSucceeded:
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionReady, metav1.ConditionTrue, maintencev1alpha1.ReasonJobSucceeded, "Job completed successfully")
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionFalse, maintencev1alpha1.ReasonJobSucceeded, "Job completed")
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionSucceeded, metav1.ConditionTrue, maintencev1alpha1.ReasonJobSucceeded, "Job completed successfully")
+	case maintencev1alpha1.AnsibleJobPhaseFailed:
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionReady, metav1.ConditionFalse, maintencev1alpha1.ReasonJobFailed, "Job failed")
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionFalse, maintencev1alpha1.ReasonJobFailed, "Job stopped progressing")
+		r.setCondition(ansibleJob, maintencev1alpha1.AnsibleJobConditionFailed, metav1.ConditionTrue, maintencev1alpha1.ReasonJobFailed, "Job failed to complete")
+	}
+}
+
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=ansiblejobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=ansiblejobs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=ansiblejobs/finalizers,verbs=update
@@ -81,6 +133,10 @@ func (r *AnsibleJobReconciler) initializeJob(ctx context.Context, ansibleJob *ma
 	// Initialize job status
 	ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhasePending
 	ansibleJob.Status.StartTime = &metav1.Time{Time: time.Now()}
+	ansibleJob.Status.ObservedGeneration = ansibleJob.Generation
+
+	// Update conditions for pending phase
+	r.updateConditionsForPhase(ansibleJob, maintencev1alpha1.AnsibleJobPhasePending)
 
 	if err := r.Status().Update(ctx, ansibleJob); err != nil {
 		logger.Error(err, "Failed to update AnsibleJob status")
@@ -104,6 +160,11 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 		// Job already exists, update status to running
 		ansibleJob.Status.JobName = jobName
 		ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseRunning
+		ansibleJob.Status.ObservedGeneration = ansibleJob.Generation
+
+		// Update conditions for running phase
+		r.updateConditionsForPhase(ansibleJob, maintencev1alpha1.AnsibleJobPhaseRunning)
+
 		if updateErr := r.Status().Update(ctx, ansibleJob); updateErr != nil {
 			return ctrl.Result{}, updateErr
 		}
@@ -143,6 +204,11 @@ func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJ
 	// Update status with both job name and phase in single call
 	ansibleJob.Status.JobName = job.Name
 	ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhaseRunning
+	ansibleJob.Status.ObservedGeneration = ansibleJob.Generation
+
+	// Update conditions for running phase
+	r.updateConditionsForPhase(ansibleJob, maintencev1alpha1.AnsibleJobPhaseRunning)
+
 	if statusUpdateErr := r.Status().Update(ctx, ansibleJob); statusUpdateErr != nil {
 		return ctrl.Result{}, statusUpdateErr
 	}
@@ -187,6 +253,11 @@ func (r *AnsibleJobReconciler) monitorJob(ctx context.Context, ansibleJob *maint
 		ansibleJob.Status.Phase = newPhase
 		ansibleJob.Status.CompletionTime = completionTime
 		ansibleJob.Status.Message = message
+		ansibleJob.Status.ObservedGeneration = ansibleJob.Generation
+
+		// Update conditions for the new phase
+		r.updateConditionsForPhase(ansibleJob, newPhase)
+
 		statusChanged = true
 	}
 

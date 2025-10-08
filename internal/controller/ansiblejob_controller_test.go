@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 )
@@ -150,6 +151,16 @@ func (m *mockJobClient) Get(ctx context.Context, key client.ObjectKey, obj clien
 		return errors.New("job not found")
 	}
 	return m.Client.Get(ctx, key, obj, opts...)
+}
+
+// findCondition finds a condition by type in the conditions slice
+func findCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
+			return &conditions[i]
+		}
+	}
+	return nil
 }
 
 var _ = Describe("AnsibleJob Controller", func() {
@@ -334,6 +345,83 @@ var _ = Describe("AnsibleJob Controller", func() {
 				}
 				return string(ansibleJob.Status.Phase)
 			}, timeout, interval).Should(Equal(string(maintencev1alpha1.AnsibleJobPhaseSucceeded)))
+
+			By("Refetching AnsibleJob to get latest conditions")
+			err = k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking that conditions are properly set")
+			Expect(ansibleJob.Status.Conditions).NotTo(BeEmpty())
+
+			// Check Ready condition
+			readyCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionReady)
+			Expect(readyCondition).NotTo(BeNil())
+			Expect(readyCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(readyCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobSucceeded))
+
+			// Check Progressing condition
+			progressingCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionProgressing)
+			Expect(progressingCondition).NotTo(BeNil())
+			Expect(progressingCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(progressingCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobSucceeded))
+
+			// Check Succeeded condition
+			succeededCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionSucceeded)
+			Expect(succeededCondition).NotTo(BeNil())
+			Expect(succeededCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(succeededCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobSucceeded))
+
+			// Check ObservedGeneration
+			Expect(ansibleJob.Status.ObservedGeneration).To(Equal(ansibleJob.Generation))
+		})
+
+		It("should set correct conditions during running phase", func() {
+			By("Creating and reconciling the AnsibleJob to running state")
+			controllerReconciler := &AnsibleJobReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			// Initialize
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create job (will be in running state)
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking that running conditions are properly set")
+			ansibleJob := &maintencev1alpha1.AnsibleJob{}
+			Eventually(func() string {
+				getErr := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
+				if getErr != nil {
+					return ""
+				}
+				return string(ansibleJob.Status.Phase)
+			}, timeout, interval).Should(Equal(string(maintencev1alpha1.AnsibleJobPhaseRunning)))
+
+			By("Refetching AnsibleJob to get latest conditions")
+			err = k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Check Ready condition (should be False during running)
+			readyCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionReady)
+			Expect(readyCondition).NotTo(BeNil())
+			Expect(readyCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobRunning))
+
+			// Check Progressing condition (should be True during running)
+			progressingCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionProgressing)
+			Expect(progressingCondition).NotTo(BeNil())
+			Expect(progressingCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(progressingCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobRunning))
+
+			// Check ObservedGeneration
+			Expect(ansibleJob.Status.ObservedGeneration).To(Equal(ansibleJob.Generation))
 		})
 	})
 
@@ -2193,6 +2281,109 @@ var _ = Describe("AnsibleJob Controller", func() {
 				}
 				duration := reconciler.calculateRequeueAfter(ansibleJob)
 				Expect(duration).To(Equal(60 * time.Second))
+			})
+		})
+
+		Describe("SetupWithManager", func() {
+			It("should setup controller with manager successfully", func() {
+				// Create a test manager
+				scheme := runtime.NewScheme()
+				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(batchv1.AddToScheme(scheme)).To(Succeed())
+				Expect(corev1.AddToScheme(scheme)).To(Succeed())
+
+				mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+					Scheme: scheme,
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				reconciler := &AnsibleJobReconciler{
+					Client: mgr.GetClient(),
+					Scheme: mgr.GetScheme(),
+				}
+
+				err = reconciler.SetupWithManager(mgr)
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Describe("Edge cases for better coverage", func() {
+			It("should handle createKubernetesJob with SetControllerReference failure", func() {
+				// Create a test scheme without the necessary types to trigger SetControllerReference failure
+				incorrectScheme := runtime.NewScheme()
+				// Don't add the required types to trigger an error
+
+				reconciler := &AnsibleJobReconciler{
+					Client: k8sClient,
+					Scheme: incorrectScheme, // Use incorrect scheme
+				}
+
+				ansibleJob := CreateTestAnsibleJob("test-job", "default")
+				ansibleJob.Spec.Inventory.Inline = ""  // No inline inventory to skip ConfigMap creation
+
+				By("Calling createKubernetesJob with incorrect scheme")
+				_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+
+				By("Expecting SetControllerReference to fail")
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no kind is registered for the type"))
+			})
+
+			It("should handle calculateBackoffDelay edge case with retryCount=21", func() {
+				scheme := runtime.NewScheme()
+				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+
+				reconciler := &AnsibleJobReconciler{
+					Client: k8sClient,
+					Scheme: scheme,
+				}
+
+				// Test the edge case where retryCount > 20
+				delay := reconciler.calculateBackoffDelay(21)
+				Expect(delay).To(Equal(5 * time.Minute))
+			})
+
+			It("should handle calculateBackoffDelay with exactly retryCount=20", func() {
+				scheme := runtime.NewScheme()
+				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+
+				reconciler := &AnsibleJobReconciler{
+					Client: k8sClient,
+					Scheme: scheme,
+				}
+
+				// Test the boundary case where retryCount = 20
+				delay := reconciler.calculateBackoffDelay(20)
+				Expect(delay).To(Equal(5 * time.Minute)) // Should be capped at 5 minutes
+			})
+
+			It("should handle createInventoryConfigMap with Create failure", func() {
+				scheme := runtime.NewScheme()
+				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(corev1.AddToScheme(scheme)).To(Succeed())
+
+				// Create a mock client that fails on ConfigMap creation
+				fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+				mockClient := &mockConfigMapCreateFailingClient{
+					Client:     fakeClient,
+					shouldFail: true,
+					failError:  errors.New("mock create failure"),
+				}
+
+				reconciler := &AnsibleJobReconciler{
+					Client: mockClient,
+					Scheme: scheme,
+				}
+
+				ansibleJob := CreateTestAnsibleJob("test-job", "default")
+				ansibleJob.Spec.Inventory.Inline = "test-inventory"
+
+				By("Calling createInventoryConfigMap with failing Create")
+				err := reconciler.createInventoryConfigMap(ctx, ansibleJob)
+
+				By("Expecting ConfigMap creation to fail")
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("mock create failure"))
 			})
 		})
 	})

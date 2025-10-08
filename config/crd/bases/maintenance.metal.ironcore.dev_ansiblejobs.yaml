@@ -267,6 +267,11 @@ spec:
               message:
                 description: Message provides additional details about the job status
                 type: string
+              observedGeneration:
+                description: ObservedGeneration reflects the generation of the most
+                  recently observed AnsibleJob
+                format: int64
+                type: integer
               phase:
                 description: Phase represents the current phase of the job
                 type: string

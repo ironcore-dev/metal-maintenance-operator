@@ -140,6 +140,35 @@ spec:
 			}
 			Eventually(verifyKubernetesJobExists, timeout, interval).Should(Succeed())
 
+			By("Verifying that conditions are set correctly")
+			verifyConditions := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "ansiblejob", ansibleJobName, "-n", testNamespace,
+					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// During running phase, Ready should be False (Kubernetes convention)
+				if strings.TrimSpace(output) != "" {
+					readyStatus := strings.TrimSpace(output)
+
+					// Get current phase to determine expected condition
+					phaseCmd := exec.Command("kubectl", "get", "ansiblejob", ansibleJobName, "-n", testNamespace,
+						"-o", "jsonpath={.status.phase}",
+						"--context", "kind-maintenance-operator-test-e2e")
+					phaseOutput, phaseErr := utils.Run(phaseCmd)
+					g.Expect(phaseErr).NotTo(HaveOccurred())
+					currentPhase := strings.TrimSpace(phaseOutput)
+
+					if currentPhase == "Running" {
+						g.Expect(readyStatus).To(Equal("False"), "Ready condition should be False during running phase")
+					} else if currentPhase == "Succeeded" {
+						g.Expect(readyStatus).To(Equal("True"), "Ready condition should be True when succeeded")
+					}
+				}
+			}
+			Eventually(verifyConditions, timeout, interval).Should(Succeed())
+
 			By("Cleaning up the manifest file")
 			os.Remove(manifestFile)
 		})
@@ -466,7 +495,7 @@ spec:
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				// The job should be created and show some status
-				g.Expect(output).To(MatchRegexp(`(phase:|status:`), "AnsibleJob should have status information")
+				g.Expect(output).To(MatchRegexp(`(phase:|status:)`), "AnsibleJob should have status information")
 			}
 			Eventually(verifyJobProgress, timeout, interval).Should(Succeed())
 
@@ -571,7 +600,7 @@ spec:
 				g.Expect(output).To(ContainSubstring("metadata:"), "AnsibleJob should be created")
 				// Check if there's any status indication
 				if strings.Contains(output, "status:") {
-					g.Expect(output).To(MatchRegexp(`(phase:|message:|conditions:`), "AnsibleJob should have status information")
+					g.Expect(output).To(MatchRegexp(`(phase:|message:|conditions:)`), "AnsibleJob should have status information")
 				}
 			}
 			Eventually(verifyMissingConfigMapHandling, timeout, interval).Should(Succeed())

@@ -30,3 +30,7 @@ go.work
 __pycache__/
 *.pyc
 *.pyo
+
+# Coverage reports
+cover*.out
+cover*.html

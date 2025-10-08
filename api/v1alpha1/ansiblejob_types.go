@@ -147,6 +147,10 @@ type AnsibleJobStatus struct {
 	// +optional
 	Phase AnsibleJobPhase `json:"phase,omitempty"`
 
+	// ObservedGeneration reflects the generation of the most recently observed AnsibleJob
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// JobName is the name of the created Kubernetes Job
 	// +optional
 	JobName string `json:"jobName,omitempty"`
@@ -192,6 +196,48 @@ const (
 	AnsibleJobPhaseSucceeded AnsibleJobPhase = "Succeeded"
 	// AnsibleJobPhaseFailed indicates the job failed
 	AnsibleJobPhaseFailed AnsibleJobPhase = "Failed"
+)
+
+// Standard condition types following Kubernetes conventions
+const (
+	// AnsibleJobConditionReady indicates whether the AnsibleJob is ready to execute
+	AnsibleJobConditionReady = "Ready"
+
+	// AnsibleJobConditionProgressing indicates whether the AnsibleJob is actively progressing
+	AnsibleJobConditionProgressing = "Progressing"
+
+	// AnsibleJobConditionSucceeded indicates whether the AnsibleJob completed successfully
+	AnsibleJobConditionSucceeded = "Succeeded"
+
+	// AnsibleJobConditionFailed indicates whether the AnsibleJob failed
+	AnsibleJobConditionFailed = "Failed"
+)
+
+// Condition reasons following Kubernetes naming conventions
+const (
+	// ReasonJobCreated indicates the Kubernetes Job has been created
+	ReasonJobCreated = "JobCreated"
+
+	// ReasonJobRunning indicates the Job is actively running
+	ReasonJobRunning = "JobRunning"
+
+	// ReasonJobSucceeded indicates the Job completed successfully
+	ReasonJobSucceeded = "JobSucceeded"
+
+	// ReasonJobFailed indicates the Job failed to complete
+	ReasonJobFailed = "JobFailed"
+
+	// ReasonInvalidSpec indicates the AnsibleJob specification is invalid
+	ReasonInvalidSpec = "InvalidSpec"
+
+	// ReasonResourceError indicates an error creating required resources
+	ReasonResourceError = "ResourceError"
+
+	// ReasonInventoryError indicates an error with the inventory configuration
+	ReasonInventoryError = "InventoryError"
+
+	// ReasonPlaybookError indicates an error with the playbook execution
+	ReasonPlaybookError = "PlaybookError"
 )
 
 // AnsibleResults contains the results from the ansible execution
