@@ -16,10 +16,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	ctrl "sigs.k8s.io/controller-runtime"
 
 	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 )
@@ -2319,7 +2319,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 				}
 
 				ansibleJob := CreateTestAnsibleJob("test-job", "default")
-				ansibleJob.Spec.Inventory.Inline = ""  // No inline inventory to skip ConfigMap creation
+				ansibleJob.Spec.Inventory.Inline = "" // No inline inventory to skip ConfigMap creation
 
 				By("Calling createKubernetesJob with incorrect scheme")
 				_, err := reconciler.createKubernetesJob(ctx, ansibleJob)

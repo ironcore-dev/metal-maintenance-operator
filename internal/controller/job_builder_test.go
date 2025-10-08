@@ -443,7 +443,7 @@ var _ = Describe("Job Builder", func() {
 					volumes := reconciler.createVolumes(ansibleJob)
 
 					// Should only include runner-workspace and tmp volumes
-					Expect(len(volumes)).To(Equal(2))
+					Expect(volumes).To(HaveLen(2))
 
 					volumeNames := make([]string, len(volumes))
 					for i, vol := range volumes {
@@ -543,7 +543,7 @@ var _ = Describe("Job Builder", func() {
 						Spec: maintencev1alpha1.AnsibleJobSpec{
 							Playbook:     "test.yml",
 							PlaybookRepo: "https://github.com/test/repo.git",
-							Inventory: maintencev1alpha1.AnsibleInventory{
+							Inventory:    maintencev1alpha1.AnsibleInventory{
 								// No inline, ConfigMapRef, or SecretRef
 							},
 						},
@@ -598,13 +598,13 @@ var _ = Describe("Job Builder", func() {
 					// Should have custom resource requirements
 					Expect(container.Resources.Limits).NotTo(BeEmpty())
 					Expect(container.Resources.Requests).NotTo(BeEmpty())
-					
+
 					// Check specific resource values
 					cpuLimit := container.Resources.Limits[corev1.ResourceCPU]
 					memLimit := container.Resources.Limits[corev1.ResourceMemory]
 					cpuRequest := container.Resources.Requests[corev1.ResourceCPU]
 					memRequest := container.Resources.Requests[corev1.ResourceMemory]
-					
+
 					Expect(cpuLimit.String()).To(Equal("2"))
 					Expect(memLimit.String()).To(Equal("4Gi"))
 					Expect(cpuRequest.String()).To(Equal("1"))
@@ -636,7 +636,7 @@ var _ = Describe("Job Builder", func() {
 					memRequest := container.Resources.Requests[corev1.ResourceMemory]
 					cpuLimit := container.Resources.Limits[corev1.ResourceCPU]
 					memLimit := container.Resources.Limits[corev1.ResourceMemory]
-					
+
 					Expect(cpuRequest.String()).To(Equal("100m"))
 					Expect(memRequest.String()).To(Equal("256Mi"))
 					Expect(cpuLimit.String()).To(Equal("500m"))
@@ -666,7 +666,7 @@ var _ = Describe("Job Builder", func() {
 					memRequest := container.Resources.Requests[corev1.ResourceMemory]
 					cpuLimit := container.Resources.Limits[corev1.ResourceCPU]
 					memLimit := container.Resources.Limits[corev1.ResourceMemory]
-					
+
 					Expect(cpuRequest.String()).To(Equal("100m"))
 					Expect(memRequest.String()).To(Equal("256Mi"))
 					Expect(cpuLimit.String()).To(Equal("500m"))

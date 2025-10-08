@@ -160,9 +160,10 @@ spec:
 					g.Expect(phaseErr).NotTo(HaveOccurred())
 					currentPhase := strings.TrimSpace(phaseOutput)
 
-					if currentPhase == "Running" {
+					switch currentPhase {
+					case "Running":
 						g.Expect(readyStatus).To(Equal("False"), "Ready condition should be False during running phase")
-					} else if currentPhase == "Succeeded" {
+					case "Succeeded":
 						g.Expect(readyStatus).To(Equal("True"), "Ready condition should be True when succeeded")
 					}
 				}
