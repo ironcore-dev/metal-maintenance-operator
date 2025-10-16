@@ -14,7 +14,7 @@ resources:
   controller: true
   domain: metal.ironcore.dev
   group: console.maintenance
-  kind: ServerManagementConsole
+  kind: ServerManagementConsoleSet
   path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
   version: v1alpha1
 version: "3"
