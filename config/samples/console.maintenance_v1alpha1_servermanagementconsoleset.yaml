@@ -1,9 +1,9 @@
 apiVersion: console.maintenance.metal.ironcore.dev/v1alpha1
-kind: ServerManagementConsole
+kind: ServerManagementConsoleSet
 metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: servermanagementconsole-sample
+  name: servermanagementconsoleset-sample
 spec:
   # TODO(user): Add fields here

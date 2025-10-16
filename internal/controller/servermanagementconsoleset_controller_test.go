@@ -27,11 +27,11 @@ var _ = Describe("ServerManagementConsoleSet Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		ServerManagementConsoleSet := &consolemaintenancev1alpha1.ServerManagementConsoleSet{}
+		servermanagementconsoleset := &consolemaintenancev1alpha1.ServerManagementConsoleSet{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind ServerManagementConsoleSet")
-			err := k8sClient.Get(ctx, typeNamespacedName, ServerManagementConsoleSet)
+			err := k8sClient.Get(ctx, typeNamespacedName, servermanagementconsoleset)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &consolemaintenancev1alpha1.ServerManagementConsoleSet{
 					ObjectMeta: metav1.ObjectMeta{

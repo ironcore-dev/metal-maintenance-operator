@@ -11,17 +11,17 @@ metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: servermanagementconsole-admin-role
+  name: servermanagementconsoleset-admin-role
 rules:
 - apiGroups:
   - console.maintenance.metal.ironcore.dev
   resources:
-  - servermanagementconsoles
+  - servermanagementconsolesets
   verbs:
   - '*'
 - apiGroups:
   - console.maintenance.metal.ironcore.dev
   resources:
-  - servermanagementconsoles/status
+  - servermanagementconsolesets/status
   verbs:
   - get

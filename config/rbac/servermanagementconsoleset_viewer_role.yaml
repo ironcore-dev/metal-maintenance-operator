@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: servermanagementconsole-viewer-role
+  name: servermanagementconsoleset-viewer-role
 rules:
 - apiGroups:
   - console.maintenance.metal.ironcore.dev
   resources:
-  - servermanagementconsoles
+  - servermanagementconsolesets
   verbs:
   - get
   - list
@@ -24,6 +24,6 @@ rules:
 - apiGroups:
   - console.maintenance.metal.ironcore.dev
   resources:
-  - servermanagementconsoles/status
+  - servermanagementconsolesets/status
   verbs:
   - get
