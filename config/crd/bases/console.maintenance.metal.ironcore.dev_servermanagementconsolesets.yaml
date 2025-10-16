@@ -1,0 +1,125 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: servermanagementconsolesets.console.maintenance.metal.ironcore.dev
+spec:
+  group: console.maintenance.metal.ironcore.dev
+  names:
+    kind: ServerManagementConsoleSet
+    listKind: ServerManagementConsoleSetList
+    plural: servermanagementconsolesets
+    singular: servermanagementconsoleset
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ServerManagementConsoleSet is the Schema for the ServerManagementConsoleSets
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ServerManagementConsoleSetSpec defines the desired state
+              of ServerManagementConsoleSet.
+            properties:
+              consoleURL:
+                description: ConsoleURL is the URL of the server management console.
+                type: string
+              manufacturer:
+                description: Manufacturer is the manufacturer of the server management
+                  console (e.g., "Dell", "HPE", "Lenovo").
+                type: string
+              serverSelector:
+                description: ServerSelector specifies a label selector to identify
+                  the servers that are to be selected.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - consoleURL
+            - manufacturer
+            - serverSelector
+            type: object
+          status:
+            description: ServerManagementConsoleSetStatus defines the observed state
+              of ServerManagementConsoleSet.
+            properties:
+              managedServers:
+                format: int32
+                type: integer
+              state:
+                description: State represents the current state of the server management
+                  console.
+                type: string
+              totalServers:
+                format: int32
+                type: integer
+              unmanagedServers:
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
