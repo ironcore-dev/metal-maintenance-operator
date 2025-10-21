@@ -7,6 +7,7 @@ import (
 	"context"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -63,13 +64,31 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 		logger.Error(err, "unable to list servers")
 		return ctrl.Result{}, err
 	}
-
-	consoleClient, err := servermanagement.New(console.Spec.Manufacturer, servermanagement.ClientOptions{})
+	secret, err := r.getConsoleSecret(ctx, console)
+	if err != nil {
+		logger.Error(err, "unable to get console credential secret")
+		return ctrl.Result{}, err
+	}
+	consoleClient, err := servermanagement.New(console.Spec.Manufacturer, servermanagement.ClientOptions{
+		Endpoint: console.Spec.ConsoleURL,
+		Username: string(secret.Data["username"]),
+		Password: string(secret.Data["password"]),
+		Token:    string(secret.Data["token"]),
+	})
 	if err != nil {
 		logger.Error(err, "unable to create server management console client")
 		return ctrl.Result{}, err
 	}
+	token, err := consoleClient.GetAuthToken()
+	if err != nil {
+		logger.Error(err, "unable to get auth token from console")
+		return ctrl.Result{}, err
+	}
 
+	if err := r.updateSecretToken(ctx, secret, token); err != nil {
+		logger.Error(err, "unable to update console credential secret with token")
+		return ctrl.Result{}, err
+	}
 	managedServers, err := consoleClient.ListServers()
 	if err != nil {
 		logger.Error(err, "unable to list servers from console")
@@ -80,6 +99,11 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 		bmc := metalv1alpha1.BMC{}
 		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &bmc); err != nil {
 			logger.Error(err, "unable to get BMC for server", "server", server.Name)
+			continue
+		}
+		bmcSecret := metalv1alpha1.BMCSecret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: bmc.Spec.BMCSecretRef.Name, Namespace: bmc.Namespace}, &bmcSecret); err != nil {
+			logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
 			continue
 		}
 		found := false
@@ -101,6 +125,46 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 
 func (r *ServerManagementConsoleSetReconciler) delete(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagementConsoleSet) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
+}
+
+func (r *ServerManagementConsoleSetReconciler) getConsoleSecret(
+	ctx context.Context,
+	console *consolemaintenancev1alpha1.ServerManagementConsoleSet,
+) (*corev1.Secret, error) {
+	secret := &corev1.Secret{}
+	var secretName string
+	switch console.Spec.Manufacturer {
+	case "Dell":
+		secretName = console.Spec.DellCredentialSecretRef
+	case "Lenovo":
+		secretName = console.Spec.LenovoCredentialSecretRef
+	case "HPE":
+		secretName = console.Spec.HPECredentialSecretRef
+	default:
+		return nil, nil
+	}
+	if secretName == "" {
+		return nil, nil
+	}
+	if err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: console.Namespace}, secret); err != nil {
+		log.FromContext(ctx).Error(err, "unable to get console credential secret")
+		return nil, err
+	}
+	return secret, nil
+}
+
+func (r *ServerManagementConsoleSetReconciler) updateSecretToken(
+	ctx context.Context,
+	secret *corev1.Secret,
+	token string,
+) error {
+	secretBase := secret.DeepCopy()
+	secret.Data["token"] = []byte(token)
+	if err := r.Patch(ctx, secret, client.MergeFrom(secretBase)); err != nil {
+		log.FromContext(ctx).Error(err, "unable to update console credential secret with token")
+		return err
+	}
+	return nil
 }
 
 func (r *ServerManagementConsoleSetReconciler) updateStatus(

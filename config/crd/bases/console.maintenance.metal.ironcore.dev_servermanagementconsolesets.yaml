@@ -44,6 +44,18 @@ spec:
               consoleURL:
                 description: ConsoleURL is the URL of the server management console.
                 type: string
+              dellCredentialSecretRef:
+                description: DellCredentialSecretRef references the secret containing
+                  Dell credentials.
+                type: string
+              hpeCredentialSecretRef:
+                description: HPECredentialSecretRef references the secret containing
+                  HPE credentials.
+                type: string
+              lenovoCredentialSecretRef:
+                description: LenovoCredentialSecretRef references the secret containing
+                  Lenovo credentials.
+                type: string
               manufacturer:
                 description: Manufacturer is the manufacturer of the server management
                   console (e.g., "Dell", "HPE", "Lenovo").

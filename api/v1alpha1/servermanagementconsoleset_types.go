@@ -19,6 +19,12 @@ type ServerManagementConsoleSetSpec struct {
 	ConsoleURL string `json:"consoleURL"`
 	// Manufacturer is the manufacturer of the server management console (e.g., "Dell", "HPE", "Lenovo").
 	Manufacturer string `json:"manufacturer"`
+	// LenovoCredentialSecretRef references the secret containing Lenovo credentials.
+	LenovoCredentialSecretRef string `json:"lenovoCredentialSecretRef,omitempty"`
+	// DellCredentialSecretRef references the secret containing Dell credentials.
+	DellCredentialSecretRef string `json:"dellCredentialSecretRef,omitempty"`
+	// HPECredentialSecretRef references the secret containing HPE credentials.
+	HPECredentialSecretRef string `json:"hpeCredentialSecretRef,omitempty"`
 }
 
 type ServerManagementConsoleSetState string

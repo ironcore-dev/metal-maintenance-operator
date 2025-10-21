@@ -151,7 +151,7 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP) error {
 	return nil
 }
 
-func (c *DellClient) RemoveServer() error {
+func (c *DellClient) RemoveServer(hostname string) error {
 	// Implement Dell-specific logic here
 	return nil
 }
@@ -176,11 +176,27 @@ func (c *DellClient) ListServers() ([]Device, error) {
 
 func (c *DellClient) GetAuthToken() (string, error) {
 	authURL := c.client.parsedURL.String() + "/api/SessionService/Sessions"
+	if c.client.token != "" {
+		// check token still valid
+		req, err := http.NewRequest("GET", authURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("error creating auth validation request: %w", err)
+		}
+		_, err = c.client.DoRequest(req, []int{http.StatusOK})
+		if err != nil {
+			return c.createToken()
+		}
+		return c.client.token, nil
+	}
+	return c.createToken()
+}
+
+func (c *DellClient) createToken() (string, error) {
+	authURL := c.client.parsedURL.String() + "/api/SessionService/Sessions"
 	authPayload := AuthRequest{
 		UserName: c.client.username,
 		Password: c.client.password,
 	}
-
 	payloadBytes, err := json.Marshal(authPayload)
 	if err != nil {
 		return "", fmt.Errorf("error marshalling auth payload: %w", err)

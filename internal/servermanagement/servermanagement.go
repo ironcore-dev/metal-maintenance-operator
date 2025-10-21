@@ -5,19 +5,21 @@ package servermanagement
 
 import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 )
 
 // Device represents a single device returned from the API
 type Device struct {
 	ID           int    `json:"Id"`
 	Name         string `json:"Name"`
+	Hostname     string `json:"Hostname"`
 	Model        string `json:"Model"`
 	HealthStatus int    `json:"HealthStatus"` // 4000 = OK, 4002 = Warning, etc.
 }
 
 type ServerManagementConsoleInterface interface {
 	ImportServer(hostname string, IP metalv1alpha1.IP) error
-	RemoveServer() error
+	RemoveServer(hostname string) error
 	ListServers() ([]Device, error)
 	GetAuthToken() (string, error)
 }
@@ -31,14 +33,14 @@ func New(manufacturer string, options ClientOptions) (console *ServerManagementC
 	console = &ServerManagementConsole{}
 	console.Manufacturer = manufacturer
 	switch manufacturer {
-	case "Dell":
+	case string(bmc.ManufacturerDell):
 		console.ServerManagementConsoleInterface, err = NewDellClient(options)
 		return
-	case "Lenovo":
-		// Not implemented yet
+	case string(bmc.ManufacturerLenovo):
+		console.ServerManagementConsoleInterface, err = NewLenovoClient(options)
 		return
-	case "HPE":
-		// Not implemented yet
+	case string(bmc.ManufacturerHPE):
+		console.ServerManagementConsoleInterface, err = NewHPEClient(options)
 		return
 	}
 	return

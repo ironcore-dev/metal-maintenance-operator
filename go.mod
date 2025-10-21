@@ -3,6 +3,7 @@ module github.com/ironcore-dev/maintenance-operator
 go 1.24.0
 
 require (
+	github.com/HewlettPackard/oneview-golang v10.2.0+incompatible
 	github.com/ironcore-dev/metal-operator v0.0.0-20251010134956-f14ae88c827b
 	github.com/onsi/ginkgo/v2 v2.26.0
 	github.com/onsi/gomega v1.38.2
@@ -20,6 +21,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/docker/machine v0.16.2 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
