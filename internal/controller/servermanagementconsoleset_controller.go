@@ -5,12 +5,14 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -69,23 +71,13 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 		logger.Error(err, "unable to get console credential secret")
 		return ctrl.Result{}, err
 	}
-	consoleClient, err := servermanagement.New(console.Spec.Manufacturer, servermanagement.ClientOptions{
-		Endpoint: console.Spec.ConsoleURL,
-		Username: string(secret.Data["username"]),
-		Password: string(secret.Data["password"]),
-		Token:    string(secret.Data["token"]),
-	})
+	consoleClient, err := r.createConsoleClient(ctx, console, secret)
 	if err != nil {
 		logger.Error(err, "unable to create server management console client")
 		return ctrl.Result{}, err
 	}
-	token, err := consoleClient.GetAuthToken()
-	if err != nil {
-		logger.Error(err, "unable to get auth token from console")
-		return ctrl.Result{}, err
-	}
 
-	if err := r.updateSecretToken(ctx, secret, token); err != nil {
+	if err := r.updateSecretToken(ctx, secret, consoleClient); err != nil {
 		logger.Error(err, "unable to update console credential secret with token")
 		return ctrl.Result{}, err
 	}
@@ -124,7 +116,54 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 }
 
 func (r *ServerManagementConsoleSetReconciler) delete(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagementConsoleSet) (ctrl.Result, error) {
+	serverList, err := r.getServerList(ctx, console)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	var errs []error
+	client, err := r.createConsoleClient(ctx, console, nil)
+	for _, server := range serverList.Items {
+		if err := client.RemoveServer(server.Spec.BMC.Address); err != nil {
+			log.FromContext(ctx).Error(err, "unable to remove server from console", "server", server.Name)
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return ctrl.Result{}, errors.NewAggregate(errs)
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *ServerManagementConsoleSetReconciler) createConsoleClient(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagementConsoleSet, secret *corev1.Secret) (*servermanagement.ServerManagementConsole, error) {
+	var err error
+	if secret == nil {
+		secret, err = r.getConsoleSecret(ctx, console)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var ok bool
+	var username []byte
+	// check is username/password/token are present in secret
+	if username, ok = secret.Data["username"]; !ok {
+		return nil, fmt.Errorf("username not found in console credential secret")
+	}
+	var password []byte
+	if password, ok = secret.Data["password"]; !ok {
+		return nil, fmt.Errorf("password not found in console credential secret")
+	}
+	var token []byte
+	if token, ok = secret.Data["token"]; !ok {
+		token = []byte("")
+	}
+
+	return servermanagement.New(console.Spec.Manufacturer, servermanagement.ClientOptions{
+		Endpoint: console.Spec.ConsoleURL,
+		Username: string(username),
+		Password: string(password),
+		Token:    string(token),
+	})
 }
 
 func (r *ServerManagementConsoleSetReconciler) getConsoleSecret(
@@ -153,11 +192,32 @@ func (r *ServerManagementConsoleSetReconciler) getConsoleSecret(
 	return secret, nil
 }
 
+func (r *ServerManagementConsoleSetReconciler) getServerList(
+	ctx context.Context,
+	console *consolemaintenancev1alpha1.ServerManagementConsoleSet,
+) (*metalv1alpha1.ServerList, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&console.Spec.ServerSelector)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "invalid label selector")
+		return nil, err
+	}
+	serverList := &metalv1alpha1.ServerList{}
+	if err := r.List(ctx, serverList, &client.ListOptions{LabelSelector: selector}); err != nil {
+		log.FromContext(ctx).Error(err, "unable to list servers")
+		return nil, err
+	}
+	return serverList, nil
+}
+
 func (r *ServerManagementConsoleSetReconciler) updateSecretToken(
 	ctx context.Context,
 	secret *corev1.Secret,
-	token string,
+	consoleClient *servermanagement.ServerManagementConsole,
 ) error {
+	token, err := consoleClient.GetAuthToken()
+	if err != nil {
+		return err
+	}
 	secretBase := secret.DeepCopy()
 	secret.Data["token"] = []byte(token)
 	if err := r.Patch(ctx, secret, client.MergeFrom(secretBase)); err != nil {
