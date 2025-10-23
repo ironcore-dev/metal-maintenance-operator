@@ -454,7 +454,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 
@@ -818,7 +818,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-1",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[webservers]\nweb1.example.com\nweb2.example.com",
 					},
@@ -839,7 +839,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-2",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "",
 					},
@@ -860,7 +860,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-3",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 					// No Inventory field specified
 				},
 			}
@@ -888,7 +888,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-initialize",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{
+						Name:       "site.yml",
+						Repository: "https://github.com/test/playbooks.git",
+					},
 				},
 			}
 		})
@@ -1025,7 +1028,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "minimal.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{
+						Name:       "minimal.yml",
+						Repository: "https://github.com/test/minimal.git",
+					},
 					// No inventory, roles, extra vars, etc.
 				},
 			}
@@ -1059,7 +1065,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1123,7 +1129,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1186,7 +1192,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1223,7 +1229,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1260,7 +1266,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1309,7 +1315,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-create-job",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 			}
 		})
@@ -1724,7 +1730,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
 						Resources: &corev1.ResourceRequirements{
 							Limits: corev1.ResourceList{
@@ -1754,7 +1760,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					Namespace: "default",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 					// No image specified
 				},
 			}
@@ -1789,7 +1795,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-monitor",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 				},
 				Status: ansiblev1alpha1.AnsibleJobStatus{
 					Phase:   ansiblev1alpha1.AnsibleJobPhaseRunning,
@@ -2013,7 +2019,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					UID:       "test-uid-configmap",
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
-					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml", Repository: "https://github.com/test/playbooks.git"},
 					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[webservers]\nweb1.example.com\nweb2.example.com",
 					},
