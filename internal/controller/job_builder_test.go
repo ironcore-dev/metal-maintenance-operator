@@ -10,13 +10,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 )
 
 var _ = Describe("Job Builder", func() {
 	var (
 		reconciler *AnsibleJobReconciler
-		ansibleJob *maintencev1alpha1.AnsibleJob
+		ansibleJob *ansiblev1alpha1.AnsibleJob
 		scheme     *runtime.Scheme
 	)
 
@@ -26,19 +26,23 @@ var _ = Describe("Job Builder", func() {
 			Scheme: scheme,
 		}
 
-		ansibleJob = &maintencev1alpha1.AnsibleJob{
+		ansibleJob = &ansiblev1alpha1.AnsibleJob{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-job",
 				Namespace: "default",
 			},
-			Spec: maintencev1alpha1.AnsibleJobSpec{
-				Playbook:     "site.yml",
-				PlaybookRepo: "https://github.com/test/playbooks.git",
-				RolesRepo:    "https://github.com/test/roles.git",
-				Inventory: maintencev1alpha1.AnsibleInventory{
+			Spec: ansiblev1alpha1.AnsibleJobSpec{
+				Playbook: ansiblev1alpha1.PlaybookSpec{
+					Name:       "site.yml",
+					Repository: "https://github.com/test/playbooks.git",
+				},
+				Roles: &ansiblev1alpha1.RolesSpec{
+					Repository: "https://github.com/test/roles.git",
+				},
+				Inventory: ansiblev1alpha1.AnsibleInventory{
 					Inline: "[servers]\nweb1 ansible_host=10.0.1.10",
 				},
-				ExtraVars: []maintencev1alpha1.KeyValue{
+				ExtraVars: []ansiblev1alpha1.KeyValue{
 					{Name: "test_var", Value: "test_value"},
 					{Name: "environment", Value: "test"},
 				},
@@ -107,16 +111,16 @@ var _ = Describe("Job Builder", func() {
 		})
 
 		It("should handle custom job template settings", func() {
-			ansibleJob.Spec.JobTemplate = &maintencev1alpha1.JobTemplateSpec{
+			ansibleJob.Spec.JobTemplate = &ansiblev1alpha1.JobTemplateSpec{
 				Image:              "custom/ansible-runner:v1.0",
 				ServiceAccountName: "custom-sa",
 				BackoffLimit:       &[]int32{5}[0],
-				Resources: &maintencev1alpha1.ResourceRequirements{
-					Limits: []maintencev1alpha1.ResourceQuantity{
+				Resources: &ansiblev1alpha1.ResourceRequirements{
+					Limits: []ansiblev1alpha1.ResourceQuantity{
 						{Name: "cpu", Quantity: "2"},
 						{Name: "memory", Quantity: "4Gi"},
 					},
-					Requests: []maintencev1alpha1.ResourceQuantity{
+					Requests: []ansiblev1alpha1.ResourceQuantity{
 						{Name: "cpu", Quantity: "1"},
 						{Name: "memory", Quantity: "2Gi"},
 					},
@@ -179,8 +183,8 @@ var _ = Describe("Job Builder", func() {
 		})
 
 		It("should handle git ref in init container git clone", func() {
-			ansibleJob.Spec.PlaybookGitRef = "v1.0.0"
-			ansibleJob.Spec.RolesGitRef = "v1.0.0"
+			ansibleJob.Spec.Playbook.GitRef = "v1.0.0"
+			ansibleJob.Spec.Roles.GitRef = "v1.0.0"
 
 			// Check that init container handles git checkout of specific ref
 			initContainers := reconciler.createInitContainers(ansibleJob)
@@ -191,7 +195,7 @@ var _ = Describe("Job Builder", func() {
 		})
 
 		It("should create only 1 container when no roles repo", func() {
-			ansibleJob.Spec.RolesRepo = ""
+			ansibleJob.Spec.Roles = nil
 			initContainers := reconciler.createInitContainers(ansibleJob)
 
 			Expect(initContainers).To(HaveLen(1))
@@ -207,13 +211,13 @@ var _ = Describe("Job Builder", func() {
 			})
 
 			It("should handle empty list", func() {
-				result := convertToResourceList([]maintencev1alpha1.ResourceQuantity{})
+				result := convertToResourceList([]ansiblev1alpha1.ResourceQuantity{})
 				Expect(result).NotTo(BeNil())
 				Expect(result).To(BeEmpty())
 			})
 
 			It("should convert valid resource values", func() {
-				resources := []maintencev1alpha1.ResourceQuantity{
+				resources := []ansiblev1alpha1.ResourceQuantity{
 					{Name: "cpu", Quantity: "1"},
 					{Name: "memory", Quantity: "2Gi"},
 					{Name: "storage", Quantity: "10G"},
@@ -236,7 +240,7 @@ var _ = Describe("Job Builder", func() {
 			})
 
 			It("should handle invalid resource values gracefully", func() {
-				resources := []maintencev1alpha1.ResourceQuantity{
+				resources := []ansiblev1alpha1.ResourceQuantity{
 					{Name: "cpu", Quantity: "1"},
 					{Name: "memory", Quantity: "invalid-value"},
 					{Name: "storage", Quantity: "10G"},
@@ -261,7 +265,7 @@ var _ = Describe("Job Builder", func() {
 			})
 
 			It("should handle mix of valid and invalid quantities", func() {
-				resources := []maintencev1alpha1.ResourceQuantity{
+				resources := []ansiblev1alpha1.ResourceQuantity{
 					{Name: "cpu", Quantity: "500m"},
 					{Name: "memory", Quantity: "not-a-quantity"},
 					{Name: "storage", Quantity: "1Ti"},
@@ -282,7 +286,7 @@ var _ = Describe("Job Builder", func() {
 			})
 
 			It("should handle various quantity formats", func() {
-				resources := []maintencev1alpha1.ResourceQuantity{
+				resources := []ansiblev1alpha1.ResourceQuantity{
 					{Name: "cpu", Quantity: "100m"},              // millicpu
 					{Name: "memory", Quantity: "512Mi"},          // mebibytes
 					{Name: "ephemeral-storage", Quantity: "1Gi"}, // gibibytes
@@ -326,15 +330,15 @@ var _ = Describe("Job Builder", func() {
 
 			Describe("getInitContainerImage", func() {
 				It("should return default image when none specified", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{}
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{}
 					image := getInitContainerImage(ansibleJob)
 					Expect(image).To(Equal("alpine/git@sha256:1dd70a5eed7f9b17aecd66756d138137d6818061c4fefefa5859b07f760e68fe"))
 				})
 
 				It("should return custom image when specified", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
 								InitImage: "custom-git:latest",
 							},
 						},
@@ -344,9 +348,9 @@ var _ = Describe("Job Builder", func() {
 				})
 
 				It("should handle empty JobTemplate", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							JobTemplate: &maintencev1alpha1.JobTemplateSpec{},
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							JobTemplate: &ansiblev1alpha1.JobTemplateSpec{},
 						},
 					}
 					image := getInitContainerImage(ansibleJob)
@@ -401,14 +405,14 @@ var _ = Describe("Job Builder", func() {
 
 			Describe("createVolumes edge cases", func() {
 				It("should handle multiple volume mount scenarios", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Inventory: maintencev1alpha1.AnsibleInventory{
-								ConfigMapRef: &maintencev1alpha1.ConfigMapReference{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
+								ConfigMapRef: &ansiblev1alpha1.ConfigMapReference{
 									Name: "test-configmap",
 									Key:  "hosts",
 								},
-								SecretRef: &maintencev1alpha1.SecretReference{
+								SecretRef: &ansiblev1alpha1.SecretReference{
 									Name: "test-secret",
 									Key:  "hosts",
 								},
@@ -432,9 +436,9 @@ var _ = Describe("Job Builder", func() {
 				})
 
 				It("should handle empty inventory configuration", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Inventory: maintencev1alpha1.AnsibleInventory{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								// No inline, ConfigMapRef, or SecretRef
 							},
 						},
@@ -457,18 +461,20 @@ var _ = Describe("Job Builder", func() {
 
 			Describe("createAnsibleJob edge cases", func() {
 				It("should handle JobTemplate with all nil/empty fields", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "edge-case-job",
 							Namespace: "test-namespace",
 						},
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:     "playbook.yml",
-							PlaybookRepo: "https://github.com/test/repo.git",
-							JobTemplate:  &maintencev1alpha1.JobTemplateSpec{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "playbook.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
+							JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
 								// All fields empty/nil
 							},
-							Inventory: maintencev1alpha1.AnsibleInventory{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								Inline: "test-inventory",
 							},
 						},
@@ -485,19 +491,21 @@ var _ = Describe("Job Builder", func() {
 				})
 
 				It("should handle JobTemplate with empty strings", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "empty-strings-job",
 							Namespace: "test-namespace",
 						},
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:     "playbook.yml",
-							PlaybookRepo: "https://github.com/test/repo.git",
-							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "playbook.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
+							JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
 								Image:              "", // Empty string
 								ServiceAccountName: "", // Empty string
 							},
-							Inventory: maintencev1alpha1.AnsibleInventory{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								Inline: "test-inventory",
 							},
 						},
@@ -513,16 +521,18 @@ var _ = Describe("Job Builder", func() {
 
 				It("should handle zero timeout correctly", func() {
 					timeout := int32(0)
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "zero-timeout-job",
 							Namespace: "test-namespace",
 						},
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:       "playbook.yml",
-							PlaybookRepo:   "https://github.com/test/repo.git",
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "playbook.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
 							TimeoutSeconds: &timeout,
-							Inventory: maintencev1alpha1.AnsibleInventory{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								Inline: "test-inventory",
 							},
 						},
@@ -539,11 +549,13 @@ var _ = Describe("Job Builder", func() {
 
 			Describe("createAnsibleRunnerContainer edge cases", func() {
 				It("should handle inventory without any mount when needsInventoryMount returns false", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:     "test.yml",
-							PlaybookRepo: "https://github.com/test/repo.git",
-							Inventory:    maintencev1alpha1.AnsibleInventory{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "test.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								// No inline, ConfigMapRef, or SecretRef
 							},
 						},
@@ -567,23 +579,25 @@ var _ = Describe("Job Builder", func() {
 				})
 
 				It("should handle custom resource requirements correctly", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:     "test.yml",
-							PlaybookRepo: "https://github.com/test/repo.git",
-							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
-								Resources: &maintencev1alpha1.ResourceRequirements{
-									Limits: []maintencev1alpha1.ResourceQuantity{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "test.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
+							JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
+								Resources: &ansiblev1alpha1.ResourceRequirements{
+									Limits: []ansiblev1alpha1.ResourceQuantity{
 										{Name: "cpu", Quantity: "2"},
 										{Name: "memory", Quantity: "4Gi"},
 									},
-									Requests: []maintencev1alpha1.ResourceQuantity{
+									Requests: []ansiblev1alpha1.ResourceQuantity{
 										{Name: "cpu", Quantity: "1"},
 										{Name: "memory", Quantity: "2Gi"},
 									},
 								},
 							},
-							Inventory: maintencev1alpha1.AnsibleInventory{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								Inline: "test-inventory",
 							},
 						},
@@ -612,14 +626,16 @@ var _ = Describe("Job Builder", func() {
 				})
 
 				It("should use default resources when JobTemplate.Resources is nil", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:     "test.yml",
-							PlaybookRepo: "https://github.com/test/repo.git",
-							JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "test.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
+							JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
 								Resources: nil, // Explicitly nil
 							},
-							Inventory: maintencev1alpha1.AnsibleInventory{
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								Inline: "test-inventory",
 							},
 						},
@@ -644,12 +660,14 @@ var _ = Describe("Job Builder", func() {
 				})
 
 				It("should use default resources when JobTemplate is nil", func() {
-					ansibleJob := &maintencev1alpha1.AnsibleJob{
-						Spec: maintencev1alpha1.AnsibleJobSpec{
-							Playbook:     "test.yml",
-							PlaybookRepo: "https://github.com/test/repo.git",
-							JobTemplate:  nil, // Explicitly nil
-							Inventory: maintencev1alpha1.AnsibleInventory{
+					ansibleJob := &ansiblev1alpha1.AnsibleJob{
+						Spec: ansiblev1alpha1.AnsibleJobSpec{
+							Playbook: ansiblev1alpha1.PlaybookSpec{
+								Name:       "test.yml",
+								Repository: "https://github.com/test/repo.git",
+							},
+							JobTemplate: nil, // Explicitly nil
+							Inventory: ansiblev1alpha1.AnsibleInventory{
 								Inline: "test-inventory",
 							},
 						},

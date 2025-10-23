@@ -54,13 +54,13 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 .PHONY: generate
 generate: controller-gen goimports ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-	$(GOIMPORTS) -w api/v1alpha1/zz_generated.deepcopy.go
+	$(GOIMPORTS) -w api/ansible/v1alpha1/zz_generated.deepcopy.go
 
 .PHONY: dev
 dev: ## Start development environment with Tilt
 	@echo "Starting development environment with Tilt..."
 	@if command -v tilt >/dev/null 2>&1; then \
-		./scripts/dev-setup.sh start; \
+		./hack/dev-setup.sh start; \
 	else \
 		echo "Tilt not found. Please install Tilt: https://docs.tilt.dev/install.html"; \
 		exit 1; \
@@ -69,7 +69,7 @@ dev: ## Start development environment with Tilt
 .PHONY: dev-stop
 dev-stop: ## Stop development environment
 	@echo "Stopping development environment..."
-	@./scripts/dev-setup.sh stop
+	@./hack/dev-setup.sh stop
 
 .PHONY: fmt
 fmt: goimports ## Run goimports against code.

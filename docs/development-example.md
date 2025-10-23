@@ -6,7 +6,7 @@ This example demonstrates the complete development workflow using Tilt.
 
 ```bash
 # Option 1: Use the convenience script
-./scripts/dev-setup.sh start
+./hack/dev-setup.sh start
 
 # Option 2: Use make target
 make dev
@@ -43,7 +43,7 @@ Deploy a sample AnsibleJob:
 ```bash
 # Create a test AnsibleJob
 kubectl apply -f - <<EOF
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: dev-test-job
@@ -100,7 +100,7 @@ With port forwarding enabled, you can access:
 kubectl delete ansiblejob dev-test-job
 
 # Stop development environment
-./scripts/dev-setup.sh stop
+./hack/dev-setup.sh stop
 # or
 make dev-stop
 # or

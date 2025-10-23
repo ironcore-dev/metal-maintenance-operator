@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 )
 
 // mockStatusWriter is a mock implementation of client.StatusWriter that can simulate failures
@@ -32,6 +32,13 @@ type mockStatusWriter struct {
 }
 
 func (m *mockStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	return nil
+}
+
+func (m *mockStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 	if m.shouldFail {
 		return m.failError
 	}
@@ -182,20 +189,24 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind AnsibleJob")
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      AnsibleJobName,
 					Namespace: AnsibleJobNamespace,
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook:     "test-playbook.yml",
-					PlaybookRepo: "https://github.com/test/playbooks.git",
-					RolesRepo:    "https://github.com/test/roles.git",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{
+						Name:       "test-playbook.yml",
+						Repository: "https://github.com/test/playbooks.git",
+					},
+					Roles: &ansiblev1alpha1.RolesSpec{
+						Repository: "https://github.com/test/roles.git",
+					},
 
-					Inventory: maintencev1alpha1.AnsibleInventory{
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[test]\nlocalhost ansible_connection=local",
 					},
-					ExtraVars: []maintencev1alpha1.KeyValue{
+					ExtraVars: []ansiblev1alpha1.KeyValue{
 						{Name: "test_var", Value: "test_value"},
 					},
 				},
@@ -205,7 +216,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		AfterEach(func() {
 			By("Cleanup the specific resource instance AnsibleJob")
-			resource := &maintencev1alpha1.AnsibleJob{}
+			resource := &ansiblev1alpha1.AnsibleJob{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -234,14 +245,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking the AnsibleJob status is updated")
-			ansibleJob := &maintencev1alpha1.AnsibleJob{}
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{}
 			Eventually(func() string {
 				getErr := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
 				if getErr != nil {
 					return ""
 				}
 				return string(ansibleJob.Status.Phase)
-			}, timeout, interval).Should(Equal(string(maintencev1alpha1.AnsibleJobPhasePending)))
+			}, timeout, interval).Should(Equal(string(ansiblev1alpha1.AnsibleJobPhasePending)))
 		})
 
 		It("should create a Kubernetes Job", func() {
@@ -337,14 +348,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking AnsibleJob status is updated to Succeeded")
-			ansibleJob := &maintencev1alpha1.AnsibleJob{}
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{}
 			Eventually(func() string {
 				getErr := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
 				if getErr != nil {
 					return ""
 				}
 				return string(ansibleJob.Status.Phase)
-			}, timeout, interval).Should(Equal(string(maintencev1alpha1.AnsibleJobPhaseSucceeded)))
+			}, timeout, interval).Should(Equal(string(ansiblev1alpha1.AnsibleJobPhaseSucceeded)))
 
 			By("Refetching AnsibleJob to get latest conditions")
 			err = k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
@@ -354,22 +365,22 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansibleJob.Status.Conditions).NotTo(BeEmpty())
 
 			// Check Ready condition
-			readyCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionReady)
+			readyCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionReady)
 			Expect(readyCondition).NotTo(BeNil())
 			Expect(readyCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(readyCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobSucceeded))
+			Expect(readyCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobSucceeded))
 
 			// Check Progressing condition
-			progressingCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionProgressing)
+			progressingCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionProgressing)
 			Expect(progressingCondition).NotTo(BeNil())
 			Expect(progressingCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(progressingCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobSucceeded))
+			Expect(progressingCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobSucceeded))
 
 			// Check Succeeded condition
-			succeededCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionSucceeded)
+			succeededCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionSucceeded)
 			Expect(succeededCondition).NotTo(BeNil())
 			Expect(succeededCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(succeededCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobSucceeded))
+			Expect(succeededCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobSucceeded))
 
 			// Check ObservedGeneration
 			Expect(ansibleJob.Status.ObservedGeneration).To(Equal(ansibleJob.Generation))
@@ -395,30 +406,30 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking that running conditions are properly set")
-			ansibleJob := &maintencev1alpha1.AnsibleJob{}
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{}
 			Eventually(func() string {
 				getErr := k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
 				if getErr != nil {
 					return ""
 				}
 				return string(ansibleJob.Status.Phase)
-			}, timeout, interval).Should(Equal(string(maintencev1alpha1.AnsibleJobPhaseRunning)))
+			}, timeout, interval).Should(Equal(string(ansiblev1alpha1.AnsibleJobPhaseRunning)))
 
 			By("Refetching AnsibleJob to get latest conditions")
 			err = k8sClient.Get(ctx, typeNamespacedName, ansibleJob)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Check Ready condition (should be False during running)
-			readyCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionReady)
+			readyCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionReady)
 			Expect(readyCondition).NotTo(BeNil())
 			Expect(readyCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(readyCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobRunning))
+			Expect(readyCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobRunning))
 
 			// Check Progressing condition (should be True during running)
-			progressingCondition := findCondition(ansibleJob.Status.Conditions, maintencev1alpha1.AnsibleJobConditionProgressing)
+			progressingCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionProgressing)
 			Expect(progressingCondition).NotTo(BeNil())
 			Expect(progressingCondition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(progressingCondition.Reason).To(Equal(maintencev1alpha1.ReasonJobRunning))
+			Expect(progressingCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobRunning))
 
 			// Check ObservedGeneration
 			Expect(ansibleJob.Status.ObservedGeneration).To(Equal(ansibleJob.Generation))
@@ -436,13 +447,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create basic ansible runner container", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-basic-ansible",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 
@@ -470,14 +481,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container with inline inventory", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-inline-inventory",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "maintenance.yml",
-					Inventory: maintencev1alpha1.AnsibleInventory{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "maintenance.yml"},
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[webservers]\nweb1.example.com\nweb2.example.com\n\n[databases]\ndb1.example.com",
 					},
 				},
@@ -510,14 +521,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container without inventory when not specified", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-inventory",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "setup.yml",
-					Inventory: maintencev1alpha1.AnsibleInventory{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "setup.yml"},
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "", // Empty inventory
 					},
 				},
@@ -542,13 +553,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container with limit parameter", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-with-limit",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "deploy.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "deploy.yml"},
 					Limit:    "webservers:!web3.example.com",
 				},
 			}
@@ -562,13 +573,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container without limit when not specified", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-limit",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "install.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "install.yml"},
 					Limit:    "", // No limit specified
 				},
 			}
@@ -582,14 +593,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container with extra vars", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-extra-vars",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "configure.yml",
-					ExtraVars: []maintencev1alpha1.KeyValue{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "configure.yml"},
+					ExtraVars: []ansiblev1alpha1.KeyValue{
 						{Name: "environment", Value: "production"},
 						{Name: "app_version", Value: "v2.1.0"},
 						{Name: "enable_ssl", Value: "true"},
@@ -614,13 +625,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container without extra vars when not specified", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-extra-vars",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook:  "basic.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook:  ansiblev1alpha1.PlaybookSpec{Name: "basic.yml"},
 					ExtraVars: nil, // No extra vars
 				},
 			}
@@ -634,20 +645,20 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container with resource specifications", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-resources",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "resource-intensive.yml",
-					JobTemplate: &maintencev1alpha1.JobTemplateSpec{
-						Resources: &maintencev1alpha1.ResourceRequirements{
-							Limits: []maintencev1alpha1.ResourceQuantity{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "resource-intensive.yml"},
+					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
+						Resources: &ansiblev1alpha1.ResourceRequirements{
+							Limits: []ansiblev1alpha1.ResourceQuantity{
 								{Name: "cpu", Quantity: "1000m"},
 								{Name: "memory", Quantity: "2Gi"},
 							},
-							Requests: []maintencev1alpha1.ResourceQuantity{
+							Requests: []ansiblev1alpha1.ResourceQuantity{
 								{Name: "cpu", Quantity: "500m"},
 								{Name: "memory", Quantity: "1Gi"},
 							},
@@ -675,14 +686,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container with default resources when not specified", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-resources",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "simple.yml",
-					JobTemplate: &maintencev1alpha1.JobTemplateSpec{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "simple.yml"},
+					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
 						Resources: nil, // No resources specified
 					},
 				},
@@ -702,13 +713,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create container with default resources when JobTemplate is nil", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-nil-job-template",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook:    "basic.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook:    ansiblev1alpha1.PlaybookSpec{Name: "basic.yml"},
 					JobTemplate: nil, // No job template specified
 				},
 			}
@@ -727,28 +738,28 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should handle complex scenarios with all features", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-complex-ansible",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "complex.yml",
-					Inventory: maintencev1alpha1.AnsibleInventory{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "complex.yml"},
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[production]\nserver1.prod.com\nserver2.prod.com",
 					},
 					Limit: "production:!server2.prod.com",
-					ExtraVars: []maintencev1alpha1.KeyValue{
+					ExtraVars: []ansiblev1alpha1.KeyValue{
 						{Name: "env", Value: "production"},
 						{Name: "ssl", Value: "enabled"},
 					},
-					JobTemplate: &maintencev1alpha1.JobTemplateSpec{
-						Resources: &maintencev1alpha1.ResourceRequirements{
-							Limits: []maintencev1alpha1.ResourceQuantity{
+					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
+						Resources: &ansiblev1alpha1.ResourceRequirements{
+							Limits: []ansiblev1alpha1.ResourceQuantity{
 								{Name: "cpu", Quantity: "2000m"},
 								{Name: "memory", Quantity: "4Gi"},
 							},
-							Requests: []maintencev1alpha1.ResourceQuantity{
+							Requests: []ansiblev1alpha1.ResourceQuantity{
 								{Name: "cpu", Quantity: "1000m"},
 								{Name: "memory", Quantity: "2Gi"},
 							},
@@ -799,15 +810,15 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create inventory ConfigMap for inline inventory", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-configmap-inventory",
 					Namespace: "default",
 					UID:       "test-uid-1",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
-					Inventory: maintencev1alpha1.AnsibleInventory{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[webservers]\nweb1.example.com\nweb2.example.com",
 					},
 				},
@@ -820,15 +831,15 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should handle empty inline inventory", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-empty-inventory",
 					Namespace: "default",
 					UID:       "test-uid-2",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
-					Inventory: maintencev1alpha1.AnsibleInventory{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "",
 					},
 				},
@@ -841,14 +852,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should handle nil inventory", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-nil-inventory",
 					Namespace: "default",
 					UID:       "test-uid-3",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 					// No Inventory field specified
 				},
 			}
@@ -863,20 +874,20 @@ var _ = Describe("AnsibleJob Controller", func() {
 	Context("InitializeJob Function Tests", func() {
 		var (
 			reconciler *AnsibleJobReconciler
-			ansibleJob *maintencev1alpha1.AnsibleJob
+			ansibleJob *ansiblev1alpha1.AnsibleJob
 			ctx        context.Context
 		)
 
 		BeforeEach(func() {
 			ctx = context.Background()
-			ansibleJob = &maintencev1alpha1.AnsibleJob{
+			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-initialize-job",
 					Namespace: "default",
 					UID:       "test-uid-initialize",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 		})
@@ -899,13 +910,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(result.RequeueAfter).To(BeZero())
 
 			By("Verifying status was updated correctly")
-			updatedJob := &maintencev1alpha1.AnsibleJob{}
+			updatedJob := &ansiblev1alpha1.AnsibleJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      ansibleJob.Name,
 				Namespace: ansibleJob.Namespace,
 			}, updatedJob)).To(Succeed())
 
-			Expect(updatedJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhasePending))
+			Expect(updatedJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhasePending))
 			Expect(updatedJob.Status.StartTime).NotTo(BeNil())
 			Expect(updatedJob.Status.StartTime.Time).To(BeTemporally("~", time.Now(), time.Minute))
 
@@ -916,7 +927,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should handle status update failure gracefully", func() {
 			// Create a mock client that fails on status updates
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(scheme).
@@ -955,7 +966,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			// Create job with no existing status
-			ansibleJob.Status = maintencev1alpha1.AnsibleJobStatus{}
+			ansibleJob.Status = ansiblev1alpha1.AnsibleJobStatus{}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
 			beforeTime := time.Now().Add(-time.Second) // Add buffer for timing
@@ -970,7 +981,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(result.RequeueAfter).To(BeZero())
 
 			// Verify the in-memory object was updated
-			Expect(ansibleJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhasePending))
+			Expect(ansibleJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhasePending))
 			Expect(ansibleJob.Status.StartTime).NotTo(BeNil())
 			startTime := ansibleJob.Status.StartTime.Time
 			Expect(startTime).To(BeTemporally(">=", beforeTime))
@@ -1007,13 +1018,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		It("should handle AnsibleJob with minimal configuration", func() {
 			ctx := context.Background()
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "minimal-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "minimal.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "minimal.yml"},
 					// No inventory, roles, extra vars, etc.
 				},
 			}
@@ -1030,10 +1041,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(result.RequeueAfter).To(BeZero())
 
 			By("Checking status is updated")
-			updatedJob := &maintencev1alpha1.AnsibleJob{}
+			updatedJob := &ansiblev1alpha1.AnsibleJob{}
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: "minimal-job", Namespace: "default"}, updatedJob)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhasePending))
+			Expect(updatedJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhasePending))
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, ansibleJob)).To(Succeed())
@@ -1041,13 +1052,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		It("should handle multiple reconciliations gracefully", func() {
 			ctx := context.Background()
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "multi-reconcile-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1062,12 +1073,12 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			By("Checking final status")
-			finalJob := &maintencev1alpha1.AnsibleJob{}
+			finalJob := &ansiblev1alpha1.AnsibleJob{}
 			err := k8sClient.Get(ctx, namespacedName, finalJob)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(finalJob.Status.Phase).To(BeElementOf(
-				maintencev1alpha1.AnsibleJobPhasePending,
-				maintencev1alpha1.AnsibleJobPhaseRunning,
+				ansiblev1alpha1.AnsibleJobPhasePending,
+				ansiblev1alpha1.AnsibleJobPhaseRunning,
 			))
 
 			// Cleanup
@@ -1077,7 +1088,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should handle client Get errors gracefully", func() {
 			// Create a mock client that fails on Get operations
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).Build(),
@@ -1105,13 +1116,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		It("should handle AnsibleJob in Running phase", func() {
 			ctx := context.Background()
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "running-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
@@ -1141,8 +1152,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(k8sClient.Create(ctx, kubernetesJob)).To(Succeed())
 
 			// Update status to Running phase with JobName
-			ansibleJob.Status = maintencev1alpha1.AnsibleJobStatus{
-				Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+			ansibleJob.Status = ansiblev1alpha1.AnsibleJobStatus{
+				Phase:     ansiblev1alpha1.AnsibleJobPhaseRunning,
 				StartTime: &metav1.Time{Time: time.Now()},
 				JobName:   jobName,
 			}
@@ -1168,20 +1179,20 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		It("should handle AnsibleJob in Succeeded phase", func() {
 			ctx := context.Background()
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "succeeded-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
 			// Update status to Succeeded phase
-			ansibleJob.Status = maintencev1alpha1.AnsibleJobStatus{
-				Phase:          maintencev1alpha1.AnsibleJobPhaseSucceeded,
+			ansibleJob.Status = ansiblev1alpha1.AnsibleJobStatus{
+				Phase:          ansiblev1alpha1.AnsibleJobPhaseSucceeded,
 				StartTime:      &metav1.Time{Time: time.Now().Add(-time.Hour)},
 				CompletionTime: &metav1.Time{Time: time.Now()},
 			}
@@ -1205,23 +1216,22 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		It("should handle AnsibleJob in Failed phase", func() {
 			ctx := context.Background()
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "failed-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
 			// Update status to Failed phase
-			ansibleJob.Status = maintencev1alpha1.AnsibleJobStatus{
-				Phase:          maintencev1alpha1.AnsibleJobPhaseFailed,
+			ansibleJob.Status = ansiblev1alpha1.AnsibleJobStatus{
+				Phase:          ansiblev1alpha1.AnsibleJobPhaseFailed,
 				StartTime:      &metav1.Time{Time: time.Now().Add(-time.Hour)},
 				CompletionTime: &metav1.Time{Time: time.Now()},
-				Message:        "Job failed due to test error",
 			}
 			Expect(k8sClient.Status().Update(ctx, ansibleJob)).To(Succeed())
 
@@ -1243,19 +1253,19 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		It("should handle AnsibleJob with unknown phase", func() {
 			ctx := context.Background()
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "unknown-phase-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
 			// Update status to unknown phase
-			ansibleJob.Status = maintencev1alpha1.AnsibleJobStatus{
+			ansibleJob.Status = ansiblev1alpha1.AnsibleJobStatus{
 				Phase:     "UnknownPhase", // Invalid phase
 				StartTime: &metav1.Time{Time: time.Now()},
 			}
@@ -1281,7 +1291,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 	Context("CreateKubernetesJob Function Tests", func() {
 		var (
 			reconciler *AnsibleJobReconciler
-			ansibleJob *maintencev1alpha1.AnsibleJob
+			ansibleJob *ansiblev1alpha1.AnsibleJob
 			ctx        context.Context
 		)
 
@@ -1291,21 +1301,21 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			ansibleJob = &maintencev1alpha1.AnsibleJob{
+			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-create-job",
 					Namespace: "default",
 					UID:       "test-uid-create-job",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
 			}
 		})
 
 		It("should successfully create new Kubernetes Job", func() {
 			// Set status to Pending to trigger job creation
-			ansibleJob.Status.Phase = maintencev1alpha1.AnsibleJobPhasePending
+			ansibleJob.Status.Phase = ansiblev1alpha1.AnsibleJobPhasePending
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
 			By("Calling createKubernetesJob")
@@ -1324,12 +1334,12 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}, createdJob)).To(Succeed())
 
 			By("Verifying status was updated")
-			updatedJob := &maintencev1alpha1.AnsibleJob{}
+			updatedJob := &ansiblev1alpha1.AnsibleJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      ansibleJob.Name,
 				Namespace: ansibleJob.Namespace,
 			}, updatedJob)).To(Succeed())
-			Expect(updatedJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhaseRunning))
+			Expect(updatedJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhaseRunning))
 			Expect(updatedJob.Status.JobName).To(Equal(jobName))
 
 			// Cleanup
@@ -1377,12 +1387,12 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 
 			By("Verifying status was updated to Running")
-			updatedJob := &maintencev1alpha1.AnsibleJob{}
+			updatedJob := &ansiblev1alpha1.AnsibleJob{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      ansibleJob.Name,
 				Namespace: ansibleJob.Namespace,
 			}, updatedJob)).To(Succeed())
-			Expect(updatedJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhaseRunning))
+			Expect(updatedJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhaseRunning))
 			Expect(updatedJob.Status.JobName).To(Equal(jobName))
 
 			// Cleanup
@@ -1393,7 +1403,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should handle Job Get errors gracefully", func() {
 			// Create a mock client that fails on Job Get operations
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockJobGetFailingClient{
@@ -1425,7 +1435,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that fails on Job Create operations
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockJobCreateFailingClient{
@@ -1460,7 +1470,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that fails on status updates
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			statusWriter := &mockStatusWriter{
@@ -1538,7 +1548,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that fails ConfigMap creation
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 			Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
@@ -1558,7 +1568,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to create ConfigMap"))
+			Expect(err.Error()).To(ContainSubstring("failed to create or patch ConfigMap"))
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, ansibleJob)).To(Succeed())
@@ -1574,7 +1584,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that returns non-NotFound error for Job Get
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockJobGetFailingClient{
@@ -1609,7 +1619,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that simulates SetControllerReference failure
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockSetControllerRefFailingClient{
@@ -1667,7 +1677,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that fails on status updates
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockClient{
@@ -1707,16 +1717,16 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should handle invalid resource specifications gracefully", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-resources-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
-					JobTemplate: &maintencev1alpha1.JobTemplateSpec{
-						Resources: &maintencev1alpha1.ResourceRequirements{
-							Limits: []maintencev1alpha1.ResourceQuantity{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
+						Resources: &ansiblev1alpha1.ResourceRequirements{
+							Limits: []ansiblev1alpha1.ResourceQuantity{
 								{Name: "cpu", Quantity: "invalid-cpu-value"},
 								{Name: "memory", Quantity: "invalid-memory-value"},
 							},
@@ -1737,13 +1747,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		It("should create job with default image when none specified", func() {
-			ansibleJob := &maintencev1alpha1.AnsibleJob{
+			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default-image-job",
 					Namespace: "default",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 					// No image specified
 				},
 			}
@@ -1761,7 +1771,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 	Context("MonitorJob Function Tests", func() {
 		var (
 			reconciler *AnsibleJobReconciler
-			ansibleJob *maintencev1alpha1.AnsibleJob
+			ansibleJob *ansiblev1alpha1.AnsibleJob
 			ctx        context.Context
 		)
 
@@ -1771,17 +1781,17 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			ansibleJob = &maintencev1alpha1.AnsibleJob{
+			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-monitor-job",
 					Namespace: "default",
 					UID:       "test-uid-monitor",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 				},
-				Status: maintencev1alpha1.AnsibleJobStatus{
-					Phase:   maintencev1alpha1.AnsibleJobPhaseRunning,
+				Status: ansiblev1alpha1.AnsibleJobStatus{
+					Phase:   ansiblev1alpha1.AnsibleJobPhaseRunning,
 					JobName: "test-monitor-job-job",
 				},
 			}
@@ -1790,7 +1800,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should handle Job Get errors gracefully", func() {
 			// Create a mock client that fails on Job Get operations
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockJobGetFailingClient{
@@ -1853,9 +1863,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(result.RequeueAfter).To(BeZero())
 
 			By("Verifying status was updated to Succeeded")
-			Expect(ansibleJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhaseSucceeded))
-			Expect(ansibleJob.Status.Message).To(Equal("Job completed successfully"))
+			Expect(ansibleJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhaseSucceeded))
 			Expect(ansibleJob.Status.CompletionTime).NotTo(BeNil())
+
+			By("Checking that succeeded condition has the correct message")
+			succeededCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionSucceeded)
+			Expect(succeededCondition).NotTo(BeNil())
+			Expect(succeededCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(succeededCondition.Message).To(Equal("Job completed successfully"))
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, ansibleJob)).To(Succeed())
@@ -1903,9 +1918,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(result.RequeueAfter).To(BeZero())
 
 			By("Verifying status was updated to Failed")
-			Expect(ansibleJob.Status.Phase).To(Equal(maintencev1alpha1.AnsibleJobPhaseFailed))
-			Expect(ansibleJob.Status.Message).To(Equal("Job failed"))
+			Expect(ansibleJob.Status.Phase).To(Equal(ansiblev1alpha1.AnsibleJobPhaseFailed))
 			Expect(ansibleJob.Status.CompletionTime).NotTo(BeNil())
+
+			By("Checking that failed condition has the correct message")
+			failedCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionFailed)
+			Expect(failedCondition).NotTo(BeNil())
+			Expect(failedCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(failedCondition.Message).To(Equal("Job failed to complete"))
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, ansibleJob)).To(Succeed())
@@ -1945,7 +1965,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that fails on status updates
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
 			statusWriter := &mockStatusWriter{
@@ -1975,7 +1995,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 	Context("CreateInventoryConfigMap Function Tests", func() {
 		var (
 			reconciler *AnsibleJobReconciler
-			ansibleJob *maintencev1alpha1.AnsibleJob
+			ansibleJob *ansiblev1alpha1.AnsibleJob
 			ctx        context.Context
 		)
 
@@ -1985,15 +2005,15 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
-			ansibleJob = &maintencev1alpha1.AnsibleJob{
+			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-configmap-create",
 					Namespace: "default",
 					UID:       "test-uid-configmap",
 				},
-				Spec: maintencev1alpha1.AnsibleJobSpec{
-					Playbook: "site.yml",
-					Inventory: maintencev1alpha1.AnsibleInventory{
+				Spec: ansiblev1alpha1.AnsibleJobSpec{
+					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
+					Inventory: ansiblev1alpha1.AnsibleInventory{
 						Inline: "[webservers]\nweb1.example.com\nweb2.example.com",
 					},
 				},
@@ -2066,7 +2086,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should handle ConfigMap Get errors gracefully", func() {
 			// Create a mock client that fails on ConfigMap Get operations
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockConfigMapGetFailingClient{
@@ -2095,7 +2115,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a mock client that fails on ConfigMap Create operations
 			scheme := runtime.NewScheme()
-			Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
 			mockClient := &mockConfigMapCreateFailingClient{
@@ -2114,7 +2134,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to create ConfigMap"))
+			Expect(err.Error()).To(ContainSubstring("failed to create or patch ConfigMap"))
 			Expect(err.Error()).To(ContainSubstring("simulated configmap create failure"))
 
 			// Cleanup
@@ -2127,7 +2147,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			ansibleJob.Name = "test-configmap-controller-ref"
 
 			// Create AnsibleJob with missing UID to cause SetControllerReference to fail
-			ansibleJobNoUID := &maintencev1alpha1.AnsibleJob{
+			ansibleJobNoUID := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      ansibleJob.Name,
 					Namespace: ansibleJob.Namespace,
@@ -2181,16 +2201,16 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		Describe("getRetryCountFromConditions", func() {
 			It("should return 0 for AnsibleJob with no StartTime", func() {
-				ansibleJob := &maintencev1alpha1.AnsibleJob{}
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{}
 				count := reconciler.getRetryCountFromConditions(ansibleJob)
 				Expect(count).To(Equal(0))
 			})
 
 			It("should return 0 for new jobs", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhasePending,
 						StartTime: &metav1.Time{Time: now.Add(-30 * time.Second)}, // 30 seconds ago
 					},
 				}
@@ -2200,9 +2220,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should return 1 for jobs older than 2 minutes in Pending phase", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhasePending,
 						StartTime: &metav1.Time{Time: now.Add(-3 * time.Minute)}, // 3 minutes ago
 					},
 				}
@@ -2212,9 +2232,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should return 3 for jobs older than 5 minutes in Pending phase", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhasePending,
 						StartTime: &metav1.Time{Time: now.Add(-7 * time.Minute)}, // 7 minutes ago
 					},
 				}
@@ -2224,9 +2244,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should return 0 for old jobs not in Pending phase", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhaseRunning,
 						StartTime: &metav1.Time{Time: now.Add(-7 * time.Minute)}, // 7 minutes ago
 					},
 				}
@@ -2237,9 +2257,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		Describe("calculateRequeueAfter", func() {
 			It("should return 5 seconds when StartTime is nil", func() {
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase: maintencev1alpha1.AnsibleJobPhasePending,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase: ansiblev1alpha1.AnsibleJobPhasePending,
 						// StartTime is nil
 					},
 				}
@@ -2249,9 +2269,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should return 10 seconds for jobs less than 2 minutes old", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhaseRunning,
 						StartTime: &metav1.Time{Time: now.Add(-1 * time.Minute)}, // 1 minute ago
 					},
 				}
@@ -2261,9 +2281,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should return 30 seconds for jobs 2-10 minutes old", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhasePending,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhasePending,
 						StartTime: &metav1.Time{Time: now.Add(-5 * time.Minute)}, // 5 minutes ago
 					},
 				}
@@ -2273,9 +2293,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should return 60 seconds for jobs older than 10 minutes", func() {
 				now := time.Now()
-				ansibleJob := &maintencev1alpha1.AnsibleJob{
-					Status: maintencev1alpha1.AnsibleJobStatus{
-						Phase:     maintencev1alpha1.AnsibleJobPhaseRunning,
+				ansibleJob := &ansiblev1alpha1.AnsibleJob{
+					Status: ansiblev1alpha1.AnsibleJobStatus{
+						Phase:     ansiblev1alpha1.AnsibleJobPhaseRunning,
 						StartTime: &metav1.Time{Time: now.Add(-15 * time.Minute)}, // 15 minutes ago
 					},
 				}
@@ -2288,7 +2308,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			It("should setup controller with manager successfully", func() {
 				// Create a test manager
 				scheme := runtime.NewScheme()
-				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 				Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 				Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
@@ -2331,7 +2351,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should handle calculateBackoffDelay edge case with retryCount=21", func() {
 				scheme := runtime.NewScheme()
-				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
 				reconciler := &AnsibleJobReconciler{
 					Client: k8sClient,
@@ -2345,7 +2365,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should handle calculateBackoffDelay with exactly retryCount=20", func() {
 				scheme := runtime.NewScheme()
-				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
 				reconciler := &AnsibleJobReconciler{
 					Client: k8sClient,
@@ -2359,7 +2379,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			It("should handle createInventoryConfigMap with Create failure", func() {
 				scheme := runtime.NewScheme()
-				Expect(maintencev1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 				Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
 				// Create a mock client that fails on ConfigMap creation

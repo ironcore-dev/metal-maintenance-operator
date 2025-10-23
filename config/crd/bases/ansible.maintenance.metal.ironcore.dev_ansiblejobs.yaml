@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: ansiblejobs.maintenance.metal.ironcore.dev
+  name: ansiblejobs.ansible.maintenance.metal.ironcore.dev
 spec:
-  group: maintenance.metal.ironcore.dev
+  group: ansible.maintenance.metal.ironcore.dev
   names:
     kind: AnsibleJob
     listKind: AnsibleJobList
@@ -18,7 +18,7 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.playbook
+    - jsonPath: .spec.playbook.name
       name: Playbook
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -166,22 +166,35 @@ spec:
                 description: Limit restricts the playbook run to specific hosts
                 type: string
               playbook:
-                description: Playbook specifies the playbook to run
-                type: string
-              playbookGitRef:
-                description: PlaybookGitRef specifies the branch, tag, or commit to
-                  use for the playbook repository
-                type: string
-              playbookRepo:
-                description: PlaybookRepo is the repository containing playbooks
-                type: string
-              rolesGitRef:
-                description: RolesGitRef specifies the branch, tag, or commit to use
-                  for the roles repository
-                type: string
-              rolesRepo:
-                description: RolesRepo is the repository containing roles
-                type: string
+                description: Playbook defines the playbook configuration
+                properties:
+                  gitRef:
+                    description: GitRef specifies the branch, tag, or commit to use
+                      for the playbook repository
+                    type: string
+                  name:
+                    description: Name specifies the playbook file to run
+                    type: string
+                  repository:
+                    description: Repository is the Git repository containing playbooks
+                    type: string
+                required:
+                - name
+                - repository
+                type: object
+              roles:
+                description: Roles defines the roles repository configuration
+                properties:
+                  gitRef:
+                    description: GitRef specifies the branch, tag, or commit to use
+                      for the roles repository
+                    type: string
+                  repository:
+                    description: Repository is the Git repository containing roles
+                    type: string
+                required:
+                - repository
+                type: object
               timeoutSeconds:
                 description: TimeoutSeconds specifies the job timeout
                 format: int32
@@ -189,7 +202,6 @@ spec:
             required:
             - inventory
             - playbook
-            - playbookRepo
             type: object
           status:
             description: AnsibleJobStatus defines the observed state of AnsibleJob
@@ -263,9 +275,6 @@ spec:
                 type: string
               jobName:
                 description: JobName is the name of the created Kubernetes Job
-                type: string
-              message:
-                description: Message provides additional details about the job status
                 type: string
               observedGeneration:
                 description: ObservedGeneration reflects the generation of the most

@@ -25,19 +25,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - batch
-  resources:
-  - jobs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - maintenance.metal.ironcore.dev
+  - ansible.maintenance.metal.ironcore.dev
   resources:
   - ansiblejobs
   verbs:
@@ -49,16 +37,28 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - ansible.maintenance.metal.ironcore.dev
   resources:
   - ansiblejobs/finalizers
   verbs:
   - update
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - ansible.maintenance.metal.ironcore.dev
   resources:
   - ansiblejobs/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

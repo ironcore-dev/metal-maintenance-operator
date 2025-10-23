@@ -9,25 +9,13 @@ import (
 
 // AnsibleJobSpec defines the desired state of AnsibleJob
 type AnsibleJobSpec struct {
-	// Playbook specifies the playbook to run
+	// Playbook defines the playbook configuration
 	// +required
-	Playbook string `json:"playbook"`
+	Playbook PlaybookSpec `json:"playbook"`
 
-	// PlaybookRepo is the repository containing playbooks
-	// +required
-	PlaybookRepo string `json:"playbookRepo"`
-
-	// PlaybookGitRef specifies the branch, tag, or commit to use for the playbook repository
+	// Roles defines the roles repository configuration
 	// +optional
-	PlaybookGitRef string `json:"playbookGitRef,omitempty"`
-
-	// RolesRepo is the repository containing roles
-	// +optional
-	RolesRepo string `json:"rolesRepo,omitempty"`
-
-	// RolesGitRef specifies the branch, tag, or commit to use for the roles repository
-	// +optional
-	RolesGitRef string `json:"rolesGitRef,omitempty"`
+	Roles *RolesSpec `json:"roles,omitempty"`
 
 	// Inventory defines the target hosts
 	// +required
@@ -49,6 +37,32 @@ type AnsibleJobSpec struct {
 	// JobTemplate allows customization of the Kubernetes Job
 	// +optional
 	JobTemplate *JobTemplateSpec `json:"jobTemplate,omitempty"`
+}
+
+// PlaybookSpec defines the playbook configuration
+type PlaybookSpec struct {
+	// Name specifies the playbook file to run
+	// +required
+	Name string `json:"name"`
+
+	// Repository is the Git repository containing playbooks
+	// +required
+	Repository string `json:"repository"`
+
+	// GitRef specifies the branch, tag, or commit to use for the playbook repository
+	// +optional
+	GitRef string `json:"gitRef,omitempty"`
+}
+
+// RolesSpec defines the roles repository configuration
+type RolesSpec struct {
+	// Repository is the Git repository containing roles
+	// +required
+	Repository string `json:"repository"`
+
+	// GitRef specifies the branch, tag, or commit to use for the roles repository
+	// +optional
+	GitRef string `json:"gitRef,omitempty"`
 }
 
 // AnsibleInventory defines the target hosts for playbook execution
@@ -167,10 +181,6 @@ type AnsibleJobStatus struct {
 	// +optional
 	JobID string `json:"jobId,omitempty"`
 
-	// Message provides additional details about the job status
-	// +optional
-	Message string `json:"message,omitempty"`
-
 	// Conditions represent the latest available observations
 	// +optional
 	// +listType=map
@@ -259,7 +269,7 @@ type AnsibleResults struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Playbook",type=string,JSONPath=`.spec.playbook`
+// +kubebuilder:printcolumn:name="Playbook",type=string,JSONPath=`.spec.playbook.name`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // AnsibleJob is the Schema for the ansiblejobs API

@@ -14,7 +14,7 @@ This controller enables running Ansible playbooks via ansible-runner as Kubernet
 ## Usage
 
 Create an AnsibleJob to execute Ansible playbooks using ansible-runner:
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: maintenance-task
@@ -105,7 +105,7 @@ kubectl logs job/maintenance-task-ansible-job
 ### Development Setup:
 ```bash
 # Start development environment
-./scripts/dev-setup.sh start
+./hack/dev-setup.sh start
 
 # Apply sample configurations
 kubectl apply -k config/samples/

@@ -14,8 +14,8 @@ resources:
     namespaced: true
   controller: true
   domain: metal.ironcore.dev
-  group: maintenance
+  group: ansible.maintenance
   kind: AnsibleJob
-  path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
+  path: github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1
   version: v1alpha1
 version: "3"

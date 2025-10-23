@@ -1,7 +1,4 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-# SPDX-License-Identifier: Apache-2.0
-
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   labels:
@@ -9,11 +6,13 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: sample-ansible-job
 spec:
-  playbook: "site.yml"
-  playbookRepo: "https://github.com/example/ansible-playbooks.git"
-  playbookGitRef: "main"
-  rolesRepo: "https://github.com/example/ansible-roles.git"
-  rolesGitRef: "v1.5.0"
+  playbook:
+    name: "site.yml"
+    repository: "https://github.com/example/ansible-playbooks.git"
+    gitRef: "main"
+  roles:
+    repository: "https://github.com/example/ansible-roles.git"
+    gitRef: "v1.5.0"
   inventory:
     inline: |
       [servers]

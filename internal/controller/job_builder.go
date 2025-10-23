@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 	defaultBackoffLimit       = int32(1)
 )
 
-func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.AnsibleJob) *batchv1.Job {
+func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *ansiblev1alpha1.AnsibleJob) *batchv1.Job {
 	jobName := fmt.Sprintf("%s-job", ansibleJob.Name)
 
 	// Get image from spec or use default
@@ -84,10 +84,12 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *maintencev1alpha1.An
 	return job
 }
 
-func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Container {
+func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *ansiblev1alpha1.AnsibleJob) []corev1.Container {
 	// Validate git URLs for security (defensive validation, errors are ignored)
-	_ = validateGitURL(ansibleJob.Spec.PlaybookRepo)
-	_ = validateGitURL(ansibleJob.Spec.RolesRepo)
+	_ = validateGitURL(ansibleJob.Spec.Playbook.Repository)
+	if ansibleJob.Spec.Roles != nil {
+		_ = validateGitURL(ansibleJob.Spec.Roles.Repository)
+	}
 
 	// Init container to create ansible-runner directory structure and clone repos
 	// ansible-runner doesn't support --scm-url, so we handle git cloning here
@@ -96,8 +98,8 @@ func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *maintencev1alpha
 		mkdir -p /runner/inventory /runner/env /runner/project`
 
 	// Add git clone if playbook repo is specified
-	if ansibleJob.Spec.PlaybookRepo != "" {
-		if ansibleJob.Spec.PlaybookGitRef != "" {
+	if ansibleJob.Spec.Playbook.Repository != "" {
+		if ansibleJob.Spec.Playbook.GitRef != "" {
 			// Clone specific branch/tag/commit
 			setupCommand += fmt.Sprintf(`
 		# Clone git repository with specific ref
@@ -106,14 +108,34 @@ func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *maintencev1alpha
 		cd project
 		# If the above didn't work, try checkout
 		git checkout %s 2>/dev/null || true
-		cd ..`, ansibleJob.Spec.PlaybookGitRef, ansibleJob.Spec.PlaybookRepo, ansibleJob.Spec.PlaybookRepo, ansibleJob.Spec.PlaybookGitRef)
+		cd ..`, ansibleJob.Spec.Playbook.GitRef, ansibleJob.Spec.Playbook.Repository, ansibleJob.Spec.Playbook.Repository, ansibleJob.Spec.Playbook.GitRef)
 		} else {
 			// Clone default branch
 			setupCommand += fmt.Sprintf(`
 		# Clone git repository (default branch)
 		cd /runner
 		git clone %s project
-		cd ..`, ansibleJob.Spec.PlaybookRepo)
+		cd ..`, ansibleJob.Spec.Playbook.Repository)
+		}
+	}
+
+	// Add roles clone if specified
+	if ansibleJob.Spec.Roles != nil && ansibleJob.Spec.Roles.Repository != "" {
+		if ansibleJob.Spec.Roles.GitRef != "" {
+			// Clone specific branch/tag/commit
+			setupCommand += fmt.Sprintf(`
+		# Clone roles repository with specific ref
+		mkdir -p /runner/project/roles
+		cd /runner/project/roles
+		git clone --depth 1 --branch %s %s . || git clone %s .
+		git checkout %s 2>/dev/null || true`, ansibleJob.Spec.Roles.GitRef, ansibleJob.Spec.Roles.Repository, ansibleJob.Spec.Roles.Repository, ansibleJob.Spec.Roles.GitRef)
+		} else {
+			// Clone default branch
+			setupCommand += fmt.Sprintf(`
+		# Clone roles repository (default branch)
+		mkdir -p /runner/project/roles
+		cd /runner/project/roles
+		git clone %s .`, ansibleJob.Spec.Roles.Repository)
 		}
 	}
 
@@ -158,11 +180,11 @@ EOF`, string(extraVarsJSON))
 	}}
 }
 
-func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintencev1alpha1.AnsibleJob, image string) []corev1.Container {
+func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *ansiblev1alpha1.AnsibleJob, image string) []corev1.Container {
 	args := []string{
 		"run",
 		"/runner",
-		"--playbook", ansibleJob.Spec.Playbook,
+		"--playbook", ansibleJob.Spec.Playbook.Name,
 	}
 
 	// Note: ansible-runner doesn't support --scm-url/--scm-revision
@@ -242,13 +264,13 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *maintenc
 	return []corev1.Container{container}
 }
 
-func (r *AnsibleJobReconciler) needsInventoryMount(ansibleJob *maintencev1alpha1.AnsibleJob) bool {
+func (r *AnsibleJobReconciler) needsInventoryMount(ansibleJob *ansiblev1alpha1.AnsibleJob) bool {
 	return ansibleJob.Spec.Inventory.Inline != "" ||
 		ansibleJob.Spec.Inventory.ConfigMapRef != nil ||
 		ansibleJob.Spec.Inventory.SecretRef != nil
 }
 
-func (r *AnsibleJobReconciler) createVolumes(ansibleJob *maintencev1alpha1.AnsibleJob) []corev1.Volume {
+func (r *AnsibleJobReconciler) createVolumes(ansibleJob *ansiblev1alpha1.AnsibleJob) []corev1.Volume {
 	volumes := []corev1.Volume{{
 		Name: "runner-workspace",
 		VolumeSource: corev1.VolumeSource{
@@ -298,7 +320,7 @@ func (r *AnsibleJobReconciler) createVolumes(ansibleJob *maintencev1alpha1.Ansib
 	return volumes
 }
 
-func convertToResourceList(resources []maintencev1alpha1.ResourceQuantity) corev1.ResourceList {
+func convertToResourceList(resources []ansiblev1alpha1.ResourceQuantity) corev1.ResourceList {
 	if resources == nil {
 		return nil
 	}
@@ -336,7 +358,7 @@ func createSecurityContext(userID int64) *corev1.SecurityContext {
 }
 
 // getInitContainerImage returns the secure pinned init container image
-func getInitContainerImage(ansibleJob *maintencev1alpha1.AnsibleJob) string {
+func getInitContainerImage(ansibleJob *ansiblev1alpha1.AnsibleJob) string {
 	// Use custom image if specified, otherwise use secure pinned default
 	if ansibleJob.Spec.JobTemplate != nil && ansibleJob.Spec.JobTemplate.InitImage != "" {
 		return ansibleJob.Spec.JobTemplate.InitImage

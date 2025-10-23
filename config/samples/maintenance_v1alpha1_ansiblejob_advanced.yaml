@@ -1,8 +1,5 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-# SPDX-License-Identifier: Apache-2.0
-
 # Advanced sample AnsibleJob showing roles repository and complex configuration
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   labels:
@@ -11,20 +8,16 @@ metadata:
   name: ansiblejob-advanced-sample
   namespace: default
 spec:
-  # Playbook to execute from the playbook repository
-  playbook: site.yml
-
-  # Repository containing Ansible playbooks
-  playbookRepo: "https://github.com/example/ansible-playbooks.git"
-
-  # Git reference for playbook repository (branch, tag, or commit)
-  playbookGitRef: "v1.0.0"
+  # Playbook configuration
+  playbook:
+    name: site.yml
+    repository: "https://github.com/example/ansible-playbooks.git"
+    gitRef: "v1.0.0"
 
   # Repository containing Ansible roles
-  rolesRepo: "https://github.com/example/ansible-roles.git"
-
-  # Git reference for roles repository (branch, tag, or commit)
-  rolesGitRef: "v2.1.0"
+  roles:
+    repository: "https://github.com/example/ansible-roles.git"
+    gitRef: "v2.1.0"
 
   # Ansible inventory in YAML or INI format
   inventory:

@@ -327,7 +327,7 @@ done
 echo "🗑️ Cleaning up maintenance-operator cluster-scoped resources..."
 kubectl delete clusterrole maintenance-operator-manager-role maintenance-operator-metrics-auth-role maintenance-operator-metrics-reader --ignore-not-found=true
 kubectl delete clusterrolebinding maintenance-operator-manager-rolebinding maintenance-operator-metrics-auth-rolebinding --ignore-not-found=true
-kubectl delete crd ansiblejobs.maintenance.metal.ironcore.dev --ignore-not-found=true
+kubectl delete crd ansiblejobs.ansible.maintenance.metal.ironcore.dev --ignore-not-found=true
 
 echo '✅ Cleanup completed! All resources have been removed.'
 echo "💡 You may need to wait a few moments for all resources to fully terminate."

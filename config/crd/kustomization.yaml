@@ -1,13 +1,10 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-# SPDX-License-Identifier: Apache-2.0
-
 resources:
-- bases/maintenance.metal.ironcore.dev_ansiblejobs.yaml
-#+kubebuilder:crdkustomizeresource:groupversionkind=maintenance.metal.ironcore.dev/v1alpha1/AnsibleJob
+- bases/ansible.maintenance.metal.ironcore.dev_ansiblejobs.yaml
+#+kubebuilder:crdkustomizeresource:groupversionkind=ansible.maintenance.metal.ironcore.dev/v1alpha1/AnsibleJob
 
 # patches:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
 #- path: patches/webhook_in_ansiblejobs.yaml
 #- path: patches/cainjection_in_ansiblejobs.yaml
-#+kubebuilder:crdkustomizewebhookpatch:groupversionkind=maintenance.metal.ironcore.dev/v1alpha1/AnsibleJob
+#+kubebuilder:crdkustomizewebhookpatch:groupversionkind=ansible.maintenance.metal.ironcore.dev/v1alpha1/AnsibleJob

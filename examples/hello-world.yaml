@@ -1,8 +1,5 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-# SPDX-License-Identifier: Apache-2.0
-
 ---
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: hello-world
@@ -11,13 +8,10 @@ spec:
   # Runs ansible-runner to execute playbooks
 
   # Use example playbook for demonstration
-  playbook: "hello_world.yml"
-
-  # Use ansible samples repository
-  playbookRepo: "https://github.com/ansible/ansible-tower-samples"
-
-  # Use git reference for playbook repository
-  playbookGitRef: "master"
+  playbook:
+    name: "hello_world.yml"
+    repository: "https://github.com/ansible/ansible-tower-samples"
+    gitRef: "master"
 
   # Simple inventory targeting localhost
   inventory:

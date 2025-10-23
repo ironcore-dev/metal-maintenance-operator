@@ -25,7 +25,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 	"github.com/ironcore-dev/maintenance-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -38,7 +38,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(maintencev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(ansiblev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

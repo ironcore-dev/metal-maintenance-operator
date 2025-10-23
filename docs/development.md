@@ -1,27 +1,79 @@
-# Development with Tilt
+# Development Guide
 
-This project includes a [Tiltfile](https://tilt.dev/) for fast local development cycles. Tilt provides automatic rebuilds, hot reloading, and easy log streaming for Kubernetes development.
+This guide covers setting up a development environment for the Maintenance Operator project.
 
 ## Prerequisites
 
-1. **Install Tilt**: Follow the [Tilt installation guide](https://docs.tilt.dev/install.html)
-2. **Kubernetes cluster**: Ensure you have a local Kubernetes cluster running (kind, minikube, Docker Desktop, etc.)
-3. **Docker registry**: For pushing images (can use a local registry)
-4. **kubectl**: Configured to access your cluster
+- go version v1.24.0+
+- docker version 17.03+
+- kubectl version v1.11.3+
+- Access to a Kubernetes v1.11.3+ cluster
+- **Install Tilt**: Follow the [Tilt installation guide](https://docs.tilt.dev/install.html)
 
-## Quick Start
+## Quick Development Setup
 
-1. **Start a local Docker registry** (optional, if not using an external registry):
-   ```bash
-   docker run -d -p 5000:5000 --name registry registry:2
-   ```
+For fast local development with hot reloading, we recommend using [Tilt](https://tilt.dev/):
 
-2. **Start Tilt**:
-   ```bash
-   tilt up
-   ```
+### Option 1: Helper Script (Recommended)
+```bash
+./hack/dev-setup.sh start
+```
 
-3. **Open the Tilt UI**: Navigate to http://localhost:10350 to see the development dashboard
+### Option 2: Manual Tilt Setup
+```bash
+tilt up
+```
+
+### Option 3: Using an Existing Registry
+```bash
+# With environment variables
+REGISTRY=localhost:5001 SKIP_REGISTRY=true ./hack/dev-setup.sh start
+
+# Or with Tilt directly
+tilt up -- --registry=localhost:5001 --skip-registry-setup=true
+```
+
+### What This Does:
+- Set up a local Docker registry (unless you skip it)
+- Build and deploy the operator with live reload
+- Provide a web UI at http://localhost:10350
+- Forward metrics ports (8080) and health endpoints (8081)
+
+## Manual Installation (Alternative to Tilt)
+
+If you prefer not to use Tilt, you can set up the development environment manually:
+
+1. **Install the CRDs**:
+```bash
+make install
+```
+
+2. **Deploy the controller**:
+```bash
+make deploy IMG=ghcr.io/ironcore-dev/maintenance-operator:latest
+```
+
+## Detailed Development with Tilt
+
+This project includes a [Tiltfile](https://tilt.dev/) for fast local development cycles. Tilt provides automatic rebuilds, hot reloading, and easy log streaming for Kubernetes development.
+
+### Additional Prerequisites for Tilt
+
+1. **Kubernetes cluster**: Ensure you have a local Kubernetes cluster running (kind, minikube, Docker Desktop, etc.)
+2. **Docker registry**: For pushing images (can use a local registry)
+3. **kubectl**: Configured to access your cluster
+
+### Manual Registry Setup (Optional)
+
+If you want to start a local Docker registry manually:
+
+```bash
+docker run -d -p 5000:5000 --name registry registry:2
+```
+
+### Open the Tilt UI
+
+Navigate to http://localhost:10350 to see the development dashboard.
 
 ## Configuration
 
@@ -45,13 +97,13 @@ tilt up -- --registry=my-registry.com/user --namespace=my-dev --skip-registry-se
 ### Using the helper script:
 ```bash
 # Use existing registry
-REGISTRY=my-registry.com/username SKIP_REGISTRY=true ./scripts/dev-setup.sh start
+REGISTRY=my-registry.com/username SKIP_REGISTRY=true ./hack/dev-setup.sh start
 
 # Use custom namespace
-DEV_NAMESPACE=my-dev-namespace ./scripts/dev-setup.sh start
+DEV_NAMESPACE=my-dev-namespace ./hack/dev-setup.sh start
 
 # Use existing registry on different port
-REGISTRY=localhost:5001 SKIP_REGISTRY=true ./scripts/dev-setup.sh start
+REGISTRY=localhost:5001 SKIP_REGISTRY=true ./hack/dev-setup.sh start
 ```
 
 ## Development Workflow

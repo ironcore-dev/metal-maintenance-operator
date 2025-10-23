@@ -8,26 +8,30 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	maintencev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 )
 
 // TestHelpers provides utility functions for testing
 
 // CreateTestAnsibleJob creates a basic AnsibleJob for testing
-func CreateTestAnsibleJob(name, namespace string) *maintencev1alpha1.AnsibleJob {
-	return &maintencev1alpha1.AnsibleJob{
+func CreateTestAnsibleJob(name, namespace string) *ansiblev1alpha1.AnsibleJob {
+	return &ansiblev1alpha1.AnsibleJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: maintencev1alpha1.AnsibleJobSpec{
-			Playbook:     "test.yml",
-			PlaybookRepo: "https://github.com/test/playbooks.git",
-			RolesRepo:    "https://github.com/test/roles.git",
-			Inventory: maintencev1alpha1.AnsibleInventory{
+		Spec: ansiblev1alpha1.AnsibleJobSpec{
+			Playbook: ansiblev1alpha1.PlaybookSpec{
+				Name:       "test.yml",
+				Repository: "https://github.com/test/playbooks.git",
+			},
+			Roles: &ansiblev1alpha1.RolesSpec{
+				Repository: "https://github.com/test/roles.git",
+			},
+			Inventory: ansiblev1alpha1.AnsibleInventory{
 				Inline: "[test]\nlocalhost ansible_connection=local",
 			},
-			ExtraVars: []maintencev1alpha1.KeyValue{
+			ExtraVars: []ansiblev1alpha1.KeyValue{
 				{Name: "test_var", Value: "test_value"},
 			},
 		},

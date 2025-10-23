@@ -1,19 +1,18 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-# SPDX-License-Identifier: Apache-2.0
-
 # Example AnsibleJob with custom container images for security and air-gapped environments
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: custom-images-example
   namespace: default
 spec:
   # Ansible playbook configuration
-  playbook: site.yml
-  playbookRepo: https://github.com/your-org/secure-playbooks.git
-  playbookGitRef: v1.2.3
-  rolesRepo: https://github.com/your-org/secure-roles.git
-  rolesGitRef: v2.1.0
+  playbook:
+    name: site.yml
+    repository: https://github.com/your-org/secure-playbooks.git
+    gitRef: v1.2.3
+  roles:
+    repository: https://github.com/your-org/secure-roles.git
+    gitRef: v2.1.0
 
   # Inventory configuration
   inventory:
