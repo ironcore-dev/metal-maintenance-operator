@@ -38,15 +38,11 @@ spec:
     # Resource limits for production workloads
     resources:
       requests:
-        - name: cpu
-          quantity: "200m"
-        - name: memory
-          quantity: "512Mi"
+        cpu: "200m"
+        memory: "512Mi"
       limits:
-        - name: cpu
-          quantity: "1"
-        - name: memory
-          quantity: "1Gi"
+        cpu: "1"
+        memory: "1Gi"
 
   # Extra variables
   extraVars:

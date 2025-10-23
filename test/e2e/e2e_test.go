@@ -175,13 +175,13 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating the curl-metrics pod to access the metrics endpoint")
 			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
 				"--namespace", namespace,
-				"--image=curlimages/curl:latest",
+				"--image=curlimages/curl:8.4.0@sha256:4a3396ae573c44932d06ba33f8696db4429c419da87cbdc82965ee96a37dd0af",
 				"--overrides",
 				fmt.Sprintf(`{
 					"spec": {
 						"containers": [{
 							"name": "curl",
-							"image": "curlimages/curl:latest",
+							"image": "curlimages/curl:8.4.0@sha256:4a3396ae573c44932d06ba33f8696db4429c419da87cbdc82965ee96a37dd0af",
 							"command": ["/bin/sh", "-c"],
 							"args": ["curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics"],
 							"securityContext": {

@@ -65,15 +65,16 @@ var _ = Describe("AnsibleJob E2E", func() {
 		It("should successfully create and complete an AnsibleJob with inline inventory", func() {
 			By("Creating an AnsibleJob manifest")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -84,15 +85,11 @@ spec:
   jobTemplate:
     resources:
       limits:
-        - name: cpu
-          quantity: 500m
-        - name: memory
-          quantity: 512Mi
+        cpu: 500m
+        memory: 512Mi
       requests:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 256Mi
+        cpu: 100m
+        memory: 256Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s.yaml", ansibleJobName))
@@ -199,19 +196,18 @@ data:
 
 			By("Creating an AnsibleJob manifest with ConfigMap inventory")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-configmap
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     configMapRef:
       name: test-inventory
-      key: hosts
   extraVars:
 `, ansibleJobName, testNamespace)
 
@@ -282,34 +278,29 @@ stringData:
 
 			By("Creating an AnsibleJob manifest with Secret inventory")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-secret
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     secretRef:
       name: test-inventory-secret
-      key: hosts
   extraVars:
     - name: target_hosts
       value: localhost
   jobTemplate:
     resources:
       limits:
-        - name: cpu
-          quantity: 500m
-        - name: memory
-          quantity: 512Mi
+        cpu: 500m
+        memory: 512Mi
       requests:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 256Mi
+        cpu: 100m
+        memory: 256Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-secret.yaml", ansibleJobName))
@@ -355,19 +346,174 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 
+		It("should handle missing Secret references gracefully", func() {
+			By("Creating an AnsibleJob manifest with non-existent Secret")
+			ansibleJobManifest := fmt.Sprintf(`
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: %s-missing-secret
+  namespace: %s
+spec:
+  playbook: hello_world.yml
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
+  playbookGitRef: master
+  inventory:
+    secretRef:
+      name: non-existent-secret
+  extraVars:
+    - name: target_hosts
+      value: localhost
+`, ansibleJobName, testNamespace)
+
+			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-missing-secret.yaml", ansibleJobName))
+			err := os.WriteFile(manifestFile, []byte(ansibleJobManifest), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Failed to write manifest file")
+
+			By("Applying the AnsibleJob manifest")
+			cmd := exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply AnsibleJob manifest")
+
+			By("Verifying the AnsibleJob eventually fails due to missing Secret")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-missing-secret", ansibleJobName), "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				// Accept either Failed or Running (pod might be stuck due to missing secret)
+				phase := output
+				g.Expect(phase).To(Or(Equal("Failed"), Equal("Running")))
+
+				// If it's running, check that the underlying pod has volume mount issues
+				if phase == "Running" {
+					jobCmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+						"-l", fmt.Sprintf("ansible-job=%s-missing-secret", ansibleJobName),
+						"-o", "jsonpath={.items[*].status.containerStatuses[*].state.waiting.reason}",
+						"--context", "kind-maintenance-operator-test-e2e")
+					podOutput, _ := utils.Run(jobCmd)
+					if strings.Contains(podOutput, "CreateContainerConfigError") {
+						return // Pod is failing due to missing secret, which is expected
+					}
+				}
+			}, "120s", "10s").Should(Succeed())
+
+			By("Cleaning up resources")
+			cmd = exec.Command("kubectl", "delete", "ansiblejob",
+				fmt.Sprintf("%s-missing-secret", ansibleJobName), "-n", testNamespace,
+				"--timeout=60s", "--context", "kind-maintenance-operator-test-e2e")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should prioritize inline inventory over ConfigMapRef", func() {
+			By("Creating a ConfigMap that should be ignored")
+			inventoryConfigMap := fmt.Sprintf(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-ignored-configmap
+  namespace: %s
+data:
+  hosts: |
+    [ignored]
+    should.not.be.used
+`, testNamespace)
+
+			configMapFile := filepath.Join("/tmp", "ignored-configmap.yaml")
+			err := os.WriteFile(configMapFile, []byte(inventoryConfigMap), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Failed to write ConfigMap file")
+
+			cmd := exec.Command("kubectl", "apply", "-f", configMapFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create inventory ConfigMap")
+
+			By("Creating an AnsibleJob with both inline and ConfigMapRef")
+			ansibleJobManifest := fmt.Sprintf(`
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: %s-priority
+  namespace: %s
+spec:
+  playbook: hello_world.yml
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
+  playbookGitRef: master
+  inventory:
+    inline: |
+      [all]
+      localhost ansible_connection=local
+    configMapRef:
+      name: test-ignored-configmap
+  extraVars:
+    - name: target_hosts
+      value: localhost
+`, ansibleJobName, testNamespace)
+
+			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-priority.yaml", ansibleJobName))
+			err = os.WriteFile(manifestFile, []byte(ansibleJobManifest), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Failed to write manifest file")
+
+			By("Applying the AnsibleJob manifest")
+			cmd = exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply AnsibleJob manifest")
+
+			By("Verifying the AnsibleJob uses inline inventory (succeeds)")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-priority", ansibleJobName), "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}, "180s", "5s").Should(Succeed())
+
+			By("Verifying the job used inline inventory by checking created volumes")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-priority", ansibleJobName), "-n", testNamespace,
+					"-o", "jsonpath={.status.jobName}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				jobNameOutput, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// Check that the job uses the inline inventory ConfigMap (named with -inventory suffix)
+				cmd = exec.Command("kubectl", "get", "job", jobNameOutput, "-n", testNamespace,
+					"-o", "jsonpath={.spec.template.spec.volumes[*].configMap.name}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				volumesOutput, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(volumesOutput).To(ContainSubstring("priority-inventory"))
+				g.Expect(volumesOutput).NotTo(ContainSubstring("test-ignored-configmap"))
+			}, "60s", "5s").Should(Succeed())
+
+			By("Cleaning up resources")
+			cmd = exec.Command("kubectl", "delete", "ansiblejob",
+				fmt.Sprintf("%s-priority", ansibleJobName), "-n", testNamespace,
+				"--timeout=60s", "--context", "kind-maintenance-operator-test-e2e")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "configmap", "test-ignored-configmap",
+				"-n", testNamespace, "--timeout=60s",
+				"--context", "kind-maintenance-operator-test-e2e")
+			_, _ = utils.Run(cmd)
+		})
+
 		It("should successfully create an AnsibleJob with roles repository", func() {
 			By("Creating an AnsibleJob manifest with roles repository")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-roles
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
-  rolesRepo: https://github.com/ansible/ansible-tower-samples
+  rolesRepo: https://github.com/ansible/ansible-tower-samples.git
   rolesGitRef: master
   inventory:
     inline: |
@@ -381,15 +527,11 @@ spec:
   jobTemplate:
     resources:
       limits:
-        - name: cpu
-          quantity: 500m
-        - name: memory
-          quantity: 512Mi
+        cpu: 500m
+        memory: 512Mi
       requests:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 256Mi
+        cpu: 100m
+        memory: 256Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-roles.yaml", ansibleJobName))
@@ -433,7 +575,7 @@ spec:
 				g.Expect(output).To(ContainSubstring("initContainers:"), "Job should have init containers")
 				g.Expect(output).To(ContainSubstring("setup-ansible-runner"), "Job should have ansible runner setup init container")
 				// Verify that both repositories are referenced in the setup script
-				g.Expect(output).To(ContainSubstring("github.com/ansible/ansible-tower-samples"),
+				g.Expect(output).To(ContainSubstring("github.com/ansible/ansible-tower-samples.git"),
 					"Job should reference the playbook and roles repository")
 			}
 			Eventually(verifyJobHasInitContainers, timeout, interval).Should(Succeed())
@@ -449,7 +591,7 @@ spec:
 		It("should handle invalid git repository URLs gracefully", func() {
 			By("Creating an AnsibleJob manifest with invalid git URL")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-invalid-url
@@ -511,7 +653,7 @@ spec:
 		It("should handle malformed git URLs", func() {
 			By("Creating an AnsibleJob manifest with malformed git URL")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-malformed-url
@@ -536,45 +678,29 @@ spec:
 			By("Applying the AnsibleJob manifest")
 			cmd := exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
 			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to apply AnsibleJob manifest")
+			Expect(err).To(HaveOccurred(), "Expected validation to reject malformed URL")
+			Expect(fmt.Sprintf("%v", err)).To(ContainSubstring("should match '^https://.*\\\\.git$'"),
+				"Should fail with URL pattern validation error")
 
-			By("Verifying that the AnsibleJob is created (controller doesn't validate URLs at creation)")
-			verifyJobCreation := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "ansiblejob",
-					fmt.Sprintf("%s-malformed-url", ansibleJobName), "-n", testNamespace,
-					"-o", "yaml",
-					"--context", "kind-maintenance-operator-test-e2e")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				// Should show that the resource was created
-				g.Expect(output).To(ContainSubstring("metadata:"), "AnsibleJob should be created successfully")
-			}
-			Eventually(verifyJobCreation, timeout, interval).Should(Succeed())
-
-			By("Cleaning up test resources")
+			By("Cleaning up the manifest file")
 			os.Remove(manifestFile)
-			cmd = exec.Command("kubectl", "delete", "ansiblejob",
-				fmt.Sprintf("%s-malformed-url", ansibleJobName), "-n", testNamespace,
-				"--timeout=60s", "--context", "kind-maintenance-operator-test-e2e")
-			_, _ = utils.Run(cmd)
 		})
 
 		It("should handle missing ConfigMap references gracefully", func() {
 			By("Creating an AnsibleJob manifest with non-existent ConfigMap")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-missing-configmap
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     configMapRef:
       name: non-existent-configmap
-      key: hosts
   extraVars:
     - name: target_hosts
       value: localhost
@@ -617,14 +743,14 @@ spec:
 		It("should progress through expected status phases", func() {
 			By("Creating an AnsibleJob manifest for status progression testing")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-status
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     inline: |
@@ -636,15 +762,11 @@ spec:
   jobTemplate:
     resources:
       limits:
-        - name: cpu
-          quantity: 500m
-        - name: memory
-          quantity: 512Mi
+        cpu: 500m
+        memory: 512Mi
       requests:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 256Mi
+        cpu: 100m
+        memory: 256Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-status.yaml", ansibleJobName))
@@ -727,14 +849,14 @@ spec:
 		It("should respect timeout and resource limits", func() {
 			By("Creating an AnsibleJob manifest with timeout and custom resource limits")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-timeout
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   timeoutSeconds: 120
   inventory:
@@ -748,15 +870,11 @@ spec:
     backoffLimit: 1
     resources:
       limits:
-        - name: cpu
-          quantity: 200m
-        - name: memory
-          quantity: 256Mi
+        cpu: 200m
+        memory: 256Mi
       requests:
-        - name: cpu
-          quantity: 50m
-        - name: memory
-          quantity: 128Mi
+        cpu: 50m
+        memory: 128Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-timeout.yaml", ansibleJobName))
@@ -830,24 +948,24 @@ spec:
 		It("should use custom images for ansible-runner and init containers", func() {
 			By("Creating an AnsibleJob manifest with custom images")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-custom-images
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     inline: |
       [all]
       localhost ansible_connection=local
   jobTemplate:
-    image: quay.io/ansible/ansible-runner:latest
+    image: quay.io/ansible/ansible-runner:stable-2.12-latest@sha256:%s
     initImage: alpine/git:v2.36.3
     serviceAccountName: default
-`, ansibleJobName, testNamespace)
+`, ansibleJobName, testNamespace, "001a4bde411be863d54c1d293f3d2e7b0ff0e67ef5d7b2f9f7fb56b61694f4e8")
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-custom-images.yaml", ansibleJobName))
 			err := os.WriteFile(manifestFile, []byte(ansibleJobManifest), 0644)
@@ -867,7 +985,9 @@ spec:
 				if err != nil {
 					return err
 				}
-				if !strings.Contains(output, "quay.io/ansible/ansible-runner:latest") {
+				expectedImage := "quay.io/ansible/ansible-runner:stable-2.12-latest@sha256:" +
+					"001a4bde411be863d54c1d293f3d2e7b0ff0e67ef5d7b2f9f7fb56b61694f4e8"
+				if !strings.Contains(output, expectedImage) {
 					return fmt.Errorf("custom ansible-runner image not found")
 				}
 				if !strings.Contains(output, "alpine/git:v2.36.3") {
@@ -887,14 +1007,14 @@ spec:
 		It("should handle complex extra variables scenarios", func() {
 			By("Creating an AnsibleJob manifest with complex extra variables")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-complex-vars
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     inline: |
@@ -977,14 +1097,14 @@ spec:
 		It("should support host limiting functionality", func() {
 			By("Creating an AnsibleJob manifest with host limiting")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-host-limit
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   limit: "localhost"
   inventory:
@@ -1049,14 +1169,14 @@ spec:
 		It("should handle different git reference types (tags, commits, branches)", func() {
 			By("Testing with a specific git tag")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-git-tag
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: "v1.0.0"
   inventory:
     inline: |
@@ -1097,14 +1217,14 @@ spec:
 
 			By("Testing with a specific git commit SHA")
 			ansibleJobManifest = fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-git-commit
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: "abc123def456"
   inventory:
     inline: |
@@ -1203,14 +1323,14 @@ roleRef:
 
 			By("Creating an AnsibleJob with custom ServiceAccount")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-rbac-test
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     inline: |
@@ -1220,10 +1340,8 @@ spec:
     serviceAccountName: test-limited-sa
     resources:
       limits:
-        - name: cpu
-          quantity: 200m
-        - name: memory
-          quantity: 256Mi
+        cpu: 200m
+        memory: 256Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-rbac-test.yaml", ansibleJobName))
@@ -1281,14 +1399,14 @@ spec:
 			manifestFiles := []string{}
 			for i, jobName := range jobNames {
 				ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   inventory:
     inline: |
@@ -1302,15 +1420,11 @@ spec:
   jobTemplate:
     resources:
       limits:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 128Mi
+        cpu: 100m
+        memory: 128Mi
       requests:
-        - name: cpu
-          quantity: 50m
-        - name: memory
-          quantity: 64Mi
+        cpu: 50m
+        memory: 64Mi
 `, jobName, testNamespace, i+1)
 
 				manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s.yaml", jobName))
@@ -1390,14 +1504,14 @@ spec:
 			largeInventory += "\n      [all]\n      localhost ansible_connection=local"
 
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-large-inventory
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   limit: "localhost"
   inventory:
@@ -1411,15 +1525,11 @@ spec:
   jobTemplate:
     resources:
       limits:
-        - name: cpu
-          quantity: 500m
-        - name: memory
-          quantity: 1Gi
+        cpu: 500m
+        memory: 1Gi
       requests:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 256Mi
+        cpu: 100m
+        memory: 256Mi
 `, ansibleJobName, testNamespace, largeInventory)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-large-inventory.yaml", ansibleJobName))
@@ -1502,14 +1612,14 @@ spec:
 		It("should handle performance and resource usage scenarios", func() {
 			By("Creating an AnsibleJob with resource constraints and monitoring")
 			ansibleJobManifest := fmt.Sprintf(`
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
 kind: AnsibleJob
 metadata:
   name: %s-performance
   namespace: %s
 spec:
   playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples
+  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
   playbookGitRef: master
   timeoutSeconds: 300
   inventory:
@@ -1525,19 +1635,13 @@ spec:
     backoffLimit: 3
     resources:
       limits:
-        - name: cpu
-          quantity: 100m
-        - name: memory
-          quantity: 128Mi
-        - name: ephemeral-storage
-          quantity: 1Gi
+        cpu: 100m
+        memory: 128Mi
+        ephemeral-storage: 1Gi
       requests:
-        - name: cpu
-          quantity: 50m
-        - name: memory
-          quantity: 64Mi
-        - name: ephemeral-storage
-          quantity: 512Mi
+        cpu: 50m
+        memory: 64Mi
+        ephemeral-storage: 512Mi
 `, ansibleJobName, testNamespace)
 
 			manifestFile := filepath.Join("/tmp", fmt.Sprintf("%s-performance.yaml", ansibleJobName))

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package controller
+package utils
 
 import (
 	batchv1 "k8s.io/api/batch/v1"
@@ -11,9 +11,12 @@ import (
 	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 )
 
-// TestHelpers provides utility functions for testing
+const (
+	// InventoryVolumeName is the name of the inventory volume
+	InventoryVolumeName = "inventory"
+)
 
-// CreateTestAnsibleJob creates a basic AnsibleJob for testing
+// CreateTestAnsibleJob creates a simple AnsibleJob for testing
 func CreateTestAnsibleJob(name, namespace string) *ansiblev1alpha1.AnsibleJob {
 	return &ansiblev1alpha1.AnsibleJob{
 		ObjectMeta: metav1.ObjectMeta{
@@ -22,17 +25,14 @@ func CreateTestAnsibleJob(name, namespace string) *ansiblev1alpha1.AnsibleJob {
 		},
 		Spec: ansiblev1alpha1.AnsibleJobSpec{
 			Playbook: ansiblev1alpha1.PlaybookSpec{
-				Name:       "test.yml",
-				Repository: "https://github.com/test/playbooks.git",
-			},
-			Roles: &ansiblev1alpha1.RolesSpec{
-				Repository: "https://github.com/test/roles.git",
+				Name:       "hello-world.yml",
+				Repository: "https://github.com/example/playbooks.git",
 			},
 			Inventory: ansiblev1alpha1.AnsibleInventory{
-				Inline: "[test]\nlocalhost ansible_connection=local",
-			},
-			ExtraVars: []ansiblev1alpha1.KeyValue{
-				{Name: "test_var", Value: "test_value"},
+				Inline: `
+[web_servers]
+web1 ansible_host=10.0.1.10
+`,
 			},
 		},
 	}
@@ -55,8 +55,9 @@ func CreateTestJob(name, namespace, ansibleJobName string) *batchv1.Job {
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:  "ansible-runner",
-							Image: "quay.io/ansible/ansible-runner:v2.3.6@sha256:92fb3b54be00c51c9bd526e8e86c68c60b7e90056da42a8b5ca59b2d0a8cadd4",
+							Name: "ansible-runner",
+							Image: "quay.io/ansible/ansible-runner:stable-2.12-latest@sha256:" +
+								"001a4bde411be863d54c1d293f3d2e7b0ff0e67ef5d7b2f9f7fb56b61694f4e8",
 						},
 					},
 				},

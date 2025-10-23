@@ -39,7 +39,7 @@ spec:
   limit: "servers"
   timeoutSeconds: 3600
   jobTemplate:
-    image: "quay.io/ansible/ansible-runner:latest"
+    image: "quay.io/ansible/ansible-runner:stable-2.12-latest"
     serviceAccountName: "ansible-runner"
     backoffLimit: 1
     resources:
@@ -97,7 +97,7 @@ kubectl logs job/maintenance-task-ansible-job
 
 ## Prerequisites
 
-1. **Container Image**: Use `quay.io/ansible/ansible-runner:latest` or build custom image with required collections
+1. **Container Image**: Use `quay.io/ansible/ansible-runner:stable-2.12-latest` or build custom image with required collections
 2. **RBAC**: Service account with permissions to create Jobs and ConfigMaps
 3. **Git Access**: For private repositories, configure SSH keys or tokens
 4. **Network Access**: Ensure pods can reach target hosts defined in inventory

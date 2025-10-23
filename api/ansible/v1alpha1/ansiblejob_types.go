@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -71,29 +72,13 @@ type AnsibleInventory struct {
 	// +optional
 	Inline string `json:"inline,omitempty"`
 
-	// ConfigMapRef references a ConfigMap containing the inventory
+	// ConfigMapRef references a ConfigMap containing the inventory under the 'hosts' key
 	// +optional
-	ConfigMapRef *ConfigMapReference `json:"configMapRef,omitempty"`
+	ConfigMapRef *corev1.LocalObjectReference `json:"configMapRef,omitempty"`
 
-	// SecretRef references a Secret containing the inventory
+	// SecretRef references a Secret containing the inventory under the 'hosts' key
 	// +optional
-	SecretRef *SecretReference `json:"secretRef,omitempty"`
-}
-
-// ConfigMapReference references a ConfigMap
-type ConfigMapReference struct {
-	// +required
-	Name string `json:"name"`
-	// +required
-	Key string `json:"key"`
-}
-
-// SecretReference references a Secret
-type SecretReference struct {
-	// +required
-	Name string `json:"name"`
-	// +required
-	Key string `json:"key"`
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // JobTemplateSpec allows customization of the Kubernetes Job
@@ -117,20 +102,7 @@ type JobTemplateSpec struct {
 
 	// Resources specifies the compute resource requirements
 	// +optional
-	Resources *ResourceRequirements `json:"resources,omitempty"`
-}
-
-// ResourceRequirements specifies compute resource requirements
-type ResourceRequirements struct {
-	// Limits describes the maximum amount of compute resources allowed
-	// +optional
-	// +listType=atomic
-	Limits []ResourceQuantity `json:"limits,omitempty"`
-
-	// Requests describes the minimum amount of compute resources required
-	// +optional
-	// +listType=atomic
-	Requests []ResourceQuantity `json:"requests,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // KeyValue represents a key-value pair for extra variables
@@ -142,17 +114,6 @@ type KeyValue struct {
 	// Value is the variable value
 	// +required
 	Value string `json:"value"`
-}
-
-// ResourceQuantity represents a named resource quantity
-type ResourceQuantity struct {
-	// Name is the resource name (e.g., "cpu", "memory")
-	// +required
-	Name string `json:"name"`
-
-	// Quantity is the resource quantity (e.g., "100m", "512Mi")
-	// +required
-	Quantity string `json:"quantity"`
 }
 
 // AnsibleJobStatus defines the observed state of AnsibleJob

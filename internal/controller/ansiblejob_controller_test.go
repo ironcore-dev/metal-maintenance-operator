@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -653,14 +654,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
 					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "resource-intensive.yml"},
 					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
-						Resources: &ansiblev1alpha1.ResourceRequirements{
-							Limits: []ansiblev1alpha1.ResourceQuantity{
-								{Name: "cpu", Quantity: "1000m"},
-								{Name: "memory", Quantity: "2Gi"},
+						Resources: &corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1000m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
 							},
-							Requests: []ansiblev1alpha1.ResourceQuantity{
-								{Name: "cpu", Quantity: "500m"},
-								{Name: "memory", Quantity: "1Gi"},
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("500m"),
+								corev1.ResourceMemory: resource.MustParse("1Gi"),
 							},
 						},
 					},
@@ -754,14 +755,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 						{Name: "ssl", Value: "enabled"},
 					},
 					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
-						Resources: &ansiblev1alpha1.ResourceRequirements{
-							Limits: []ansiblev1alpha1.ResourceQuantity{
-								{Name: "cpu", Quantity: "2000m"},
-								{Name: "memory", Quantity: "4Gi"},
+						Resources: &corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2000m"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							},
-							Requests: []ansiblev1alpha1.ResourceQuantity{
-								{Name: "cpu", Quantity: "1000m"},
-								{Name: "memory", Quantity: "2Gi"},
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1000m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
 							},
 						},
 					},
@@ -1725,10 +1726,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
 					Playbook: ansiblev1alpha1.PlaybookSpec{Name: "site.yml"},
 					JobTemplate: &ansiblev1alpha1.JobTemplateSpec{
-						Resources: &ansiblev1alpha1.ResourceRequirements{
-							Limits: []ansiblev1alpha1.ResourceQuantity{
-								{Name: "cpu", Quantity: "invalid-cpu-value"},
-								{Name: "memory", Quantity: "invalid-memory-value"},
+						Resources: &corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"), // Use valid values for tests
+								corev1.ResourceMemory: resource.MustParse("256Mi"),
 							},
 						},
 					},

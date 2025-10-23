@@ -3,10 +3,7 @@
 
 package controller
 
-import (
-	"testing"
+const (
+	// InventoryVolumeName is the name of the inventory volume
+	InventoryVolumeName = "inventory"
 )
-
-func TestSimple(t *testing.T) {
-	t.Log("Simple test to verify test framework works")
-}

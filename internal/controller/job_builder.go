@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultAnsibleRunnerImage = "quay.io/ansible/ansible-runner:latest"
+	defaultAnsibleRunnerImage = "quay.io/ansible/ansible-runner:stable-2.12-latest@sha256:001a4bde411be863d54c1d293f3d2e7b0ff0e67ef5d7b2f9f7fb56b61694f4e8"
 	defaultServiceAccount     = "default"
 	defaultBackoffLimit       = int32(1)
 )
@@ -116,26 +116,6 @@ func (r *AnsibleJobReconciler) createInitContainers(ansibleJob *ansiblev1alpha1.
 		cd /runner
 		git clone %s project
 		cd ..`, ansibleJob.Spec.Playbook.Repository)
-		}
-	}
-
-	// Add roles clone if specified
-	if ansibleJob.Spec.Roles != nil && ansibleJob.Spec.Roles.Repository != "" {
-		if ansibleJob.Spec.Roles.GitRef != "" {
-			// Clone specific branch/tag/commit
-			setupCommand += fmt.Sprintf(`
-		# Clone roles repository with specific ref
-		mkdir -p /runner/project/roles
-		cd /runner/project/roles
-		git clone --depth 1 --branch %s %s . || git clone %s .
-		git checkout %s 2>/dev/null || true`, ansibleJob.Spec.Roles.GitRef, ansibleJob.Spec.Roles.Repository, ansibleJob.Spec.Roles.Repository, ansibleJob.Spec.Roles.GitRef)
-		} else {
-			// Clone default branch
-			setupCommand += fmt.Sprintf(`
-		# Clone roles repository (default branch)
-		mkdir -p /runner/project/roles
-		cd /runner/project/roles
-		git clone %s .`, ansibleJob.Spec.Roles.Repository)
 		}
 	}
 
@@ -243,10 +223,7 @@ func (r *AnsibleJobReconciler) createAnsibleRunnerContainer(ansibleJob *ansiblev
 
 	// Add resources if specified, otherwise use sensible defaults
 	if ansibleJob.Spec.JobTemplate != nil && ansibleJob.Spec.JobTemplate.Resources != nil {
-		container.Resources = corev1.ResourceRequirements{
-			Limits:   convertToResourceList(ansibleJob.Spec.JobTemplate.Resources.Limits),
-			Requests: convertToResourceList(ansibleJob.Spec.JobTemplate.Resources.Requests),
-		}
+		container.Resources = *ansibleJob.Spec.JobTemplate.Resources
 	} else {
 		// Apply sensible default resource constraints to prevent resource exhaustion
 		container.Resources = corev1.ResourceRequirements{
@@ -303,6 +280,12 @@ func (r *AnsibleJobReconciler) createVolumes(ansibleJob *ansiblev1alpha1.Ansible
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: ansibleJob.Spec.Inventory.ConfigMapRef.Name,
 					},
+					Items: []corev1.KeyToPath{
+						{
+							Key:  "hosts",
+							Path: "hosts",
+						},
+					},
 				},
 			},
 		})
@@ -312,24 +295,18 @@ func (r *AnsibleJobReconciler) createVolumes(ansibleJob *ansiblev1alpha1.Ansible
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: ansibleJob.Spec.Inventory.SecretRef.Name,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  "hosts",
+							Path: "hosts",
+						},
+					},
 				},
 			},
 		})
 	}
 
 	return volumes
-}
-
-func convertToResourceList(resources []ansiblev1alpha1.ResourceQuantity) corev1.ResourceList {
-	if resources == nil {
-		return nil
-	}
-
-	resourceList := make(corev1.ResourceList)
-	for _, res := range resources {
-		resourceList[corev1.ResourceName(res.Name)] = *parseQuantity(res.Quantity)
-	}
-	return resourceList
 }
 
 func parseQuantity(value string) *resource.Quantity {

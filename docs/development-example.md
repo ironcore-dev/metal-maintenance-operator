@@ -59,7 +59,7 @@ spec:
   extraVars:
     message: "Hello from development!"
   jobTemplate:
-    image: "quay.io/ansible/ansible-runner:latest"
+    image: "quay.io/ansible/ansible-runner:stable-2.12-latest"
     serviceAccountName: "ansible-runner"
     backoffLimit: 1
     resources:
