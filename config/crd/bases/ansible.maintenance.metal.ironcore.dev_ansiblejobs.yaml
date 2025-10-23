@@ -197,6 +197,7 @@ spec:
                     type: string
                   repository:
                     description: Repository is the Git repository containing playbooks
+                    pattern: ^https://.*\.git$
                     type: string
                 required:
                 - name
@@ -211,6 +212,7 @@ spec:
                     type: string
                   repository:
                     description: Repository is the Git repository containing roles
+                    pattern: ^https://.*\.git$
                     type: string
                 required:
                 - repository

@@ -48,6 +48,7 @@ type PlaybookSpec struct {
 
 	// Repository is the Git repository containing playbooks
 	// +required
+	// +kubebuilder:validation:Pattern=`^https://.*\.git$`
 	Repository string `json:"repository"`
 
 	// GitRef specifies the branch, tag, or commit to use for the playbook repository
@@ -59,6 +60,7 @@ type PlaybookSpec struct {
 type RolesSpec struct {
 	// Repository is the Git repository containing roles
 	// +required
+	// +kubebuilder:validation:Pattern=`^https://.*\.git$`
 	Repository string `json:"repository"`
 
 	// GitRef specifies the branch, tag, or commit to use for the roles repository

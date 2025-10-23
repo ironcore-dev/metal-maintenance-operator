@@ -202,9 +202,10 @@ metadata:
   name: %s-configmap
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     configMapRef:
       name: test-inventory
@@ -284,9 +285,10 @@ metadata:
   name: %s-secret
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     secretRef:
       name: test-inventory-secret
@@ -355,9 +357,10 @@ metadata:
   name: %s-missing-secret
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     secretRef:
       name: non-existent-secret
@@ -437,9 +440,10 @@ metadata:
   name: %s-priority
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -510,11 +514,13 @@ metadata:
   name: %s-roles
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
-  rolesRepo: https://github.com/ansible/ansible-tower-samples.git
-  rolesGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
+  roles:
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -597,9 +603,10 @@ metadata:
   name: %s-invalid-url
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://invalid-domain-that-does-not-exist.example.com/repo.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://invalid-domain-that-does-not-exist.example.com/repo.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -659,9 +666,10 @@ metadata:
   name: %s-malformed-url
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: "not-a-valid-url://malformed"
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: "not-a-valid-url://malformed"
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -695,9 +703,10 @@ metadata:
   name: %s-missing-configmap
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     configMapRef:
       name: non-existent-configmap
@@ -749,9 +758,10 @@ metadata:
   name: %s-status
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -855,9 +865,10 @@ metadata:
   name: %s-timeout
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   timeoutSeconds: 120
   inventory:
     inline: |
@@ -954,9 +965,10 @@ metadata:
   name: %s-custom-images
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -1013,9 +1025,10 @@ metadata:
   name: %s-complex-vars
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -1103,9 +1116,10 @@ metadata:
   name: %s-host-limit
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   limit: "localhost"
   inventory:
     inline: |
@@ -1175,9 +1189,10 @@ metadata:
   name: %s-git-tag
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: "v1.0.0"
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: "v1.0.0"
   inventory:
     inline: |
       [all]
@@ -1223,9 +1238,10 @@ metadata:
   name: %s-git-commit
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: "abc123def456"
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: "abc123def456"
   inventory:
     inline: |
       [all]
@@ -1329,9 +1345,10 @@ metadata:
   name: %s-rbac-test
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -1405,9 +1422,10 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   inventory:
     inline: |
       [all]
@@ -1510,9 +1528,10 @@ metadata:
   name: %s-large-inventory
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   limit: "localhost"
   inventory:
     inline: |
@@ -1618,9 +1637,10 @@ metadata:
   name: %s-performance
   namespace: %s
 spec:
-  playbook: hello_world.yml
-  playbookRepo: https://github.com/ansible/ansible-tower-samples.git
-  playbookGitRef: master
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
   timeoutSeconds: 300
   inventory:
     inline: |
