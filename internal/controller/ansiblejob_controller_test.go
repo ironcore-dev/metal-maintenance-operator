@@ -23,153 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
+	"github.com/ironcore-dev/maintenance-operator/test/utils"
 )
-
-// mockStatusWriter is a mock implementation of client.StatusWriter that can simulate failures
-type mockStatusWriter struct {
-	client.StatusWriter
-	shouldFail bool
-	failError  error
-}
-
-func (m *mockStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-	if m.shouldFail {
-		return m.failError
-	}
-	return nil
-}
-
-func (m *mockStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-	if m.shouldFail {
-		return m.failError
-	}
-	return nil
-}
-
-// mockClient wraps a fake client with a controllable status writer
-type mockClient struct {
-	client.Client
-	statusWriter *mockStatusWriter
-}
-
-func (m *mockClient) Status() client.StatusWriter {
-	return m.statusWriter
-}
-
-// mockFailingClient is a mock client that can simulate Get failures
-type mockFailingClient struct {
-	client.Client
-	shouldFail bool
-	failError  error
-}
-
-func (m *mockFailingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if m.shouldFail {
-		return m.failError
-	}
-	return m.Client.Get(ctx, key, obj, opts...)
-}
-
-// mockJobGetFailingClient is a mock client that can simulate Job Get failures
-type mockJobGetFailingClient struct {
-	client.Client
-	shouldFail bool
-	failError  error
-}
-
-func (m *mockJobGetFailingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	// Only fail for Job objects
-	if _, isJob := obj.(*batchv1.Job); isJob && m.shouldFail {
-		return m.failError
-	}
-	return m.Client.Get(ctx, key, obj, opts...)
-}
-
-// mockJobCreateFailingClient is a mock client that can simulate Job Create failures
-type mockJobCreateFailingClient struct {
-	client.Client
-	shouldFail bool
-	failError  error
-}
-
-func (m *mockJobCreateFailingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-	// Only fail for Job objects
-	if _, isJob := obj.(*batchv1.Job); isJob && m.shouldFail {
-		return m.failError
-	}
-	return m.Client.Create(ctx, obj, opts...)
-}
-
-// mockConfigMapGetFailingClient is a mock client that can simulate ConfigMap Get failures
-type mockConfigMapGetFailingClient struct {
-	client.Client
-	shouldFail bool
-	failError  error
-}
-
-func (m *mockConfigMapGetFailingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	// Only fail for ConfigMap objects
-	if _, isConfigMap := obj.(*corev1.ConfigMap); isConfigMap && m.shouldFail {
-		return m.failError
-	}
-	return m.Client.Get(ctx, key, obj, opts...)
-}
-
-// mockConfigMapCreateFailingClient is a mock client that can simulate ConfigMap Create failures
-type mockConfigMapCreateFailingClient struct {
-	client.Client
-	shouldFail bool
-	failError  error
-}
-
-func (m *mockConfigMapCreateFailingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-	// Only fail for ConfigMap objects
-	if _, isConfigMap := obj.(*corev1.ConfigMap); isConfigMap && m.shouldFail {
-		return m.failError
-	}
-	return m.Client.Create(ctx, obj, opts...)
-}
-
-// mockSetControllerRefFailingClient simulates SetControllerReference failure by failing Create with specific error
-type mockSetControllerRefFailingClient struct {
-	client.Client
-	shouldFailControllerRef bool
-}
-
-func (m *mockSetControllerRefFailingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
-	if m.shouldFailControllerRef {
-		// Simulate SetControllerReference type error
-		return errors.New("failed to set controller reference: owner must have non-empty UID")
-	}
-	return m.Client.Create(ctx, obj, opts...)
-}
-
-// mockJobClient is a mock client that can return pre-configured Job objects
-type mockJobClient struct {
-	client.Client
-	jobs map[client.ObjectKey]*batchv1.Job
-}
-
-func (m *mockJobClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if job, ok := obj.(*batchv1.Job); ok {
-		if mockJob, exists := m.jobs[key]; exists {
-			*job = *mockJob
-			return nil
-		}
-		return errors.New("job not found")
-	}
-	return m.Client.Get(ctx, key, obj, opts...)
-}
-
-// findCondition finds a condition by type in the conditions slice
-func findCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
-	for i := range conditions {
-		if conditions[i].Type == conditionType {
-			return &conditions[i]
-		}
-	}
-	return nil
-}
 
 var _ = Describe("AnsibleJob Controller", func() {
 	Context("When reconciling a resource", func() {
@@ -366,19 +221,19 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansibleJob.Status.Conditions).NotTo(BeEmpty())
 
 			// Check Ready condition
-			readyCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionReady)
+			readyCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionReady)
 			Expect(readyCondition).NotTo(BeNil())
 			Expect(readyCondition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(readyCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobSucceeded))
 
 			// Check Progressing condition
-			progressingCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionProgressing)
+			progressingCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionProgressing)
 			Expect(progressingCondition).NotTo(BeNil())
 			Expect(progressingCondition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(progressingCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobSucceeded))
 
 			// Check Succeeded condition
-			succeededCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionSucceeded)
+			succeededCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionSucceeded)
 			Expect(succeededCondition).NotTo(BeNil())
 			Expect(succeededCondition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(succeededCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobSucceeded))
@@ -421,13 +276,13 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Check Ready condition (should be False during running)
-			readyCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionReady)
+			readyCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionReady)
 			Expect(readyCondition).NotTo(BeNil())
 			Expect(readyCondition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobRunning))
 
 			// Check Progressing condition (should be True during running)
-			progressingCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionProgressing)
+			progressingCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionProgressing)
 			Expect(progressingCondition).NotTo(BeNil())
 			Expect(progressingCondition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(progressingCondition.Reason).To(Equal(ansiblev1alpha1.ReasonJobRunning))
@@ -938,14 +793,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 				WithObjects(ansibleJob).
 				Build()
 
-			statusWriter := &mockStatusWriter{
-				shouldFail: true,
-				failError:  errors.New("simulated status update failure"),
+			statusWriter := &utils.MockStatusWriter{
+				ShouldFail: true,
+				FailError:  errors.New("simulated status update failure"),
 			}
 
-			mockClient := &mockClient{
+			mockClient := &utils.MockClient{
 				Client:       fakeClient,
-				statusWriter: statusWriter,
+				StatusWriter: statusWriter,
 			}
 
 			reconciler = &AnsibleJobReconciler{
@@ -1097,10 +952,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			scheme := runtime.NewScheme()
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockFailingClient{
+			mockClient := &utils.MockFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).Build(),
-				shouldFail: true,
-				failError:  errors.New("simulated client get failure"),
+				ShouldFail: true,
+				FailError:  errors.New("simulated client get failure"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1413,10 +1268,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockJobGetFailingClient{
+			mockClient := &utils.MockJobGetFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("simulated job get failure"),
+				ShouldFail: true,
+				FailError:  errors.New("simulated job get failure"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1445,10 +1300,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockJobCreateFailingClient{
+			mockClient := &utils.MockJobCreateFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("simulated job create failure"),
+				ShouldFail: true,
+				FailError:  errors.New("simulated job create failure"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1480,14 +1335,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			statusWriter := &mockStatusWriter{
-				shouldFail: true,
-				failError:  errors.New("simulated status update failure"),
+			statusWriter := &utils.MockStatusWriter{
+				ShouldFail: true,
+				FailError:  errors.New("simulated status update failure"),
 			}
 
-			mockClient := &mockClient{
+			mockClient := &utils.MockClient{
 				Client:       fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				statusWriter: statusWriter,
+				StatusWriter: statusWriter,
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1559,10 +1414,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 			Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockConfigMapCreateFailingClient{
+			mockClient := &utils.MockConfigMapCreateFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("mock ConfigMap create error"),
+				ShouldFail: true,
+				FailError:  errors.New("mock ConfigMap create error"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1594,10 +1449,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockJobGetFailingClient{
+			mockClient := &utils.MockJobGetFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("permission denied"), // Non-NotFound error
+				ShouldFail: true,
+				FailError:  errors.New("permission denied"), // Non-NotFound error
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1629,9 +1484,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockSetControllerRefFailingClient{
+			mockClient := &utils.MockSetControllerRefFailingClient{
 				Client:                  fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFailControllerRef: true,
+				ShouldFailControllerRef: true,
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1687,11 +1542,11 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockClient{
+			mockClient := &utils.MockClient{
 				Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob, existingJob).Build(),
-				statusWriter: &mockStatusWriter{
-					shouldFail: true,
-					failError:  errors.New("simulated status update failure"),
+				StatusWriter: &utils.MockStatusWriter{
+					ShouldFail: true,
+					FailError:  errors.New("simulated status update failure"),
 				},
 			}
 
@@ -1810,10 +1665,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockJobGetFailingClient{
+			mockClient := &utils.MockJobGetFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("simulated job get failure in monitor"),
+				ShouldFail: true,
+				FailError:  errors.New("simulated job get failure in monitor"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -1849,9 +1704,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 				},
 			}
 
-			mockClient := &mockJobClient{
+			mockClient := &utils.MockJobClient{
 				Client: k8sClient,
-				jobs: map[client.ObjectKey]*batchv1.Job{
+				Jobs: map[client.ObjectKey]*batchv1.Job{
 					{Name: "test-monitor-complete-job", Namespace: ansibleJob.Namespace}: completedJob,
 				},
 			}
@@ -1874,7 +1729,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansibleJob.Status.CompletionTime).NotTo(BeNil())
 
 			By("Checking that succeeded condition has the correct message")
-			succeededCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionSucceeded)
+			succeededCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionSucceeded)
 			Expect(succeededCondition).NotTo(BeNil())
 			Expect(succeededCondition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(succeededCondition.Message).To(Equal("Job completed successfully"))
@@ -1904,9 +1759,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 				},
 			}
 
-			mockClient := &mockJobClient{
+			mockClient := &utils.MockJobClient{
 				Client: k8sClient,
-				jobs: map[client.ObjectKey]*batchv1.Job{
+				Jobs: map[client.ObjectKey]*batchv1.Job{
 					{Name: "test-monitor-failed-job-job", Namespace: ansibleJob.Namespace}: failedJob,
 				},
 			}
@@ -1929,7 +1784,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansibleJob.Status.CompletionTime).NotTo(BeNil())
 
 			By("Checking that failed condition has the correct message")
-			failedCondition := findCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionFailed)
+			failedCondition := utils.FindCondition(ansibleJob.Status.Conditions, ansiblev1alpha1.AnsibleJobConditionFailed)
 			Expect(failedCondition).NotTo(BeNil())
 			Expect(failedCondition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(failedCondition.Message).To(Equal("Job failed to complete"))
@@ -1975,14 +1830,14 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(batchv1.AddToScheme(scheme)).To(Succeed())
 
-			statusWriter := &mockStatusWriter{
-				shouldFail: true,
-				failError:  errors.New("simulated status update failure in monitor"),
+			statusWriter := &utils.MockStatusWriter{
+				ShouldFail: true,
+				FailError:  errors.New("simulated status update failure in monitor"),
 			}
 
-			mockClient := &mockClient{
+			mockClient := &utils.MockClient{
 				Client:       fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob, completedJob).Build(),
-				statusWriter: statusWriter,
+				StatusWriter: statusWriter,
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -2096,10 +1951,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockConfigMapGetFailingClient{
+			mockClient := &utils.MockConfigMapGetFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("simulated configmap get failure"),
+				ShouldFail: true,
+				FailError:  errors.New("simulated configmap get failure"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -2125,10 +1980,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 			Expect(corev1.AddToScheme(scheme)).To(Succeed())
 
-			mockClient := &mockConfigMapCreateFailingClient{
+			mockClient := &utils.MockConfigMapCreateFailingClient{
 				Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(ansibleJob).Build(),
-				shouldFail: true,
-				failError:  errors.New("simulated configmap create failure"),
+				ShouldFail: true,
+				FailError:  errors.New("simulated configmap create failure"),
 			}
 
 			reconciler := &AnsibleJobReconciler{
@@ -2391,10 +2246,10 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 				// Create a mock client that fails on ConfigMap creation
 				fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-				mockClient := &mockConfigMapCreateFailingClient{
+				mockClient := &utils.MockConfigMapCreateFailingClient{
 					Client:     fakeClient,
-					shouldFail: true,
-					failError:  errors.New("mock create failure"),
+					ShouldFail: true,
+					FailError:  errors.New("mock create failure"),
 				}
 
 				reconciler := &AnsibleJobReconciler{
