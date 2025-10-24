@@ -27,12 +27,13 @@ func NewHPEClient(options ClientOptions) (c *HPEClient, err error) {
 	return
 }
 
-func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP) error {
+func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
 	scp, _ := c.client.GetScopeByName("ScopeHardware")
+	//hostname:  node005r-bb097.cc.qa-de-1.cloud.sap
 	rackServer := ov.ServerHardware{
-		Hostname:           hostname,
-		Username:           "<username>",
-		Password:           "<password>",
+		Name:               hostname,
+		Username:           bmcUser,
+		Password:           bmcPassword,
 		Force:              false,
 		LicensingIntent:    "OneView", //OneView or OneViewNoiLO for Managed
 		ConfigurationState: "Managed",
@@ -41,8 +42,13 @@ func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP) error {
 	_, err := c.client.AddRackServer(rackServer)
 	return err
 }
-func (c *HPEClient) RemoveServer(hostname string) error {
-	return c.client.DeleteServerHardware("<serverUUID>")
+
+func (c *HPEClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error {
+	server, err := c.client.GetServerHardwareByName(hostname)
+	if err != nil {
+		return err
+	}
+	return c.client.DeleteServerHardware(server.URI)
 }
 
 func (c *HPEClient) ListServers() ([]Device, error) {

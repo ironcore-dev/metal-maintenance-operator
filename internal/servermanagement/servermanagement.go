@@ -18,8 +18,8 @@ type Device struct {
 }
 
 type ServerManagementConsoleInterface interface {
-	ImportServer(hostname string, IP metalv1alpha1.IP) error
-	RemoveServer(hostname string) error
+	ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error
+	RemoveServer(hostname string, IP metalv1alpha1.IP) error
 	ListServers() ([]Device, error)
 	GetAuthToken() (string, error)
 }

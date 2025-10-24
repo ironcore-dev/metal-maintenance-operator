@@ -124,7 +124,6 @@ func (c *client) getAuthToken() error {
 }
 
 func createClient(options ClientOptions) (client *http.Client) {
-	// Create the HTTP client:
 	client = &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{

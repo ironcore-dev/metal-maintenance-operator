@@ -5,14 +5,16 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/errors"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -86,16 +88,12 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 		logger.Error(err, "unable to list servers from console")
 		return ctrl.Result{}, err
 	}
-
+	var errs []error
 	for _, server := range serverList.Items {
 		bmc := metalv1alpha1.BMC{}
 		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &bmc); err != nil {
+			errs = append(errs, err)
 			logger.Error(err, "unable to get BMC for server", "server", server.Name)
-			continue
-		}
-		bmcSecret := metalv1alpha1.BMCSecret{}
-		if err := r.Get(ctx, client.ObjectKey{Name: bmc.Spec.BMCSecretRef.Name, Namespace: bmc.Namespace}, &bmcSecret); err != nil {
-			logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
 			continue
 		}
 		found := false
@@ -106,11 +104,23 @@ func (r *ServerManagementConsoleSetReconciler) reconcileExists(ctx context.Conte
 			}
 		}
 		if !found {
-			if err := consoleClient.ImportServer(server.Spec.BMC.Address, bmc.Status.IP); err != nil {
+			bmcSecret := metalv1alpha1.BMCSecret{}
+			if err := r.Get(ctx, client.ObjectKey{Name: bmc.Spec.BMCSecretRef.Name, Namespace: bmc.Namespace}, &bmcSecret); err != nil {
+				errs = append(errs, err)
+				logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
+				continue
+			}
+			node := strings.Split(server.Name, "-")
+			hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
+			if err := consoleClient.ImportServer(hostname, bmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"]); err != nil {
+				errs = append(errs, err)
 				logger.Error(err, "unable to import server to console", "server", server.Name)
 				continue
 			}
 		}
+	}
+	if len(errs) > 0 {
+		return ctrl.Result{}, errors.Join(errs...)
 	}
 	return r.updateStatus(ctx, consoleClient, console)
 }
@@ -121,15 +131,21 @@ func (r *ServerManagementConsoleSetReconciler) delete(ctx context.Context, conso
 		return ctrl.Result{}, err
 	}
 	var errs []error
-	client, err := r.createConsoleClient(ctx, console, nil)
+	cclient, err := r.createConsoleClient(ctx, console, nil)
 	for _, server := range serverList.Items {
-		if err := client.RemoveServer(server.Spec.BMC.Address); err != nil {
+		bmc := metalv1alpha1.BMC{}
+		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &bmc); err != nil {
+			log.FromContext(ctx).Error(err, "unable to get BMC for server", "server", server.Name)
+			errs = append(errs, err)
+			continue
+		}
+		if err := cclient.RemoveServer(server.Spec.BMC.Address, bmc.Status.IP); err != nil {
 			log.FromContext(ctx).Error(err, "unable to remove server from console", "server", server.Name)
 			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
-		return ctrl.Result{}, errors.NewAggregate(errs)
+		return ctrl.Result{}, errors.Join(errs...)
 	}
 
 	return ctrl.Result{}, nil

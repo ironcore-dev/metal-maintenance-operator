@@ -61,6 +61,10 @@ type DiscoveryJobRequest struct {
 	JobType            int          `json:"JobType"` // 1 for immediate discovery
 }
 
+type RemoveDeviceRequest struct {
+	DeviceIDs []int `json:"DeviceIDs"`
+}
+
 // DiscoveryJob represents a single discovery job in OpenManage Enterprise.
 type DiscoveryJob struct {
 	// OData Fields
@@ -104,9 +108,8 @@ func NewDellClient(options ClientOptions) (*DellClient, error) {
 	return &DellClient{client: *client}, nil
 }
 
-func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP) error {
+func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
 	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryService/DiscoveryJobs")
-
 	discoveryPayload := DiscoveryJobRequest{
 		JobName: "ImportServer-" + hostname,
 		ConnectionProfiles: []Credential{
@@ -151,8 +154,37 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP) error {
 	return nil
 }
 
-func (c *DellClient) RemoveServer(hostname string) error {
-	// Implement Dell-specific logic here
+func (c *DellClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error {
+	servers, err := c.ListServers()
+	if err != nil {
+		return fmt.Errorf("error listing servers: %w", err)
+	}
+	serverID := 0
+	for _, server := range servers {
+		if server.Hostname == hostname {
+			serverID = server.ID
+			break
+		}
+	}
+	if serverID == 0 {
+		return fmt.Errorf("server with hostname %s not found", hostname)
+	}
+	removeURL := c.client.parsedURL.JoinPath("/api/DeviceService/Actions/DeviceService.RemoveDevices")
+	removePayload := RemoveDeviceRequest{
+		DeviceIDs: []int{serverID},
+	}
+	payloadBytes, err := json.Marshal(removePayload)
+	if err != nil {
+		return fmt.Errorf("error marshalling remove payload: %w", err)
+	}
+	req, err := http.NewRequest("POST", removeURL.String(), bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("error creating remove request: %w", err)
+	}
+	_, err = c.client.DoRequest(req, []int{http.StatusNoContent})
+	if err != nil {
+		return fmt.Errorf("error executing remove request: %w", err)
+	}
 	return nil
 }
 
