@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
-# SPDX-License-Identifier: Apache-2.0
-
 # Tiltfile for maintenance-operator development
 # A simplified, clean Tiltfile built from scratch
 
