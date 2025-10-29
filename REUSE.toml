@@ -15,6 +15,7 @@ path = [
     "Dockerfile",
     "Makefile",
     "PROJECT",
+    "Tiltfile",
     "config/**",
     "dist/**",
     "examples/**",
