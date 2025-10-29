@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -91,8 +92,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -114,8 +116,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should create a Kubernetes Job", func() {
 			By("Reconciling the AnsibleJob multiple times")
 			controllerReconciler := &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			// First reconcile - initialize
@@ -151,8 +154,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should update status when job completes", func() {
 			By("Creating and reconciling the AnsibleJob")
 			controllerReconciler := &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			// Initialize and create job
@@ -245,8 +249,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should set correct conditions during running phase", func() {
 			By("Creating and reconciling the AnsibleJob to running state")
 			controllerReconciler := &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			// Initialize
@@ -297,8 +302,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		BeforeEach(func() {
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 		})
 
@@ -660,8 +666,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		BeforeEach(func() {
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 		})
 
@@ -754,8 +761,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should successfully initialize job with correct status", func() {
 			// Use real k8s client for success case
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			// Create the AnsibleJob first
@@ -804,8 +812,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler = &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling initializeJob with failing status writer")
@@ -820,8 +829,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		It("should set correct timestamps and phases", func() {
 			// Use real k8s client to verify actual behavior
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			// Create job with no existing status
@@ -856,8 +866,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		BeforeEach(func() {
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 		})
 
@@ -959,8 +970,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			ctx := context.Background()
@@ -1160,8 +1172,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		BeforeEach(func() {
 			ctx = context.Background()
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1275,8 +1288,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with failing Get")
@@ -1307,8 +1321,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with failing Create")
@@ -1346,8 +1361,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with failing status update")
@@ -1421,8 +1437,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with inline inventory that will fail")
@@ -1456,8 +1473,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with Job Get returning non-NotFound error")
@@ -1490,8 +1508,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with failing SetControllerReference")
@@ -1551,8 +1570,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createKubernetesJob with existing Job and failing status update")
@@ -1573,8 +1593,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		BeforeEach(func() {
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 		})
 
@@ -1640,8 +1661,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		BeforeEach(func() {
 			ctx = context.Background()
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1672,8 +1694,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling monitorJob with failing Get")
@@ -1713,8 +1736,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create reconciler with mock client
 			mockReconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: reconciler.Scheme,
+				Client:   mockClient,
+				Scheme:   reconciler.Scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling monitorJob with completed Job")
@@ -1768,8 +1792,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create reconciler with mock client
 			mockReconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: reconciler.Scheme,
+				Client:   mockClient,
+				Scheme:   reconciler.Scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling monitorJob with failed Job")
@@ -1841,8 +1866,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling monitorJob with failing status update")
@@ -1864,8 +1890,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 		BeforeEach(func() {
 			ctx = context.Background()
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 			ansibleJob = &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1958,8 +1985,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createInventoryConfigMap with failing Get")
@@ -1987,8 +2015,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 
 			reconciler := &AnsibleJobReconciler{
-				Client: mockClient,
-				Scheme: scheme,
+				Client:   mockClient,
+				Scheme:   scheme,
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			By("Calling createInventoryConfigMap with failing Create")
@@ -2037,8 +2066,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 		BeforeEach(func() {
 			reconciler = &AnsibleJobReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 		})
 
@@ -2180,8 +2210,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				reconciler := &AnsibleJobReconciler{
-					Client: mgr.GetClient(),
-					Scheme: mgr.GetScheme(),
+					Client:   mgr.GetClient(),
+					Scheme:   mgr.GetScheme(),
+					Recorder: record.NewFakeRecorder(100),
 				}
 
 				err = reconciler.SetupWithManager(mgr)
@@ -2216,8 +2247,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
 				reconciler := &AnsibleJobReconciler{
-					Client: k8sClient,
-					Scheme: scheme,
+					Client:   k8sClient,
+					Scheme:   scheme,
+					Recorder: record.NewFakeRecorder(100),
 				}
 
 				// Test the edge case where retryCount > 20
@@ -2230,8 +2262,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Expect(ansiblev1alpha1.AddToScheme(scheme)).To(Succeed())
 
 				reconciler := &AnsibleJobReconciler{
-					Client: k8sClient,
-					Scheme: scheme,
+					Client:   k8sClient,
+					Scheme:   scheme,
+					Recorder: record.NewFakeRecorder(100),
 				}
 
 				// Test the boundary case where retryCount = 20
@@ -2253,8 +2286,9 @@ var _ = Describe("AnsibleJob Controller", func() {
 				}
 
 				reconciler := &AnsibleJobReconciler{
-					Client: mockClient,
-					Scheme: scheme,
+					Client:   mockClient,
+					Scheme:   scheme,
+					Recorder: record.NewFakeRecorder(100),
 				}
 
 				ansibleJob := CreateTestAnsibleJob("test-job", "default")

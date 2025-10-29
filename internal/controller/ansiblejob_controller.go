@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -27,7 +28,8 @@ import (
 // AnsibleJobReconciler reconciles a AnsibleJob object
 type AnsibleJobReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // setCondition sets or updates a condition in the AnsibleJob status
@@ -68,17 +70,21 @@ func (r *AnsibleJobReconciler) updateConditionsForPhase(ansibleJob *ansiblev1alp
 	case ansiblev1alpha1.AnsibleJobPhasePending:
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionReady, metav1.ConditionFalse, ansiblev1alpha1.ReasonJobCreated, "Job is being created")
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionTrue, ansiblev1alpha1.ReasonJobCreated, "Job creation in progress")
+		r.Recorder.Event(ansibleJob, corev1.EventTypeNormal, ansiblev1alpha1.ReasonJobCreated, "AnsibleJob is being created")
 	case ansiblev1alpha1.AnsibleJobPhaseRunning:
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionReady, metav1.ConditionFalse, ansiblev1alpha1.ReasonJobRunning, "Job is running")
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionTrue, ansiblev1alpha1.ReasonJobRunning, "Job is actively running")
+		r.Recorder.Event(ansibleJob, corev1.EventTypeNormal, ansiblev1alpha1.ReasonJobRunning, "AnsibleJob is actively running")
 	case ansiblev1alpha1.AnsibleJobPhaseSucceeded:
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionReady, metav1.ConditionTrue, ansiblev1alpha1.ReasonJobSucceeded, "Job completed successfully")
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionFalse, ansiblev1alpha1.ReasonJobSucceeded, "Job completed")
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionSucceeded, metav1.ConditionTrue, ansiblev1alpha1.ReasonJobSucceeded, "Job completed successfully")
+		r.Recorder.Event(ansibleJob, corev1.EventTypeNormal, ansiblev1alpha1.ReasonJobSucceeded, "AnsibleJob completed successfully")
 	case ansiblev1alpha1.AnsibleJobPhaseFailed:
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionReady, metav1.ConditionFalse, ansiblev1alpha1.ReasonJobFailed, "Job failed")
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionProgressing, metav1.ConditionFalse, ansiblev1alpha1.ReasonJobFailed, "Job stopped progressing")
 		r.setCondition(ansibleJob, ansiblev1alpha1.AnsibleJobConditionFailed, metav1.ConditionTrue, ansiblev1alpha1.ReasonJobFailed, "Job failed to complete")
+		r.Recorder.Event(ansibleJob, corev1.EventTypeWarning, ansiblev1alpha1.ReasonJobFailed, "AnsibleJob failed to complete")
 	}
 }
 
