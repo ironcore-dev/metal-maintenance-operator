@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/ironcore-dev/controller-utils/conditionutils"
 	ansiblev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/ansible/v1alpha1"
 )
 
@@ -32,36 +33,14 @@ type AnsibleJobReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// setCondition sets or updates a condition in the AnsibleJob status
+// setCondition sets or updates a condition in the AnsibleJob status using controller-utils
 func (r *AnsibleJobReconciler) setCondition(ansibleJob *ansiblev1alpha1.AnsibleJob, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	now := metav1.NewTime(time.Now())
-
-	// Find existing condition
-	for i, condition := range ansibleJob.Status.Conditions {
-		if condition.Type == conditionType {
-			// Update existing condition if status or reason changed
-			if condition.Status != status || condition.Reason != reason {
-				ansibleJob.Status.Conditions[i].Status = status
-				ansibleJob.Status.Conditions[i].Reason = reason
-				ansibleJob.Status.Conditions[i].Message = message
-				ansibleJob.Status.Conditions[i].LastTransitionTime = now
-			}
-			// Always update ObservedGeneration
-			ansibleJob.Status.Conditions[i].ObservedGeneration = ansibleJob.Generation
-			return
-		}
-	}
-
-	// Add new condition
-	newCondition := metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: now,
-		ObservedGeneration: ansibleJob.Generation,
-	}
-	ansibleJob.Status.Conditions = append(ansibleJob.Status.Conditions, newCondition)
+	conditionutils.MustUpdateSlice(&ansibleJob.Status.Conditions, conditionType,
+		conditionutils.UpdateStatus(status),
+		conditionutils.UpdateReason(reason),
+		conditionutils.UpdateMessage(message),
+		conditionutils.UpdateObserved(ansibleJob),
+	)
 }
 
 // updateConditionsForPhase updates all relevant conditions based on the current phase
@@ -403,6 +382,7 @@ func (r *AnsibleJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&ansiblev1alpha1.AnsibleJob{}).
 		Owns(&batchv1.Job{}).
+		Owns(&corev1.ConfigMap{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 5, // Optimize for concurrent ansible job reconciliation
 		}).
