@@ -12,33 +12,8 @@ rules:
   - delete
   - get
   - list
-  - watch
-- apiGroups:
-  - firmware.maintenance.ironcore.dev
-  resources:
-  - dellfirmwareupdateomes
-  verbs:
-  - create
-  - delete
-  - get
-  - list
   - patch
-  - update
   - watch
-- apiGroups:
-  - firmware.maintenance.ironcore.dev
-  resources:
-  - dellfirmwareupdateomes/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - firmware.maintenance.ironcore.dev
-  resources:
-  - dellfirmwareupdateomes/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - metal.ironcore.dev
   resources:
@@ -67,3 +42,29 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - vendorconsole.ironcore.dev
+  resources:
+  - firmwareupdatedells
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vendorconsole.ironcore.dev
+  resources:
+  - firmwareupdatedells/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - vendorconsole.ironcore.dev
+  resources:
+  - firmwareupdatedells/status
+  verbs:
+  - get
+  - patch
+  - update

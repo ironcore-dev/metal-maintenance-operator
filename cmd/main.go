@@ -9,6 +9,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -27,6 +28,8 @@ import (
 
 	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 	"github.com/ironcore-dev/maintenance-operator/internal/controller"
+	managerconsole "github.com/ironcore-dev/maintenance-operator/vendor-console"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -37,7 +40,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -190,11 +193,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.DELLFirmwareUpdateOMEReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+	if err = (&controller.FirmwareUpdateDELLReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		ManagerNamespace: "default",
+		OMEConfig: &managerconsole.Config{
+			InsecureSkipVerify: true,
+			ReuseConnections:   false,
+		},
+		ResyncInterval: 30 * time.Second,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "DELLFirmwareUpdateOME")
+		setupLog.Error(err, "unable to create controller", "controller", "FirmwareUpdateDELL")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

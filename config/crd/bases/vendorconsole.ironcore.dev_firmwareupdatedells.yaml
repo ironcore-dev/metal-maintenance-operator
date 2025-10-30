@@ -4,20 +4,36 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: dellfirmwareupdateomes.firmware.maintenance.ironcore.dev
+  name: firmwareupdatedells.vendorconsole.ironcore.dev
 spec:
-  group: firmware.maintenance.ironcore.dev
+  group: vendorconsole.ironcore.dev
   names:
-    kind: DELLFirmwareUpdateOME
-    listKind: DELLFirmwareUpdateOMEList
-    plural: dellfirmwareupdateomes
-    singular: dellfirmwareupdateome
+    kind: FirmwareUpdateDELL
+    listKind: FirmwareUpdateDELLList
+    plural: firmwareupdatedells
+    singular: firmwareupdatedell
   scope: Cluster
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.omeURL
+      name: vendorURL
+      type: string
+    - jsonPath: .spec.serverMaintenancePolicy
+      name: serverMaintenancePolicy
+      type: string
+    - jsonPath: .status.serverCount
+      name: serverCount
+      type: integer
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: DELLFirmwareUpdateOME is the Schema for the dellfirmwareupdateomes
+        description: FirmwareUpdateDELL is the Schema for the FirmwareUpdateDELLs
           API.
         properties:
           apiVersion:
@@ -38,7 +54,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: DELLFirmwareUpdateOMESpec defines the desired state of DELLFirmwareUpdateOME.
+            description: FirmwareUpdateDELLSpec defines the desired state of FirmwareUpdateDELL.
             properties:
               baselineConfig:
                 description: BaselineConfig contains configuration options for the
@@ -70,13 +86,13 @@ spec:
                   The operator will use the catalog name and ignore CreateCatalog field.
                 type: string
               createCatalog:
-                description: CreateCatalog is the fields required to create catalog
-                  through the Dell OpenManage Enterprise (OME).
+                description: |-
+                  CreateCatalog is the fields required to create catalog through the Dell OpenManage Enterprise (OME).
+                  kubbuilder:validation:Optional
                 properties:
                   fileName:
                     maxLength: 253
                     minLength: 1
-                    pattern: ^[a-zA-Z0-9.-]+$
                     type: string
                   repository:
                     description: Repository contains the details of the repository
@@ -141,6 +157,9 @@ spec:
                 - repository
                 - sourcePath
                 type: object
+                x-kubernetes-validations:
+                - message: CreateCatalog is immutable
+                  rule: self == oldSelf
               firmwareUpgradeConfig:
                 description: FirmwareUpgradeConfig contains configuration options
                   for the firmware upgrade process.
@@ -316,9 +335,26 @@ spec:
             - serverSelector
             type: object
           status:
-            description: DELLFirmwareUpdateOMEStatus defines the observed state of
-              DELLFirmwareUpdateOME.
+            description: FirmwareUpdateDELLStatus defines the observed state of FirmwareUpdateDELL.
             properties:
+              baseline:
+                description: Baseline contains the details of the Baseline created
+                  by the OME for the firmware upgrade.
+                properties:
+                  id:
+                    description: Id is the unique identifier for the baseline created
+                      in OME.
+                    type: integer
+                type: object
+              catalog:
+                description: Catalog contains the details of the Catalog created by
+                  the OME for the firmware upgrade.
+                properties:
+                  id:
+                    description: Id is the unique identifier for the catalog created
+                      in OME.
+                    type: integer
+                type: object
               conditions:
                 description: Conditions represents the latest available observations
                   of the Bios version upgrade state.

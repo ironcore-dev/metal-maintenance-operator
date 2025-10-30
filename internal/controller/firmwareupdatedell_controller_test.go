@@ -18,7 +18,7 @@ import (
 	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 )
 
-var _ = Describe("DELLFirmwareUpdateOME Controller", func() {
+var _ = Describe("FirmwareUpdateDELL Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -30,13 +30,13 @@ var _ = Describe("DELLFirmwareUpdateOME Controller", func() {
 		}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind DELLFirmwareUpdateOME")
-			resource := &maintenancev1alpha1.DELLFirmwareUpdateOME{
+			By("creating the custom resource for the Kind FirmwareUpdateDELL")
+			resource := &maintenancev1alpha1.FirmwareUpdateDELL{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
 					Namespace: "default",
 				},
-				Spec: maintenancev1alpha1.DELLFirmwareUpdateOMESpec{
+				Spec: maintenancev1alpha1.FirmwareUpdateDELLSpec{
 					OMEURL: "https://example.com/ome",
 					SecretRef: &v1.LocalObjectReference{
 						Name: "example-secret",
@@ -53,16 +53,16 @@ var _ = Describe("DELLFirmwareUpdateOME Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &maintenancev1alpha1.DELLFirmwareUpdateOME{}
+			resource := &maintenancev1alpha1.FirmwareUpdateDELL{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Cleanup the specific resource instance DELLFirmwareUpdateOME")
+			By("Cleanup the specific resource instance FirmwareUpdateDELL")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &DELLFirmwareUpdateOMEReconciler{
+			controllerReconciler := &FirmwareUpdateDELLReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}

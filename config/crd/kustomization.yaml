@@ -2,7 +2,7 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/firmware.maintenance.ironcore.dev_dellfirmwareupdateomes.yaml
+- bases/vendorconsole.ironcore.dev_firmwareupdatedells.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

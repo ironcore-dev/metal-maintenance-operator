@@ -7,6 +7,12 @@ package v1alpha1
 const (
 	// SecretUsernameKeyName is the secret key name for the username.
 	SecretUsernameKeyName = "username"
-	// SecretPasswordKeyName is the secret key name for the password.F
+	// SecretPasswordKeyName is the secret key name for the password
 	SecretPasswordKeyName = "password"
+	// SecretTokenKeyName is the secret key name for the token.
+	SecretTokenKeyName = "token"
+	// SecretSessionKeyName is the secret key name for the session Key.
+	SecretSessionKeyName = "session"
+	// SecretSessionIDKeyName is the secret key name for the session ID.
+	SecretSessionIDKeyName = "sessionID"
 )

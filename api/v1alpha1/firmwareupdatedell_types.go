@@ -80,8 +80,8 @@ const (
 	NoCheckCertificateHTTPS CheckCertificateCatalog = "NoCheckCertificateHTTPS"
 )
 
-// DELLFirmwareUpdateOMESpec defines the desired state of DELLFirmwareUpdateOME.
-type DELLFirmwareUpdateOMESpec struct {
+// FirmwareUpdateDELLSpec defines the desired state of FirmwareUpdateDELL.
+type FirmwareUpdateDELLSpec struct {
 	// OMEURL is the URL of the Dell OpenManage Enterprise (OME) instance.
 	// +required
 	// +kubebuilder:validation:Pattern=`^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$`
@@ -93,6 +93,8 @@ type DELLFirmwareUpdateOMESpec struct {
 	SecretRef *corev1.LocalObjectReference `json:"secretRef"`
 
 	// CreateCatalog is the fields required to create catalog through the Dell OpenManage Enterprise (OME).
+	// kubbuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="CreateCatalog is immutable"
 	// +optional
 	CreateCatalog *CreateCatalog `json:"createCatalog,omitempty"`
 
@@ -189,7 +191,6 @@ type CreateCatalog struct {
 	// FileName is the name of the catalog file to be created.
 	// +required
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9.-]+$`
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:MinLength=1
 
@@ -253,8 +254,8 @@ type DellJob struct {
 	Name string `json:"name,omitempty"`
 }
 
-// DELLFirmwareUpdateOMEStatus defines the observed state of DELLFirmwareUpdateOME.
-type DELLFirmwareUpdateOMEStatus struct {
+// FirmwareUpdateDELLStatus defines the observed state of FirmwareUpdateDELL.
+type FirmwareUpdateDELLStatus struct {
 	// State represents the current state of the bios configuration task.
 	// +optional
 	State FirmwareUpdateState `json:"state,omitempty"`
@@ -262,6 +263,13 @@ type DELLFirmwareUpdateOMEStatus struct {
 	// UpdateTask contains the state of the Update Task created by the OME for the firmware upgrade.
 	// +optional
 	UpdateTask *DellJob `json:"updateTask,omitempty"`
+
+	// Catalog contains the details of the Catalog created by the OME for the firmware upgrade.
+	Catalog *DellCatalog `json:"catalog,omitempty"`
+
+	// Baseline contains the details of the Baseline created by the OME for the firmware upgrade.
+	// +optional
+	Baseline *DellBaseline `json:"baseline,omitempty"`
 
 	// ServerCount is the total number of servers selected by the ServerSelector.
 	// +optional
@@ -274,28 +282,43 @@ type DELLFirmwareUpdateOMEStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
+type DellCatalog struct {
+	// Id is the unique identifier for the catalog created in OME.
+	Id int `json:"id,omitempty"`
+}
+
+type DellBaseline struct {
+	// Id is the unique identifier for the baseline created in OME.
+	Id int `json:"id,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="vendorURL",type=string,JSONPath=`.spec.omeURL`
+// +kubebuilder:printcolumn:name="serverMaintenancePolicy",type=string,JSONPath=`.spec.serverMaintenancePolicy`
+// +kubebuilder:printcolumn:name="serverCount",type=integer,JSONPath=`.status.serverCount`
+// +kubebuilder:printcolumn:name="State",type="string",JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// DELLFirmwareUpdateOME is the Schema for the dellfirmwareupdateomes API.
-type DELLFirmwareUpdateOME struct {
+// FirmwareUpdateDELL is the Schema for the FirmwareUpdateDELLs API.
+type FirmwareUpdateDELL struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DELLFirmwareUpdateOMESpec   `json:"spec,omitempty"`
-	Status DELLFirmwareUpdateOMEStatus `json:"status,omitempty"`
+	Spec   FirmwareUpdateDELLSpec   `json:"spec,omitempty"`
+	Status FirmwareUpdateDELLStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// DELLFirmwareUpdateOMEList contains a list of DELLFirmwareUpdateOME.
-type DELLFirmwareUpdateOMEList struct {
+// FirmwareUpdateDELLList contains a list of FirmwareUpdateDELL.
+type FirmwareUpdateDELLList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []DELLFirmwareUpdateOME `json:"items"`
+	Items           []FirmwareUpdateDELL `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&DELLFirmwareUpdateOME{}, &DELLFirmwareUpdateOMEList{})
+	SchemeBuilder.Register(&FirmwareUpdateDELL{}, &FirmwareUpdateDELLList{})
 }

@@ -1,7 +1,7 @@
 # This rule is not used by the project maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants full permissions ('*') over firmware.maintenance.ironcore.dev.
+# Grants full permissions ('*') over vendorconsole.ironcore.dev.
 # This role is intended for users authorized to modify roles and bindings within the cluster,
 # enabling them to delegate specific permissions to other users or groups as needed.
 
@@ -11,17 +11,17 @@ metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: dellfirmwareupdateome-admin-role
+  name: firmwareupdatedell-admin-role
 rules:
 - apiGroups:
-  - firmware.maintenance.ironcore.dev
+  - vendorconsole.ironcore.dev
   resources:
-  - dellfirmwareupdateomes
+  - firmwareupdatedells
   verbs:
   - '*'
 - apiGroups:
-  - firmware.maintenance.ironcore.dev
+  - vendorconsole.ironcore.dev
   resources:
-  - dellfirmwareupdateomes/status
+  - firmwareupdatedells/status
   verbs:
   - get

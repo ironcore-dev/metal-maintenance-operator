@@ -5,6 +5,7 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -17,7 +18,23 @@ import (
 	"time"
 )
 
-// Client represents the ManagerConsole client.
+type ResponseError struct {
+	StatusCode int
+	Body       []byte
+	URL        string
+	Method     string
+}
+
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("error from '%s' URL: %s \nstatus code: %d, \nbody: %s",
+		e.Method,
+		e.URL,
+		e.StatusCode,
+		string(e.Body),
+	)
+}
+
+// Client represents the VendorConsole client.
 type ManagerClient struct {
 	Auth   *AuthToken
 	Client *http.Client
@@ -33,34 +50,30 @@ type Config struct {
 }
 
 type AuthToken struct {
-	Token    string
-	Session  string
-	Username string
-	Password string
-	AuthType AuthMethod
+	Token     string
+	Session   string
+	Username  string
+	Password  string
+	AuthType  AuthMethod
+	SessionId string
 }
 
 func CreateClient(config *Config) *http.Client {
-	defaultTransport := http.DefaultTransport.(*http.Transport)
 	transport := &http.Transport{
-		Proxy:                 defaultTransport.Proxy,
-		DialContext:           defaultTransport.DialContext,
-		MaxIdleConns:          defaultTransport.MaxIdleConns,
-		IdleConnTimeout:       defaultTransport.IdleConnTimeout,
-		ExpectContinueTimeout: defaultTransport.ExpectContinueTimeout,
-		TLSHandshakeTimeout:   config.TLSHandshakeTimeout * time.Second,
+		TLSHandshakeTimeout: config.TLSHandshakeTimeout,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: config.InsecureSkipVerify,
+			InsecureSkipVerify: config.InsecureSkipVerify, // #nosec G402
 		},
 	}
 	if config.ReuseConnections {
 		transport.DisableKeepAlives = false
 		transport.IdleConnTimeout = 0
 	}
-	return &http.Client{Transport: transport}
+	return &http.Client{Timeout: 30 * time.Second, Transport: transport}
 }
 
 func (c *ManagerClient) CreateSession(
+	ctx context.Context,
 	url *neturl.URL,
 	body map[string]string,
 	authMtd AuthMethod,
@@ -79,7 +92,7 @@ func (c *ManagerClient) CreateSession(
 	if err != nil {
 		return err
 	}
-	resp, err := c.DoRequest(req, okCodes)
+	resp, err := c.DoRequest(ctx, req, okCodes)
 	if err != nil {
 		return err
 	}
@@ -99,7 +112,7 @@ func (c *ManagerClient) CreateSession(
 
 // DoRequest performs an HTTP request and returns the response body or an error.
 // its caller is responsible to close the response body.
-func (c *ManagerClient) DoRequest(req *http.Request, okCodes []int) (*http.Response, error) {
+func (c *ManagerClient) DoRequest(ctx context.Context, req *http.Request, okCodes []int) (*http.Response, error) {
 	res, err := c.Client.Do(req)
 	if err != nil {
 		return nil, err
@@ -107,24 +120,35 @@ func (c *ManagerClient) DoRequest(req *http.Request, okCodes []int) (*http.Respo
 	// Check for expected status codes only if provided.
 	// else accept any status code.
 	if len(okCodes) > 0 && !slices.Contains(okCodes, res.StatusCode) {
-		return res, fmt.Errorf("unexpected status code: %d", res.StatusCode)
+		resBody := []byte{}
+		if res.Body != nil {
+			resBody, _ = io.ReadAll(res.Body)
+		}
+		res.Body.Close() // nolint: errcheck
+		responseError := &ResponseError{
+			StatusCode: res.StatusCode,
+			Body:       resBody,
+			URL:        req.URL.String(),
+			Method:     req.Method,
+		}
+		return res, responseError
 	}
 	return res, nil
 }
 
-func (c *ManagerClient) GetBodyFromRequest(req *http.Request, okCodes []int) ([]byte, error) {
+func (c *ManagerClient) GetBodyFromRequest(ctx context.Context, req *http.Request, okCodes []int) ([]byte, error) {
 	var resBody []byte
-	response, err := c.DoRequest(req, okCodes)
-	if response != nil {
+	response, err := c.DoRequest(ctx, req, okCodes)
+	if response != nil && response.Body != nil {
 		defer response.Body.Close() // nolint: errcheck
-		resBody, err = io.ReadAll(response.Body)
+		resBody, _ = io.ReadAll(response.Body)
 	}
 	return resBody, err
 }
 
 // Get performs a GET request to the specified path and decodes the response
-func (c *ManagerClient) Get(url *neturl.URL, returnData any, okCodes []int) error {
-	resBody, err := c.GetResponseBody(url, okCodes)
+func (c *ManagerClient) Get(ctx context.Context, url *neturl.URL, returnData any, okCodes []int) error {
+	resBody, err := c.GetResponseBody(ctx, url, okCodes)
 	if err != nil {
 		return err
 	}
@@ -136,7 +160,7 @@ func (c *ManagerClient) Get(url *neturl.URL, returnData any, okCodes []int) erro
 	return err
 }
 
-func (c *ManagerClient) GetResponseBody(url *neturl.URL, okCodes []int) ([]byte, error) {
+func (c *ManagerClient) GetResponseBody(ctx context.Context, url *neturl.URL, okCodes []int) ([]byte, error) {
 	req, err := c.CreateRequestWithAuth(
 		url,
 		http.MethodGet,
@@ -146,11 +170,27 @@ func (c *ManagerClient) GetResponseBody(url *neturl.URL, okCodes []int) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
 	}
-	return c.GetBodyFromRequest(req, okCodes)
+	return c.GetBodyFromRequest(ctx, req, okCodes)
 }
 
-func (c *ManagerClient) Post(url *neturl.URL, body io.Reader, returnData any, okCodes []int) error {
-	response, err := c.PostWithResponse(url, body, okCodes)
+func (c *ManagerClient) Post(
+	ctx context.Context,
+	url *neturl.URL,
+	body io.Reader,
+	returnData any,
+	okCodes []int) error {
+	response, err := c.PostWithResponse(ctx, url, body, okCodes)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(response, returnData); err != nil {
+		return fmt.Errorf("failed to decode response from: %v \nresponse: %v \nwith error: %v", url.String(), response, err)
+	}
+	return err
+}
+
+func (c *ManagerClient) Put(ctx context.Context, url *neturl.URL, body io.Reader, returnData any, okCodes []int) error {
+	response, err := c.PutWithResponse(ctx, url, body, okCodes)
 	if err != nil {
 		return err
 	}
@@ -160,18 +200,12 @@ func (c *ManagerClient) Post(url *neturl.URL, body io.Reader, returnData any, ok
 	return err
 }
 
-func (c *ManagerClient) Put(url *neturl.URL, body io.Reader, returnData any, okCodes []int) error {
-	response, err := c.PutWithResponse(url, body, okCodes)
-	if err != nil {
-		return err
-	}
-	if err = json.Unmarshal(response, returnData); err != nil {
-		return fmt.Errorf("failed to decode response from: %v. \nresponse: %v \twith error: %v", url.String(), response, err)
-	}
-	return err
-}
-
-func (c *ManagerClient) PutWithResponse(url *neturl.URL, body io.Reader, okCodes []int) ([]byte, error) {
+func (c *ManagerClient) PutWithResponse(
+	ctx context.Context,
+	url *neturl.URL,
+	body io.Reader,
+	okCodes []int,
+) ([]byte, error) {
 	req, err := c.CreateRequestWithAuth(
 		url,
 		http.MethodPut,
@@ -181,10 +215,15 @@ func (c *ManagerClient) PutWithResponse(url *neturl.URL, body io.Reader, okCodes
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
 	}
-	return c.GetBodyFromRequest(req, okCodes)
+	return c.GetBodyFromRequest(ctx, req, okCodes)
 }
 
-func (c *ManagerClient) PostWithResponse(url *neturl.URL, body io.Reader, okCodes []int) ([]byte, error) {
+func (c *ManagerClient) PostWithResponse(
+	ctx context.Context,
+	url *neturl.URL,
+	body io.Reader,
+	okCodes []int,
+) ([]byte, error) {
 	req, err := c.CreateRequestWithAuth(
 		url,
 		http.MethodPost,
@@ -194,7 +233,7 @@ func (c *ManagerClient) PostWithResponse(url *neturl.URL, body io.Reader, okCode
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request %v \twith error: %v", url.String(), err)
 	}
-	return c.GetBodyFromRequest(req, okCodes)
+	return c.GetBodyFromRequest(ctx, req, okCodes)
 }
 
 func (c *ManagerClient) CreateRequestWithAuth(
@@ -212,15 +251,28 @@ func (c *ManagerClient) CreateRequestWithAuth(
 		req.Close = false
 		req.Header.Add("Connection", "keep-alive")
 	}
-	if c.Config.HeaderCustomization == nil {
+	if c.Config.HeaderCustomization == nil && header == nil {
 		req.Header = http.Header{
 			"Content-Type": []string{"application/json"},
-			"Accept":       []string{"application/json"},
 		}
-	} else {
+	} else if header != nil {
 		req.Header = header
+
+	} else {
+		req.Header = http.Header{}
+		for k, v := range c.Config.HeaderCustomization {
+			req.Header.Add(k, v)
+		}
+		if req.Header.Get("Content-Type") == "" {
+			req.Header.Add("Content-Type", "application/json")
+		}
 	}
-	req.Header.Add(string(c.Auth.AuthType), c.Auth.Token)
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Add("Content-Type", "application/json")
+	}
+	if c.Auth != nil && c.Auth.Token != "" {
+		req.Header.Add(string(c.Auth.AuthType), c.Auth.Token)
+	}
 
 	return req, nil
 }
