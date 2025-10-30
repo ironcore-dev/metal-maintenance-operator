@@ -128,14 +128,14 @@ spec:
 			Eventually(verifyAnsibleJobStatus, timeout, interval).Should(Succeed())
 
 			By("Verifying that a Kubernetes Job is created")
-			verifyKubernetesJobExists := func(g Gomega) {
+			verifyJobExists := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "jobs", "-n", testNamespace, "-l",
 					fmt.Sprintf("ansible-job=%s", ansibleJobName), "--context", "kind-maintenance-operator-test-e2e")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(ContainSubstring(ansibleJobName), "Kubernetes Job should be created")
 			}
-			Eventually(verifyKubernetesJobExists, timeout, interval).Should(Succeed())
+			Eventually(verifyJobExists, timeout, interval).Should(Succeed())
 
 			By("Verifying that conditions are set correctly")
 			verifyConditions := func(g Gomega) {
@@ -233,7 +233,7 @@ spec:
 			Eventually(verifyAnsibleJobExists, timeout, interval).Should(Succeed())
 
 			By("Verifying that a Kubernetes Job is created")
-			verifyKubernetesJobExists := func(g Gomega) {
+			verifyJobExists := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "jobs", "-n", testNamespace, "-l",
 					fmt.Sprintf("ansible-job=%s-configmap", ansibleJobName), "--context", "kind-maintenance-operator-test-e2e")
 				output, err := utils.Run(cmd)
@@ -241,7 +241,7 @@ spec:
 				g.Expect(output).To(ContainSubstring(fmt.Sprintf("%s-configmap", ansibleJobName)),
 					"Kubernetes Job should be created")
 			}
-			Eventually(verifyKubernetesJobExists, timeout, interval).Should(Succeed())
+			Eventually(verifyJobExists, timeout, interval).Should(Succeed())
 
 			By("Cleaning up test resources")
 			os.Remove(manifestFile)
@@ -326,14 +326,14 @@ spec:
 			Eventually(verifyAnsibleJobExists, timeout, interval).Should(Succeed())
 
 			By("Verifying that a Kubernetes Job is created")
-			verifyKubernetesJobExists := func(g Gomega) {
+			verifyJobExists := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "jobs", "-n", testNamespace, "-l",
 					fmt.Sprintf("ansible-job=%s-secret", ansibleJobName), "--context", "kind-maintenance-operator-test-e2e")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(ContainSubstring(fmt.Sprintf("%s-secret", ansibleJobName)), "Kubernetes Job should be created")
 			}
-			Eventually(verifyKubernetesJobExists, timeout, interval).Should(Succeed())
+			Eventually(verifyJobExists, timeout, interval).Should(Succeed())
 
 			By("Cleaning up test resources")
 			os.Remove(manifestFile)
@@ -561,14 +561,14 @@ spec:
 			Eventually(verifyAnsibleJobExists, timeout, interval).Should(Succeed())
 
 			By("Verifying that a Kubernetes Job is created")
-			verifyKubernetesJobExists := func(g Gomega) {
+			verifyJobExists := func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "jobs", "-n", testNamespace, "-l",
 					fmt.Sprintf("ansible-job=%s-roles", ansibleJobName), "--context", "kind-maintenance-operator-test-e2e")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(ContainSubstring(fmt.Sprintf("%s-roles", ansibleJobName)), "Kubernetes Job should be created")
 			}
-			Eventually(verifyKubernetesJobExists, timeout, interval).Should(Succeed())
+			Eventually(verifyJobExists, timeout, interval).Should(Succeed())
 
 			By("Verifying that the Job has init containers for both playbook and roles")
 			verifyJobHasInitContainers := func(g Gomega) {

@@ -119,7 +119,7 @@ func (r *AnsibleJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return r.initializeJob(ctx, &ansibleJob)
 	case ansiblev1alpha1.AnsibleJobPhasePending:
 		// Check if job should be created
-		return r.createKubernetesJob(ctx, &ansibleJob)
+		return r.createJob(ctx, &ansibleJob)
 	case ansiblev1alpha1.AnsibleJobPhaseRunning:
 		// Monitor the running job
 		return r.monitorJob(ctx, &ansibleJob)
@@ -157,7 +157,7 @@ func (r *AnsibleJobReconciler) initializeJob(ctx context.Context, ansibleJob *an
 	return ctrl.Result{Requeue: true}, nil
 }
 
-func (r *AnsibleJobReconciler) createKubernetesJob(ctx context.Context, ansibleJob *ansiblev1alpha1.AnsibleJob) (ctrl.Result, error) {
+func (r *AnsibleJobReconciler) createJob(ctx context.Context, ansibleJob *ansiblev1alpha1.AnsibleJob) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Check if job already exists

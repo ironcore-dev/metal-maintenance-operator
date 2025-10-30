@@ -30,8 +30,8 @@ import (
 var _ = Describe("AnsibleJob Controller", func() {
 	Context("When reconciling a resource", func() {
 		const (
-			AnsibleJobName      = "test-ansible-job"
-			AnsibleJobNamespace = "default"
+			ansibleJobName      = "test-ansible-job"
+			ansibleJobNamespace = "default"
 			timeout             = time.Second * 10
 			duration            = time.Second * 10
 			interval            = time.Millisecond * 250
@@ -40,16 +40,16 @@ var _ = Describe("AnsibleJob Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name:      AnsibleJobName,
-			Namespace: AnsibleJobNamespace,
+			Name:      ansibleJobName,
+			Namespace: ansibleJobNamespace,
 		}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind AnsibleJob")
 			ansibleJob := &ansiblev1alpha1.AnsibleJob{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      AnsibleJobName,
-					Namespace: AnsibleJobNamespace,
+					Name:      ansibleJobName,
+					Namespace: ansibleJobNamespace,
 				},
 				Spec: ansiblev1alpha1.AnsibleJobSpec{
 					Playbook: ansiblev1alpha1.PlaybookSpec{
@@ -79,7 +79,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Cleanup any created jobs")
 			jobList := &batchv1.JobList{}
-			err = k8sClient.List(ctx, jobList, client.InNamespace(AnsibleJobNamespace))
+			err = k8sClient.List(ctx, jobList, client.InNamespace(ansibleJobNamespace))
 			Expect(err).NotTo(HaveOccurred())
 
 			for _, job := range jobList.Items {
@@ -136,7 +136,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			By("Checking that a Job was created")
 			jobList := &batchv1.JobList{}
 			Eventually(func() int {
-				listErr := k8sClient.List(ctx, jobList, client.InNamespace(AnsibleJobNamespace))
+				listErr := k8sClient.List(ctx, jobList, client.InNamespace(ansibleJobNamespace))
 				if listErr != nil {
 					return 0
 				}
@@ -145,7 +145,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Checking Job has correct labels and specifications")
 			job := jobList.Items[0]
-			Expect(job.Labels["ansible-job"]).To(Equal(AnsibleJobName))
+			Expect(job.Labels["ansible-job"]).To(Equal(ansibleJobName))
 			Expect(job.Labels["app"]).To(Equal("ansible-runner"))
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 			Expect(job.Spec.Template.Spec.InitContainers).To(HaveLen(1)) // single streamlined setup container
@@ -172,7 +172,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			By("Simulating job completion")
 			jobList := &batchv1.JobList{}
-			err = k8sClient.List(ctx, jobList, client.InNamespace(AnsibleJobNamespace))
+			err = k8sClient.List(ctx, jobList, client.InNamespace(ansibleJobNamespace))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(jobList.Items).To(HaveLen(1))
 
@@ -1003,7 +1003,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Create a corresponding Kubernetes Job
 			jobName := "running-job-job"
-			kubernetesJob := &batchv1.Job{
+			job := &batchv1.Job{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      jobName,
 					Namespace: "default",
@@ -1023,7 +1023,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, kubernetesJob)).To(Succeed())
+			Expect(k8sClient.Create(ctx, job)).To(Succeed())
 
 			// Update status to Running phase with JobName
 			ansibleJob.Status = ansiblev1alpha1.AnsibleJobStatus{
@@ -1048,7 +1048,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, ansibleJob)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, kubernetesJob)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, job)).To(Succeed())
 		})
 
 		It("should handle AnsibleJob in Succeeded phase", func() {
@@ -1162,7 +1162,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 	})
 
-	Context("CreateKubernetesJob Function Tests", func() {
+	Context("CreateJob Function Tests", func() {
 		var (
 			reconciler *AnsibleJobReconciler
 			ansibleJob *ansiblev1alpha1.AnsibleJob
@@ -1193,8 +1193,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			ansibleJob.Status.Phase = ansiblev1alpha1.AnsibleJobPhasePending
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
-			By("Calling createKubernetesJob")
-			result, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob")
+			result, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking successful creation")
 			Expect(err).NotTo(HaveOccurred())
@@ -1254,8 +1254,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, existingJob)).To(Succeed())
 
-			By("Calling createKubernetesJob with existing Job")
-			result, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with existing Job")
+			result, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking existing Job is handled")
 			Expect(err).NotTo(HaveOccurred())
@@ -1293,8 +1293,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with failing Get")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with failing Get")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
@@ -1326,8 +1326,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with failing Create")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with failing Create")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
@@ -1366,8 +1366,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with failing status update")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with failing status update")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
@@ -1385,8 +1385,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 			ansibleJob.Spec.Inventory.Inline = "[webservers]\nweb1.example.com\nweb2.example.com"
 			Expect(k8sClient.Create(ctx, ansibleJob)).To(Succeed())
 
-			By("Calling createKubernetesJob with inline inventory")
-			result, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with inline inventory")
+			result, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking successful creation")
 			Expect(err).NotTo(HaveOccurred())
@@ -1415,7 +1415,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(k8sClient.Delete(ctx, createdConfigMap)).To(Succeed())
 		})
 
-		It("should handle createInventoryConfigMap failure within createKubernetesJob", func() {
+		It("should handle createInventoryConfigMap failure within createJob", func() {
 			// Use unique name for this test
 			ansibleJob.Name = "test-inventory-fail-job"
 			ansibleJob.Name = "test-inventory-fail-job"
@@ -1442,8 +1442,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with inline inventory that will fail")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with inline inventory that will fail")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
@@ -1478,8 +1478,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with Job Get returning non-NotFound error")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with Job Get returning non-NotFound error")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking error is propagated correctly")
 			Expect(err).To(HaveOccurred())
@@ -1489,7 +1489,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			Expect(k8sClient.Delete(ctx, ansibleJob)).To(Succeed())
 		})
 
-		It("should handle SetControllerReference failure in createKubernetesJob", func() {
+		It("should handle SetControllerReference failure in createJob", func() {
 			// Use unique name for this test
 			ansibleJob.Name = "test-controller-ref-fail"
 			ansibleJob.Name = "test-controller-ref-fail"
@@ -1513,8 +1513,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with failing SetControllerReference")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with failing SetControllerReference")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking SetControllerReference error is handled")
 			Expect(err).To(HaveOccurred())
@@ -1575,8 +1575,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				Recorder: record.NewFakeRecorder(100),
 			}
 
-			By("Calling createKubernetesJob with existing Job and failing status update")
-			_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+			By("Calling createJob with existing Job and failing status update")
+			_, err := reconciler.createJob(ctx, ansibleJob)
 
 			By("Checking status update error is propagated correctly")
 			Expect(err).To(HaveOccurred())
@@ -2221,7 +2221,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 		})
 
 		Describe("Edge cases for better coverage", func() {
-			It("should handle createKubernetesJob with SetControllerReference failure", func() {
+			It("should handle createJob with SetControllerReference failure", func() {
 				// Create a test scheme without the necessary types to trigger SetControllerReference failure
 				incorrectScheme := runtime.NewScheme()
 				// Don't add the required types to trigger an error
@@ -2234,8 +2234,8 @@ var _ = Describe("AnsibleJob Controller", func() {
 				ansibleJob := CreateTestAnsibleJob("test-job", "default")
 				ansibleJob.Spec.Inventory.Inline = "" // No inline inventory to skip ConfigMap creation
 
-				By("Calling createKubernetesJob with incorrect scheme")
-				_, err := reconciler.createKubernetesJob(ctx, ansibleJob)
+				By("Calling createJob with incorrect scheme")
+				_, err := reconciler.createJob(ctx, ansibleJob)
 
 				By("Expecting SetControllerReference to fail")
 				Expect(err).To(HaveOccurred())
