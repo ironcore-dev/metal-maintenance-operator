@@ -29,8 +29,9 @@ import (
 // AnsibleJobReconciler reconciles a AnsibleJob object
 type AnsibleJobReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme     *runtime.Scheme
+	Recorder   record.EventRecorder
+	DefaultTTL *int32 // Default TTL for AnsibleJobs if not specified
 }
 
 // setCondition sets or updates a condition in the AnsibleJob status using controller-utils
@@ -93,7 +94,7 @@ func (r *AnsibleJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Handle different phases
 	switch ansibleJob.Status.Phase {
-	case "":
+	case ansiblev1alpha1.AnsibleJobPhaseUninitialized:
 		// Initialize the job
 		return r.initializeJob(ctx, &ansibleJob)
 	case ansiblev1alpha1.AnsibleJobPhasePending:
@@ -103,8 +104,8 @@ func (r *AnsibleJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Monitor the running job
 		return r.monitorJob(ctx, &ansibleJob)
 	case ansiblev1alpha1.AnsibleJobPhaseSucceeded, ansiblev1alpha1.AnsibleJobPhaseFailed:
-		// Job is complete, nothing to do
-		return ctrl.Result{}, nil
+		// Job is complete, check if TTL cleanup is needed
+		return r.handleTTLCleanup(ctx, &ansibleJob)
 	default:
 		logger.Info("Unknown phase", "phase", ansibleJob.Status.Phase)
 		return ctrl.Result{}, nil
@@ -312,6 +313,64 @@ func (r *AnsibleJobReconciler) createInventoryConfigMap(ctx context.Context, ans
 
 	logger.Info("Created inventory ConfigMap", "configMap", configMapName)
 	return nil
+}
+
+// handleTTLCleanup checks if a completed AnsibleJob should be deleted based on TTL
+func (r *AnsibleJobReconciler) handleTTLCleanup(ctx context.Context, ansibleJob *ansiblev1alpha1.AnsibleJob) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Determine the TTL to use: spec value takes precedence, then default, then none
+	var ttlSeconds *int32
+	if ansibleJob.Spec.TTLSecondsAfterFinished != nil {
+		ttlSeconds = ansibleJob.Spec.TTLSecondsAfterFinished
+	} else if r.DefaultTTL != nil {
+		ttlSeconds = r.DefaultTTL
+	} else {
+		// No TTL configured
+		return ctrl.Result{}, nil
+	}
+
+	// Ensure job has actually finished and has a completion time
+	if ansibleJob.Status.CompletionTime == nil {
+		logger.Info("Job marked as complete but has no completion time, skipping TTL cleanup")
+		return ctrl.Result{}, nil
+	}
+
+	ttlDuration := time.Duration(*ttlSeconds) * time.Second
+	expirationTime := ansibleJob.Status.CompletionTime.Add(ttlDuration)
+	now := time.Now()
+
+	if now.Before(expirationTime) {
+		// Job hasn't expired yet, requeue when it will expire
+		requeueAfter := expirationTime.Sub(now)
+		logger.Info("AnsibleJob not yet expired, will requeue for cleanup",
+			"expiresAt", expirationTime,
+			"requeueAfter", requeueAfter,
+			"ttlSeconds", *ttlSeconds)
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
+	// Job has expired, delete it
+	logger.Info("AnsibleJob TTL expired, deleting resource",
+		"completionTime", ansibleJob.Status.CompletionTime,
+		"ttlSeconds", *ttlSeconds,
+		"expirationTime", expirationTime)
+
+	r.Recorder.Event(ansibleJob, corev1.EventTypeNormal, "TTLExpired",
+		fmt.Sprintf("AnsibleJob expired after %d seconds, deleting", *ttlSeconds))
+
+	// Delete the AnsibleJob (this will also clean up owned resources via garbage collection)
+	if err := r.Delete(ctx, ansibleJob); err != nil {
+		if errors.IsNotFound(err) {
+			// Already deleted, nothing to do
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to delete expired AnsibleJob")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Successfully deleted expired AnsibleJob")
+	return ctrl.Result{}, nil
 }
 
 // calculateRequeueAfter returns adaptive requeue timing based on job age and phase

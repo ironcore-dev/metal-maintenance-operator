@@ -50,6 +50,14 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *ansiblev1alpha1.Ansi
 		activeDeadlineSeconds = &deadline
 	}
 
+	// Set TTL for automatic Job cleanup if configured
+	var ttlSecondsAfterFinished *int32
+	if ansibleJob.Spec.TTLSecondsAfterFinished != nil {
+		ttlSecondsAfterFinished = ansibleJob.Spec.TTLSecondsAfterFinished
+	} else if r.DefaultTTL != nil {
+		ttlSecondsAfterFinished = r.DefaultTTL
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -61,8 +69,9 @@ func (r *AnsibleJobReconciler) createAnsibleJob(ansibleJob *ansiblev1alpha1.Ansi
 			},
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit:          &backoffLimit,
-			ActiveDeadlineSeconds: activeDeadlineSeconds,
+			BackoffLimit:            &backoffLimit,
+			ActiveDeadlineSeconds:   activeDeadlineSeconds,
+			TTLSecondsAfterFinished: ttlSecondsAfterFinished,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

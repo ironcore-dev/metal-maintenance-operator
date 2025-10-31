@@ -7,12 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -2055,7 +2057,7 @@ var _ = Describe("AnsibleJob Controller", func() {
 			// The error could be either from SetControllerReference or from Create due to invalid ownerReference
 			Expect(err.Error()).To(SatisfyAny(
 				ContainSubstring("failed to set controller reference"),
-				ContainSubstring("failed to create ConfigMap"),
+				ContainSubstring("failed to create or patch ConfigMap"),
 				ContainSubstring("uid must not be empty"),
 			))
 		})
@@ -2300,6 +2302,408 @@ var _ = Describe("AnsibleJob Controller", func() {
 				By("Expecting ConfigMap creation to fail")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("mock create failure"))
+			})
+		})
+	})
+
+	Describe("TTL Functionality", func() {
+		var (
+			ctx        context.Context
+			reconciler *AnsibleJobReconciler
+		)
+
+		BeforeEach(func() {
+			ctx = context.TODO()
+			defaultTTL := int32(3600) // 1 hour default
+			reconciler = &AnsibleJobReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   record.NewFakeRecorder(100),
+				DefaultTTL: &defaultTTL,
+			}
+		})
+
+		Context("when TTL is configured", func() {
+			It("should use job-specific TTL over default TTL", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-1", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				jobSpecificTTL := int32(7200) // 2 hours
+				testJob.Spec.TTLSecondsAfterFinished = &jobSpecificTTL
+
+				By("Creating the AnsibleJob with specific TTL")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Reconciling the job through all phases")
+				// First reconcile: Uninitialized → Pending
+				_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				// Second reconcile: Pending → Running (creates the Kubernetes Job)
+				_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				By("Checking that the Kubernetes Job has the correct TTL")
+				kubeJobList := &batchv1.JobList{}
+				Expect(k8sClient.List(ctx, kubeJobList, client.InNamespace(testJob.Namespace), client.MatchingLabels{"ansible-job": testJob.Name})).To(Succeed())
+				Expect(kubeJobList.Items).To(HaveLen(1))
+
+				kubeJob := kubeJobList.Items[0]
+				Expect(kubeJob.Spec.TTLSecondsAfterFinished).ToNot(BeNil())
+				Expect(*kubeJob.Spec.TTLSecondsAfterFinished).To(Equal(jobSpecificTTL))
+			})
+
+			It("should use default TTL when job-specific TTL is not set", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-2", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				// Don't set TTLSecondsAfterFinished on the job
+
+				By("Creating the AnsibleJob without specific TTL")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Reconciling the job through all phases")
+				// First reconcile: Uninitialized → Pending
+				_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				// Second reconcile: Pending → Running (creates the Kubernetes Job)
+				_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				By("Checking that the Kubernetes Job has the default TTL")
+				kubeJobList := &batchv1.JobList{}
+				Expect(k8sClient.List(ctx, kubeJobList, client.InNamespace(testJob.Namespace), client.MatchingLabels{"ansible-job": testJob.Name})).To(Succeed())
+				Expect(kubeJobList.Items).To(HaveLen(1))
+
+				kubeJob := kubeJobList.Items[0]
+				Expect(kubeJob.Spec.TTLSecondsAfterFinished).ToNot(BeNil())
+				Expect(*kubeJob.Spec.TTLSecondsAfterFinished).To(Equal(*reconciler.DefaultTTL))
+			})
+
+			It("should not set TTL when DefaultTTL is nil", func() {
+				reconciler.DefaultTTL = nil // Disable TTL
+				testJob := CreateTestAnsibleJob("ttl-test-job-3", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Reconciling the job through all phases")
+				// First reconcile: Uninitialized → Pending
+				_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				// Second reconcile: Pending → Running (creates the Kubernetes Job)
+				_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+
+				By("Checking that the Kubernetes Job has no TTL")
+				kubeJobList := &batchv1.JobList{}
+				Expect(k8sClient.List(ctx, kubeJobList, client.InNamespace(testJob.Namespace), client.MatchingLabels{"ansible-job": testJob.Name})).To(Succeed())
+				Expect(kubeJobList.Items).To(HaveLen(1))
+
+				kubeJob := kubeJobList.Items[0]
+				Expect(kubeJob.Spec.TTLSecondsAfterFinished).To(BeNil())
+			})
+		})
+
+		Context("TTL cleanup", func() {
+			var recorder *record.FakeRecorder
+
+			BeforeEach(func() {
+				recorder = record.NewFakeRecorder(100)
+				reconciler.Recorder = recorder
+			})
+
+			It("should delete expired AnsibleJobs", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-4", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				ttl := int32(1) // 1 second TTL
+				testJob.Spec.TTLSecondsAfterFinished = &ttl
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state with finish time in the past")
+				now := metav1.Now()
+				pastTime := metav1.NewTime(now.Add(-10 * time.Second)) // 10 seconds ago
+				testJob.Status.CompletionTime = &pastTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{})) // Job should be deleted, no requeue
+
+				By("Verifying the job was deleted")
+				err = k8sClient.Get(ctx, jobKey, testJob)
+				Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+				By("Verifying deletion event was recorded")
+				Eventually(func() bool {
+					select {
+					case event := <-recorder.Events:
+						return strings.Contains(event, "TTLExpired") && strings.Contains(event, "Job expired after")
+					default:
+						return false
+					}
+				}).Should(BeTrue())
+			})
+
+			It("should not delete non-expired AnsibleJobs", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-5", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				ttl := int32(3600) // 1 hour TTL
+				testJob.Spec.TTLSecondsAfterFinished = &ttl
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state with recent finish time")
+				now := metav1.Now()
+				recentTime := metav1.NewTime(now.Add(-5 * time.Minute)) // 5 minutes ago
+				testJob.Status.CompletionTime = &recentTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+				// RequeueAfter is set, so don't check deprecated Requeue field
+
+				By("Verifying the job still exists")
+				retrievedJob := &ansiblev1alpha1.AnsibleJob{}
+				err = k8sClient.Get(ctx, jobKey, retrievedJob)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should not process TTL for incomplete jobs", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-6", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				ttl := int32(1) // 1 second TTL
+				testJob.Spec.TTLSecondsAfterFinished = &ttl
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to running state (incomplete)")
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionProgressing,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobRunning,
+						Message:            "Job is progressing",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{})) // No requeue for incomplete jobs
+
+				By("Verifying the job still exists")
+				retrievedJob := &ansiblev1alpha1.AnsibleJob{}
+				err = k8sClient.Get(ctx, jobKey, retrievedJob)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should not process TTL when TTL is not configured", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-7", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				// Don't set TTLSecondsAfterFinished
+				reconciler.DefaultTTL = nil // Also disable default TTL
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state")
+				now := metav1.Now()
+				pastTime := metav1.NewTime(now.Add(-10 * time.Second))
+				testJob.Status.CompletionTime = &pastTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{})) // No requeue when TTL not configured
+
+				By("Verifying the job still exists")
+				retrievedJob := &ansiblev1alpha1.AnsibleJob{}
+				err = k8sClient.Get(ctx, jobKey, retrievedJob)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should handle deletion errors gracefully", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-8", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				ttl := int32(1) // 1 second TTL
+				testJob.Spec.TTLSecondsAfterFinished = &ttl
+
+				// Create a job with finalizers to prevent deletion
+				testJob.Finalizers = []string{"test.finalizer/prevent-deletion"}
+
+				By("Creating the AnsibleJob with finalizer")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state with finish time in the past")
+				now := metav1.Now()
+				pastTime := metav1.NewTime(now.Add(-10 * time.Second))
+				testJob.Status.CompletionTime = &pastTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				// Should not return error even if deletion fails
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{}))
+
+				By("Verifying the job still exists due to finalizer")
+				retrievedJob := &ansiblev1alpha1.AnsibleJob{}
+				err = k8sClient.Get(ctx, jobKey, retrievedJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(retrievedJob.DeletionTimestamp).ToNot(BeNil()) // Should have deletion timestamp
+			})
+
+			It("should calculate correct requeue time for non-expired jobs", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-9", "default")
+				ttl := int32(3600) // 1 hour TTL
+				testJob.Spec.TTLSecondsAfterFinished = &ttl
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state")
+				now := metav1.Now()
+				completionTime := metav1.NewTime(now.Add(-30 * time.Minute)) // 30 minutes ago
+				testJob.Status.CompletionTime = &completionTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+				// RequeueAfter is set, so don't check deprecated Requeue field
+
+				// Should requeue in approximately 30 minutes (remaining TTL time)
+				expectedRequeue := time.Duration(ttl)*time.Second - time.Since(completionTime.Time)
+				Expect(result.RequeueAfter).To(BeNumerically("~", expectedRequeue, time.Minute))
+			})
+
+			It("should use default TTL for cleanup when job TTL is not set", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-10", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				defaultTTL := int32(10) // 10 seconds default
+				reconciler.DefaultTTL = &defaultTTL
+
+				By("Creating the AnsibleJob without specific TTL")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state with finish time in the past")
+				now := metav1.Now()
+				pastTime := metav1.NewTime(now.Add(-20 * time.Second)) // 20 seconds ago
+				testJob.Status.CompletionTime = &pastTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Running TTL cleanup")
+				result, err := reconciler.handleTTLCleanup(ctx, testJob)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{})) // Job should be deleted
+
+				By("Verifying the job was deleted")
+				err = k8sClient.Get(ctx, jobKey, testJob)
+				Expect(apierrors.IsNotFound(err)).To(BeTrue())
+			})
+		})
+
+		Context("TTL integration in reconciler", func() {
+			It("should call TTL cleanup during reconciliation", func() {
+				testJob := CreateTestAnsibleJob("ttl-test-job-11", "default")
+				jobKey := types.NamespacedName{Name: testJob.Name, Namespace: testJob.Namespace}
+				ttl := int32(1) // 1 second TTL
+				testJob.Spec.TTLSecondsAfterFinished = &ttl
+
+				By("Creating the AnsibleJob")
+				Expect(k8sClient.Create(ctx, testJob)).To(Succeed())
+
+				By("Setting the job to completed state with expired TTL")
+				now := metav1.Now()
+				pastTime := metav1.NewTime(now.Add(-10 * time.Second))
+				testJob.Status.Phase = ansiblev1alpha1.AnsibleJobPhaseSucceeded // Set the phase to completed
+				testJob.Status.CompletionTime = &pastTime
+				testJob.Status.Conditions = []metav1.Condition{
+					{
+						Type:               ansiblev1alpha1.AnsibleJobConditionSucceeded,
+						Status:             metav1.ConditionTrue,
+						Reason:             ansiblev1alpha1.ReasonJobSucceeded,
+						Message:            "Job completed successfully",
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(k8sClient.Status().Update(ctx, testJob)).To(Succeed())
+
+				By("Reconciling the job")
+				result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: jobKey})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result).To(Equal(ctrl.Result{})) // Should not requeue after deletion
+
+				By("Verifying the job was deleted by TTL cleanup")
+				err = k8sClient.Get(ctx, jobKey, testJob)
+				Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			})
 		})
 	})

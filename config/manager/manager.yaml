@@ -63,6 +63,9 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          # Default TTL for AnsibleJobs (24 hours = 86400 seconds)
+          # Set to 0 to disable automatic cleanup by default
+          - --default-ttl-seconds=86400
         image: controller:v0.1.0
         name: manager
         ports: []

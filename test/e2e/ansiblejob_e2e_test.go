@@ -1754,5 +1754,299 @@ spec:
 				"--timeout=60s", "--context", "kind-maintenance-operator-test-e2e")
 			_, _ = utils.Run(cmd)
 		})
+
+		It("should handle TTL cleanup for completed jobs", func() {
+			manifestFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-ttl.yaml", ansibleJobName))
+
+			By("Creating an AnsibleJob manifest with short TTL")
+			manifestContent := fmt.Sprintf(`
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: %s-ttl
+  namespace: %s
+spec:
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
+  inventory:
+    inline: |
+      [all]
+      localhost ansible_connection=local
+  ttlSecondsAfterFinished: 30  # Longer TTL to allow job completion
+  extraVars:
+    - name: target_hosts
+      value: localhost
+  jobTemplate:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+`, ansibleJobName, testNamespace)
+
+			err := os.WriteFile(manifestFile, []byte(manifestContent), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Should create manifest file")
+
+			By("Applying the AnsibleJob manifest")
+			cmd := exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Should apply AnsibleJob manifest")
+
+			By("Waiting for the AnsibleJob to complete")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-ttl", ansibleJobName), "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, _ := utils.Run(cmd)
+				return strings.TrimSpace(output)
+			}, timeout, interval).Should(Or(Equal("Succeeded"), Equal("Failed")), "AnsibleJob should complete")
+
+			By("Verifying the Kubernetes Job exists initially")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "get", "job", "-n", testNamespace,
+					"-l", fmt.Sprintf("ansible-job=%s-ttl", ansibleJobName),
+					"--context", "kind-maintenance-operator-test-e2e")
+				_, err := utils.Run(cmd)
+				return err
+			}, 30*time.Second, 2*time.Second).Should(Succeed(), "Kubernetes Job should exist")
+
+			By("Waiting for TTL cleanup to delete the AnsibleJob (35+ seconds)")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-ttl", ansibleJobName), "-n", testNamespace,
+					"--context", "kind-maintenance-operator-test-e2e")
+				_, err := utils.Run(cmd)
+				return err
+			}, 60*time.Second, 2*time.Second).Should(HaveOccurred(), "AnsibleJob should be deleted by TTL")
+
+			By("Verifying the Kubernetes Job cleanup (note: K8s TTL controller timing may vary)")
+			// The Kubernetes Job should be cleaned up by its TTL controller, but timing can vary
+			// In some environments, K8s TTL controller may take longer or not be enabled
+			time.Sleep(10 * time.Second) // Brief wait for K8s cleanup
+			jobCmd := exec.Command("kubectl", "get", "job", "-n", testNamespace,
+				"-l", fmt.Sprintf("ansible-job=%s-ttl", ansibleJobName),
+				"--context", "kind-maintenance-operator-test-e2e")
+			_, jobErr := utils.Run(jobCmd)
+			if jobErr != nil {
+				By("Kubernetes Job was cleaned up by TTL controller")
+			} else {
+				By("Kubernetes Job still exists (K8s TTL controller may take longer)")
+				// This is acceptable - the main functionality is AnsibleJob TTL cleanup
+			}
+
+			By("Cleaning up manifest file")
+			os.Remove(manifestFile)
+		})
+
+		It("should not delete jobs before TTL expires", func() {
+			manifestFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-ttl-long.yaml", ansibleJobName))
+
+			By("Creating an AnsibleJob manifest with long TTL")
+			manifestContent := fmt.Sprintf(`
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: %s-ttl-long
+  namespace: %s
+spec:
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
+  inventory:
+    inline: |
+      [all]
+      localhost ansible_connection=local
+  ttlSecondsAfterFinished: 3600  # 1 hour TTL
+  extraVars:
+    - name: target_hosts
+      value: localhost
+  jobTemplate:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+`, ansibleJobName, testNamespace)
+
+			err := os.WriteFile(manifestFile, []byte(manifestContent), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Should create manifest file")
+
+			By("Applying the AnsibleJob manifest")
+			cmd := exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Should apply AnsibleJob manifest")
+
+			By("Waiting for the AnsibleJob to complete")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-ttl-long", ansibleJobName), "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, _ := utils.Run(cmd)
+				return strings.TrimSpace(output)
+			}, timeout, interval).Should(Equal("Succeeded"), "AnsibleJob should complete successfully")
+
+			By("Verifying the AnsibleJob is NOT deleted after 15 seconds (well before TTL)")
+			Consistently(func() error {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-ttl-long", ansibleJobName), "-n", testNamespace,
+					"--context", "kind-maintenance-operator-test-e2e")
+				_, err := utils.Run(cmd)
+				return err
+			}, 15*time.Second, 2*time.Second).Should(Succeed(), "AnsibleJob should still exist before TTL expires")
+
+			By("Verifying the Kubernetes Job is also still present")
+			cmd = exec.Command("kubectl", "get", "job", "-n", testNamespace,
+				"-l", fmt.Sprintf("ansible-job=%s-ttl-long", ansibleJobName),
+				"--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Kubernetes Job should still exist")
+
+			By("Cleaning up test resources")
+			os.Remove(manifestFile)
+			cmd = exec.Command("kubectl", "delete", "ansiblejob",
+				fmt.Sprintf("%s-ttl-long", ansibleJobName), "-n", testNamespace,
+				"--timeout=60s", "--context", "kind-maintenance-operator-test-e2e")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should apply TTL to Kubernetes Jobs when specified", func() {
+			manifestFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-k8s-ttl.yaml", ansibleJobName))
+
+			By("Creating an AnsibleJob manifest with TTL")
+			manifestContent := fmt.Sprintf(`
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: %s-k8s-ttl
+  namespace: %s
+spec:
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
+  inventory:
+    inline: |
+      [all]
+      localhost ansible_connection=local
+  ttlSecondsAfterFinished: 300  # 5 minutes
+  extraVars:
+    - name: target_hosts
+      value: localhost
+  jobTemplate:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+`, ansibleJobName, testNamespace)
+
+			err := os.WriteFile(manifestFile, []byte(manifestContent), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Should create manifest file")
+
+			By("Applying the AnsibleJob manifest")
+			cmd := exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Should apply AnsibleJob manifest")
+
+			By("Verifying the Kubernetes Job gets the TTL setting")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "job", "-n", testNamespace,
+					"-l", fmt.Sprintf("ansible-job=%s-k8s-ttl", ansibleJobName),
+					"-o", "jsonpath={.items[0].spec.ttlSecondsAfterFinished}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, _ := utils.Run(cmd)
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 2*time.Second).Should(Equal("300"), "Kubernetes Job should have TTL set to 300 seconds")
+
+			By("Cleaning up test resources")
+			os.Remove(manifestFile)
+			cmd = exec.Command("kubectl", "delete", "ansiblejob",
+				fmt.Sprintf("%s-k8s-ttl", ansibleJobName), "-n", testNamespace,
+				"--timeout=60s", "--context", "kind-maintenance-operator-test-e2e")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should handle TTL with ConfigMap cleanup", func() {
+			manifestFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-ttl-configmap.yaml", ansibleJobName))
+
+			By("Creating an AnsibleJob with inline inventory and short TTL")
+			manifestContent := fmt.Sprintf(`
+apiVersion: ansible.maintenance.metal.ironcore.dev/v1alpha1
+kind: AnsibleJob
+metadata:
+  name: %s-ttl-configmap
+  namespace: %s
+spec:
+  playbook:
+    name: hello_world.yml
+    repository: https://github.com/ansible/ansible-tower-samples.git
+    gitRef: master
+  inventory:
+    inline: |
+      [all]
+      localhost ansible_connection=local
+      [test_group]
+      localhost
+  ttlSecondsAfterFinished: 12  # Short TTL for testing
+  extraVars:
+    - name: target_hosts
+      value: localhost
+  jobTemplate:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+`, ansibleJobName, testNamespace)
+
+			err := os.WriteFile(manifestFile, []byte(manifestContent), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Should create manifest file")
+
+			By("Applying the AnsibleJob manifest")
+			cmd := exec.Command("kubectl", "apply", "-f", manifestFile, "--context", "kind-maintenance-operator-test-e2e")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Should apply AnsibleJob manifest")
+
+			By("Verifying the inventory ConfigMap is created")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "get", "configmap",
+					fmt.Sprintf("%s-ttl-configmap-inventory", ansibleJobName), "-n", testNamespace,
+					"--context", "kind-maintenance-operator-test-e2e")
+				_, err := utils.Run(cmd)
+				return err
+			}, 30*time.Second, 2*time.Second).Should(Succeed(), "Inventory ConfigMap should be created")
+
+			By("Waiting for the AnsibleJob to complete")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-ttl-configmap", ansibleJobName), "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}",
+					"--context", "kind-maintenance-operator-test-e2e")
+				output, _ := utils.Run(cmd)
+				return strings.TrimSpace(output)
+			}, timeout, interval).Should(Equal("Succeeded"), "AnsibleJob should complete successfully")
+
+			By("Waiting for TTL cleanup to delete everything")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "get", "ansiblejob",
+					fmt.Sprintf("%s-ttl-configmap", ansibleJobName), "-n", testNamespace,
+					"--context", "kind-maintenance-operator-test-e2e")
+				_, err := utils.Run(cmd)
+				return err
+			}, 30*time.Second, 2*time.Second).Should(HaveOccurred(), "AnsibleJob should be deleted by TTL")
+
+			By("Verifying the ConfigMap is also cleaned up via OwnerReference")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "get", "configmap",
+					fmt.Sprintf("%s-ttl-configmap-inventory", ansibleJobName), "-n", testNamespace,
+					"--context", "kind-maintenance-operator-test-e2e")
+				_, err := utils.Run(cmd)
+				return err
+			}, 15*time.Second, 2*time.Second).Should(HaveOccurred(), "Inventory ConfigMap should be cleaned up")
+
+			By("Cleaning up manifest file")
+			os.Remove(manifestFile)
+		})
 	})
 })

@@ -38,6 +38,16 @@ type AnsibleJobSpec struct {
 	// JobTemplate allows customization of the Kubernetes Job
 	// +optional
 	JobTemplate *JobTemplateSpec `json:"jobTemplate,omitempty"`
+
+	// TTLSecondsAfterFinished limits the lifetime of an AnsibleJob that has finished
+	// execution (either Succeeded or Failed). If this field is set, ttlSecondsAfterFinished
+	// seconds after the AnsibleJob finishes, it is eligible to be automatically deleted.
+	// When the AnsibleJob is being deleted, its lifecycle guarantees are honored.
+	// If this field is unset, the AnsibleJob won't be automatically deleted.
+	// If this field is set to zero, the AnsibleJob becomes eligible to be deleted
+	// immediately after it finishes.
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // PlaybookSpec defines the playbook configuration
@@ -161,6 +171,8 @@ type AnsibleJobStatus struct {
 type AnsibleJobPhase string
 
 const (
+	// AnsibleJobPhaseUninitialized indicates the job has not been initialized yet
+	AnsibleJobPhaseUninitialized AnsibleJobPhase = ""
 	// AnsibleJobPhasePending indicates the job is waiting to be scheduled
 	AnsibleJobPhasePending AnsibleJobPhase = "Pending"
 	// AnsibleJobPhaseRunning indicates the job is currently executing

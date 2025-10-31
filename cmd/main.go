@@ -51,6 +51,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var defaultTTLSeconds int
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -69,6 +70,9 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.IntVar(&defaultTTLSeconds, "default-ttl-seconds", 0,
+		"Default TTL in seconds for completed AnsibleJobs. Set to 0 to disable automatic cleanup by default. "+
+			"Individual AnsibleJobs can override this with their own ttlSecondsAfterFinished field.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -190,10 +194,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Prepare default TTL
+	var defaultTTL *int32
+	if defaultTTLSeconds > 0 {
+		// Safely convert int to int32 with bounds checking
+		if defaultTTLSeconds > 2147483647 { // int32 max value
+			setupLog.Error(nil, "default-ttl-seconds value too large", "value", defaultTTLSeconds, "max", 2147483647)
+			os.Exit(1)
+		}
+		ttl := int32(defaultTTLSeconds)
+		defaultTTL = &ttl
+	}
+
 	if err = (&controller.AnsibleJobReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("ansiblejob-controller"),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("ansiblejob-controller"),
+		DefaultTTL: defaultTTL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AnsibleJob")
 		os.Exit(1)
