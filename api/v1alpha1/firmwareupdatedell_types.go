@@ -81,6 +81,8 @@ const (
 )
 
 // FirmwareUpdateDELLSpec defines the desired state of FirmwareUpdateDELL.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state != 'InProgress' || self.createCatalog == oldSelf.createCatalog", message="CreateCatalog is immutable when status is InProgress"
+// +kubebuilder:validation:XValidation:rule="has(self.createCatalog) ^ has(self.catalogName)", message="Either createCatalog or catalogName must be provided, but not both."
 type FirmwareUpdateDELLSpec struct {
 	// OMEURL is the URL of the Dell OpenManage Enterprise (OME) instance.
 	// +required
@@ -94,7 +96,6 @@ type FirmwareUpdateDELLSpec struct {
 
 	// CreateCatalog is the fields required to create catalog through the Dell OpenManage Enterprise (OME).
 	// kubbuilder:validation:Optional
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="CreateCatalog is immutable"
 	// +optional
 	CreateCatalog *CreateCatalog `json:"createCatalog,omitempty"`
 
@@ -148,14 +149,6 @@ type FirmwareUpgradeConfig struct {
 	// +kubebuilder:valdation:MinLength=1
 	OperationName string `json:"operationName"`
 
-	// Schedule specifies when to perform the firmware update.
-	// "StartNow" to start immediately, cron format "* * * * *" to start during at specific time.
-	// refer to Dell OME API documentation for possible values.
-	// +required
-	// +kubebuilder:default="StartNow"
-	// +kubebuilder:valdation:MinLength=1
-	Schedule string `json:"schedule"`
-
 	// JobTypeName specifies the type of job to be created for the firmware update.
 	// refer to Dell OME API documentation for possible values.
 	// +optional
@@ -193,7 +186,6 @@ type CreateCatalog struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:MinLength=1
-
 	FileName string `json:"fileName"`
 	// SourcePath is the path to the catalog file on the OME server.
 	// This is the path where the catalog will be created. with IP or FQDN of the repo server.

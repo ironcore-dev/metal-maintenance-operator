@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.18.0
   name: firmwareupdatedells.vendorconsole.ironcore.dev
 spec:
   group: vendorconsole.ironcore.dev
@@ -157,9 +157,6 @@ spec:
                 - repository
                 - sourcePath
                 type: object
-                x-kubernetes-validations:
-                - message: CreateCatalog is immutable
-                  rule: self == oldSelf
               firmwareUpgradeConfig:
                 description: FirmwareUpgradeConfig contains configuration options
                   for the firmware upgrade process.
@@ -181,13 +178,6 @@ spec:
                       OperationName specifies the name of the operation to be performed for the firmware update.
                       refer to Dell OME API documentation for possible values.
                     type: string
-                  schedule:
-                    default: StartNow
-                    description: |-
-                      Schedule specifies when to perform the firmware update.
-                      "StartNow" to start immediately, cron format "* * * * *" to start during at specific time.
-                      refer to Dell OME API documentation for possible values.
-                    type: string
                   signVerify:
                     default: SignVerify
                     description: SignVerify specifies whether to verify the signature
@@ -200,7 +190,6 @@ spec:
                     type: string
                 required:
                 - operationName
-                - schedule
                 type: object
               omeURL:
                 description: OMEURL is the URL of the Dell OpenManage Enterprise (OME)
@@ -334,6 +323,13 @@ spec:
             - secretRef
             - serverSelector
             type: object
+            x-kubernetes-validations:
+            - message: CreateCatalog is immutable when status is InProgress
+              rule: '!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state
+                != ''InProgress'' || self.createCatalog == oldSelf.createCatalog'
+            - message: Either createCatalog or catalogName must be provided, but not
+                both.
+              rule: has(self.createCatalog) ^ has(self.catalogName)
           status:
             description: FirmwareUpdateDELLStatus defines the observed state of FirmwareUpdateDELL.
             properties:

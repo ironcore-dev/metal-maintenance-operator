@@ -425,7 +425,6 @@ func (r *FirmwareUpdateDELLReconciler) handleCompletedState(
 		log.V(1).Info("Failed to close OME session", "error", err)
 	}
 	return ctrl.Result{}, nil
-
 }
 
 func (r *FirmwareUpdateDELLReconciler) handleFailedState(
@@ -931,7 +930,8 @@ func createBaselinePayload(
 	log logr.Logger,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
 	catalog *ome.DellCatalogDetails,
-	devices []ome.DellDeviceData) *ome.DellBaseline {
+	devices []ome.DellDeviceData,
+) *ome.DellBaseline {
 	if len(devices) == 0 {
 		return nil
 	}
@@ -963,7 +963,8 @@ func createBaselinePayload(
 func getDevicesFromServers(
 	ctx context.Context,
 	console *ome.OME,
-	servers []metalv1alpha1.Server) ([]ome.DellDeviceData, error) {
+	servers []metalv1alpha1.Server,
+) ([]ome.DellDeviceData, error) {
 	serverSKU := []string{}
 	for _, server := range servers {
 		serverSKU = append(serverSKU, server.Status.SKU)
@@ -1196,7 +1197,7 @@ func (r *FirmwareUpdateDELLReconciler) performFirmwareUpdate(
 		JobName:        firmwareDell.Name + "-firmware-update",
 		JobDescription: "Firmware update job created by FirmwareUpdateDELL " + firmwareDell.Name,
 		Targets:        target,
-		Schedule:       firmwareDell.Spec.FirmwareUpgradeConfig.Schedule,
+		Schedule:       "StartNow",
 		State:          "Enabled",
 		JobType: ome.DellJobType{
 			JobTypeID: ome.JobTypeMap[firmwareDell.Spec.FirmwareUpgradeConfig.JobTypeName],
