@@ -834,6 +834,150 @@ func (r *FirmwareUpdateDELLReconciler) patchMaintenanceRequestRef(
 	return nil
 }
 
+func existingBaseline(
+	ctx context.Context,
+	log logr.Logger,
+	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
+	console *ome.OME,
+	catalog *ome.DellCatalogDetails,
+	baseline ome.DellBaseline,
+	servers []metalv1alpha1.Server,
+) (*baselineTaskStruct, error) {
+	// function to check if existing baseline needs to be patched or is upto date with servers provided
+	result := &baselineTaskStruct{}
+	result.baseline = &baseline
+	result.selectedServers = servers
+	// get the devices from OME for the servers provided in spec
+	devices, err := getDevicesFromServers(ctx, console, servers)
+	if err != nil {
+		log.V(1).Error(err, "failed to get devices from OME for servers selected")
+		return result, err
+	}
+	equal := slices.EqualFunc(devices, baseline.Targets, func(a ome.DellDeviceData, b ome.DellTarget) bool {
+		return a.Id == b.Id
+	})
+
+	if equal {
+		log.V(1).Info("Baseline targets match the servers selected, reusing existing baseline", "Baseline", baseline.Id, "Name", baseline.Name)
+		return result, nil
+	}
+
+	if firmwareDell.Status.UpdateTask != nil && firmwareDell.Status.State == maintenancev1alpha1.FirmwareUpdateStateInProgress {
+		log.V(1).Info("Baseline is in use with active update InProgress, cannot patch the baseline", "Baseline", baseline.Id, "Name", baseline.Name)
+
+		// filter out the servers based on the devices in the baseline
+		currentServers := make([]metalv1alpha1.Server, 0, len(devices))
+		removedServers := make([]string, 0)
+
+		// map of server SKU to server obj for quick lookup
+		serverSKUMap := make(map[string]metalv1alpha1.Server, len(servers))
+		for _, server := range servers {
+			serverSKUMap[server.Status.SKU] = server
+		}
+
+		// map of device ID to device obj (from servers provided in spec) for quick lookup
+		devicesIdMap := make(map[int]ome.DellDeviceData, len(baseline.Targets))
+		for _, device := range devices {
+			devicesIdMap[device.Id] = device
+		}
+		// add only the devices which are in the selected server spec & in the baseline
+		// this is to handle the case where the server spec has changed and some servers are removed
+		// but the baseline is still in use by those servers and firmware update has been started.
+		// we will rack subset of server which are in the selected server spec and in the baseline
+		for _, baselineDevice := range baseline.Targets {
+			// device in baseline target is not in the servers listed through spec
+			if device, ok := devicesIdMap[baselineDevice.Id]; !ok {
+				log.V(1).Info("Device in baseline target is not in the servers selected from spec and firmware upgrade is already in progress", "DeviceId", baselineDevice.Id)
+				// this device has been removed from the selected Server Spec
+				// TODO: should we move to failed state if servers are removed?
+				removedServers = append(removedServers, fmt.Sprintf("device {%s}, with deviceID {%v} removed", device.Name, device.Id))
+				continue
+			} else {
+				// this device is still in the selected server Spec
+				// add the server to current servers
+				if server, ok := serverSKUMap[device.SKU]; ok {
+					currentServers = append(currentServers, server)
+				}
+			}
+		}
+		if len(removedServers) > 0 {
+			log.V(1).Info("Some devices in the baseline target are not in the servers selected and firmware upgrade is already in progress", "RemovedDevices", removedServers)
+			log.V(1).Info("This will cause some servers not part of the selected server spec to be upgraded to this firmware")
+			serverInSpec := make([]string, 0, len(servers))
+			for _, srv := range servers {
+				serverInSpec = append(serverInSpec, srv.Name)
+			}
+			return nil, &SelectedServerListChangedDuringUpdate{
+				missingdServersFromBaseline: removedServers,
+				ServersInSpec:               serverInSpec,
+			}
+		}
+		log.V(1).Info("Firmware Upgrade of server is in Progress, some server from spec are ignored until previous upgrade is completed", "Servers in Spec", servers, "firmware uprgade inProgress servers", currentServers)
+		result.selectedServers = currentServers
+		return result, nil
+	}
+
+	payload := createBaselinePayload(log, firmwareDell, catalog, devices)
+	log.V(1).Info("Baseline targets do not match the servers selected, patching the baseline", "Baseline", baseline.Id, "Name", baseline.Name)
+	PatchedBaseline, err := console.UpdateBaseline(ctx, baseline.Id, payload)
+	result.baseline = PatchedBaseline
+	result.selectedServers = servers
+	return result, err
+}
+
+// function to create baseline payload from devices
+// used to create or patch baseline on OME
+func createBaselinePayload(
+	log logr.Logger,
+	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
+	catalog *ome.DellCatalogDetails,
+	devices []ome.DellDeviceData) *ome.DellBaseline {
+	if len(devices) == 0 {
+		return nil
+	}
+	payload := &ome.DellBaseline{
+		Name:             firmwareDell.Spec.BaselineConfig.Name,
+		Description:      firmwareDell.Spec.BaselineConfig.Description,
+		Is64Bit:          firmwareDell.Spec.BaselineConfig.BitType == maintenancev1alpha1.BitType64,
+		RepositoryId:     catalog.Repository.Id,
+		CatalogId:        catalog.Id,
+		DowngradeEnabled: firmwareDell.Spec.BaselineConfig.DowngradeEnabled == maintenancev1alpha1.DowngradableUpdate,
+		Targets:          nil,
+	}
+	for _, device := range devices {
+		log.V(1).Info("Creating baseline payload", "device", device, "payload", payload)
+		payload.Targets = append(payload.Targets, ome.DellTarget{
+			Id: device.Id,
+			Type: &ome.DellTargetType{
+				Id:   device.Type,
+				Name: ome.DeviceTypeMap[device.Type],
+			},
+			TargetType: nil,
+		})
+		log.V(1).Info("Added device to baseline payload", "payload", payload)
+	}
+	return payload
+}
+
+// function to get devices (OME device list) from Server Resource
+func getDevicesFromServers(
+	ctx context.Context,
+	console *ome.OME,
+	servers []metalv1alpha1.Server) ([]ome.DellDeviceData, error) {
+	serverSKU := []string{}
+	for _, server := range servers {
+		serverSKU = append(serverSKU, server.Status.SKU)
+	}
+	if len(serverSKU) == 0 {
+		return nil, fmt.Errorf("no servers found to get devices from OME")
+	}
+	devices, err := console.GetDevicesFromSKU(ctx, serverSKU)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devices from OMe for SKU %v, error %w", serverSKU, err)
+	}
+	return devices, nil
+}
+
 func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 	ctx context.Context,
 	log logr.Logger,
@@ -843,134 +987,6 @@ func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 	servers []metalv1alpha1.Server,
 ) (*baselineTaskStruct, error) {
 	result := &baselineTaskStruct{}
-	// function to create baseline payload from devices
-	// used to create or patch baseline on OME
-	createBaselinePayload := func(devices []ome.DellDeviceData) *ome.DellBaseline {
-		if len(devices) == 0 {
-			return nil
-		}
-		payload := &ome.DellBaseline{
-			Name:             firmwareDell.Spec.BaselineConfig.Name,
-			Description:      firmwareDell.Spec.BaselineConfig.Description,
-			Is64Bit:          firmwareDell.Spec.BaselineConfig.BitType == maintenancev1alpha1.BitType64,
-			RepositoryId:     catalog.Repository.Id,
-			CatalogId:        catalog.Id,
-			DowngradeEnabled: firmwareDell.Spec.BaselineConfig.DowngradeEnabled == maintenancev1alpha1.DowngradableUpdate,
-			Targets:          nil,
-		}
-		for _, device := range devices {
-			log.V(1).Info("Creating baseline payload", "device", device, "payload", payload)
-			payload.Targets = append(payload.Targets, ome.DellTarget{
-				Id: device.Id,
-				Type: &ome.DellTargetType{
-					Id:   device.Type,
-					Name: ome.DeviceTypeMap[device.Type],
-				},
-				TargetType: nil,
-			})
-			log.V(1).Info("Added device to baseline payload", "payload", payload)
-		}
-		return payload
-	}
-
-	// function to get devices (OME device list) from Server Resource
-	getDevicesFromServers := func(servers []metalv1alpha1.Server) ([]ome.DellDeviceData, error) {
-		serverSKU := []string{}
-		for _, server := range servers {
-			serverSKU = append(serverSKU, server.Status.SKU)
-		}
-		if len(serverSKU) == 0 {
-			return nil, fmt.Errorf("no servers found to get devices from OME")
-		}
-		devices, err := console.GetDevicesFromSKU(ctx, serverSKU)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get devices from OMe for SKU %v, error %w", serverSKU, err)
-		}
-		return devices, nil
-	}
-
-	// function to check if existing baseline needs to be patched or is upto date with servers provided
-	existingBaseline := func(baseline ome.DellBaseline, servers []metalv1alpha1.Server) (*baselineTaskStruct, error) {
-		result := &baselineTaskStruct{}
-		result.baseline = &baseline
-		result.selectedServers = servers
-		// get the devices from OME for the servers provided in spec
-		devices, err := getDevicesFromServers(servers)
-		if err != nil {
-			log.V(1).Error(err, "failed to get devices from OME for servers selected")
-			return result, err
-		}
-		equal := slices.EqualFunc(devices, baseline.Targets, func(a ome.DellDeviceData, b ome.DellTarget) bool {
-			return a.Id == b.Id
-		})
-
-		if equal {
-			log.V(1).Info("Baseline targets match the servers selected, reusing existing baseline", "Baseline", baseline.Id, "Name", baseline.Name)
-			return result, nil
-		}
-
-		if firmwareDell.Status.UpdateTask != nil && firmwareDell.Status.State == maintenancev1alpha1.FirmwareUpdateStateInProgress {
-			log.V(1).Info("Baseline is in use with active update InProgress, cannot patch the baseline", "Baseline", baseline.Id, "Name", baseline.Name)
-
-			// filter out the servers based on the devices in the baseline
-			currentServers := make([]metalv1alpha1.Server, 0, len(devices))
-			removedServers := make([]string, 0)
-
-			// map of server SKU to server obj for quick lookup
-			serverSKUMap := make(map[string]metalv1alpha1.Server, len(servers))
-			for _, server := range servers {
-				serverSKUMap[server.Status.SKU] = server
-			}
-
-			// map of device ID to device obj (from servers provided in spec) for quick lookup
-			devicesIdMap := make(map[int]ome.DellDeviceData, len(baseline.Targets))
-			for _, device := range devices {
-				devicesIdMap[device.Id] = device
-			}
-			// add only the devices which are in the selected server spec & in the baseline
-			// this is to handle the case where the server spec has changed and some servers are removed
-			// but the baseline is still in use by those servers and firmware update has been started.
-			// we will rack subset of server which are in the selected server spec and in the baseline
-			for _, baselineDevice := range baseline.Targets {
-				// device in baseline target is not in the servers listed through spec
-				if device, ok := devicesIdMap[baselineDevice.Id]; !ok {
-					log.V(1).Info("Device in baseline target is not in the servers selected from spec and firmware upgrade is already in progress", "DeviceId", baselineDevice.Id)
-					// this device has been removed from the selected Server Spec
-					// TODO: should we move to failed state if servers are removed?
-					removedServers = append(removedServers, fmt.Sprintf("device {%s}, with deviceID {%v} removed", device.Name, device.Id))
-					continue
-				} else {
-					// this device is still in the selected server Spec
-					// add the server to current servers
-					if server, ok := serverSKUMap[device.SKU]; ok {
-						currentServers = append(currentServers, server)
-					}
-				}
-			}
-			if len(removedServers) > 0 {
-				log.V(1).Info("Some devices in the baseline target are not in the servers selected and firmware upgrade is already in progress", "RemovedDevices", removedServers)
-				log.V(1).Info("This will cause some servers not part of the selected server spec to be upgraded to this firmware")
-				serverInSpec := make([]string, 0, len(servers))
-				for _, srv := range servers {
-					serverInSpec = append(serverInSpec, srv.Name)
-				}
-				return nil, &SelectedServerListChangedDuringUpdate{
-					missingdServersFromBaseline: removedServers,
-					ServersInSpec:               serverInSpec,
-				}
-			}
-			log.V(1).Info("Firmware Upgrade of server is in Progress, some server from spec are ignored until previous upgrade is completed", "Servers in Spec", servers, "firmware uprgade inProgress servers", currentServers)
-			result.selectedServers = currentServers
-			return result, nil
-		}
-
-		payload := createBaselinePayload(devices)
-		log.V(1).Info("Baseline targets do not match the servers selected, patching the baseline", "Baseline", baseline.Id, "Name", baseline.Name)
-		PatchedBaseline, err := console.UpdateBaseline(ctx, baseline.Id, payload)
-		result.baseline = PatchedBaseline
-		result.selectedServers = servers
-		return result, err
-	}
 
 	baselineList, err := console.GetAllBaseline(ctx)
 	if err != nil {
@@ -991,7 +1007,7 @@ func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 			catalog.Id != 0 && baseline.CatalogId == catalog.Id &&
 			catalog.Repository.Id != 0 && baseline.RepositoryId == catalog.Repository.Id {
 			log.V(1).Info("Found existing baseline on OME", "Baseline", baseline.Id, "Name", baseline.Name)
-			return existingBaseline(baseline, servers)
+			return existingBaseline(ctx, log, firmwareDell, console, catalog, baseline, servers)
 		}
 		if existingBaselineOme != nil && existingBaselineOme.Id != 0 {
 			return nil, fmt.Errorf("baselines found on OME not matching provided spec, cannot proceed. all baselines: %v \n selected baseline %v", baselineList, existingBaselineOme)
@@ -1000,12 +1016,12 @@ func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 
 	log.V(1).Info("No existing baseline found on OME, creating new baseline", "baselineList", baselineList)
 	// create new baseline
-	devices, err := getDevicesFromServers(servers)
+	devices, err := getDevicesFromServers(ctx, console, servers)
 	if err != nil {
 		log.V(1).Error(err, "failed to get devices from OME for servers selected")
 		return result, err
 	}
-	payload := createBaselinePayload(devices)
+	payload := createBaselinePayload(log, firmwareDell, catalog, devices)
 	log.V(1).Info("Creating new baseline on OME", "Payload", payload)
 	dellBaselineDetails, err := console.CreateBaseline(ctx, payload)
 	if err != nil {
