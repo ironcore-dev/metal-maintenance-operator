@@ -1,7 +1,7 @@
 # This rule is not used by the project maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants full permissions ('*') over console.maintenance.metal.ironcore.dev.
+# Grants full permissions ('*') over vendorconsole.metal.ironcore.dev.
 # This role is intended for users authorized to modify roles and bindings within the cluster,
 # enabling them to delegate specific permissions to other users or groups as needed.
 
@@ -11,17 +11,17 @@ metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: servermanagementconsoleset-admin-role
+  name: servermanagement-admin-role
 rules:
 - apiGroups:
-  - console.maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
-  - servermanagementconsolesets
+  - servermanagements
   verbs:
   - '*'
 - apiGroups:
-  - console.maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
-  - servermanagementconsolesets/status
+  - servermanagements/status
   verbs:
   - get

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -89,14 +90,7 @@ func (c *client) DoRequest(req *http.Request, okCodes []int) ([]byte, error) {
 	}
 
 	defer res.Body.Close() //nolint:errcheck // We can't do anything if closing the body fails.
-	ok := false
-	for _, code := range okCodes {
-		if res.StatusCode == code {
-			ok = true
-			break
-		}
-	}
-	if !ok {
+	if ok := slices.Contains(okCodes, res.StatusCode); !ok {
 		output := ErrorResponse{}
 		body, err := io.ReadAll(res.Body)
 		if err != nil {

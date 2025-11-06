@@ -14,10 +14,10 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	consolemaintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	vendorconsolev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 )
 
-var _ = Describe("ServerManagementConsoleSet Controller", func() {
+var _ = Describe("ServerManagement Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -27,13 +27,13 @@ var _ = Describe("ServerManagementConsoleSet Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		servermanagementconsoleset := &consolemaintenancev1alpha1.ServerManagementConsoleSet{}
+		servermanagement := &vendorconsolev1alpha1.ServerManagement{}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind ServerManagementConsoleSet")
-			err := k8sClient.Get(ctx, typeNamespacedName, servermanagementconsoleset)
+			By("creating the custom resource for the Kind ServerManagement")
+			err := k8sClient.Get(ctx, typeNamespacedName, servermanagement)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &consolemaintenancev1alpha1.ServerManagementConsoleSet{
+				resource := &vendorconsolev1alpha1.ServerManagement{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -46,16 +46,16 @@ var _ = Describe("ServerManagementConsoleSet Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &consolemaintenancev1alpha1.ServerManagementConsoleSet{}
+			resource := &vendorconsolev1alpha1.ServerManagement{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Cleanup the specific resource instance ServerManagementConsoleSet")
+			By("Cleanup the specific resource instance ServerManagement")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &ServerManagementConsoleSetReconciler{
+			controllerReconciler := &ServerManagementReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}

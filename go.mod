@@ -7,6 +7,7 @@ require (
 	github.com/ironcore-dev/metal-operator v0.0.0-20251010134956-f14ae88c827b
 	github.com/onsi/ginkgo/v2 v2.26.0
 	github.com/onsi/gomega v1.38.2
+	k8s.io/api v0.33.3
 	k8s.io/apimachinery v0.33.3
 	k8s.io/client-go v0.33.3
 	sigs.k8s.io/controller-runtime v0.21.0
@@ -91,7 +92,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.33.3 // indirect
 	k8s.io/apiextensions-apiserver v0.33.3 // indirect
 	k8s.io/apiserver v0.33.3 // indirect
 	k8s.io/component-base v0.33.3 // indirect

@@ -1,7 +1,7 @@
 # This rule is not used by the project maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to console.maintenance.metal.ironcore.dev resources.
+# Grants read-only access to vendorconsole.metal.ironcore.dev resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 
@@ -11,19 +11,19 @@ metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: servermanagementconsoleset-viewer-role
+  name: servermanagement-viewer-role
 rules:
 - apiGroups:
-  - console.maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
-  - servermanagementconsolesets
+  - servermanagements
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - console.maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
-  - servermanagementconsolesets/status
+  - servermanagements/status
   verbs:
   - get
