@@ -21,6 +21,7 @@ import (
 	consolemaintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 	"github.com/ironcore-dev/maintenance-operator/internal/servermanagement"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 )
 
 // ServerManagementReconciler reconciles a ServerManagement object
@@ -44,9 +45,10 @@ type ServerManagementReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.2/pkg/reconcile
 func (r *ServerManagementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	logger.Info("Reconciling ServerManagement", "name", req.NamespacedName)
 	console := &consolemaintenancev1alpha1.ServerManagement{}
 	if err := r.Get(ctx, req.NamespacedName, console); err != nil {
-		logger.Error(err, "unable to fetch ServerManagementConsoleSet")
+		logger.Error(err, "unable to fetch ServerManagement")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if console.GetDeletionTimestamp() != nil {
@@ -57,15 +59,14 @@ func (r *ServerManagementReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagement) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	selector, err := metav1.LabelSelectorAsSelector(&console.Spec.ServerSelector)
+	serverList, err := r.getServerList(ctx, console)
 	if err != nil {
-		logger.Error(err, "invalid label selector")
-		return ctrl.Result{}, err
-	}
-	serverList := &metalv1alpha1.ServerList{}
-	if err := r.List(ctx, serverList, &client.ListOptions{LabelSelector: selector}); err != nil {
 		logger.Error(err, "unable to list servers")
 		return ctrl.Result{}, err
+	}
+	logger.Info("Found servers matching selector", "count", len(serverList.Items))
+	if len(serverList.Items) == 0 {
+		return r.updateStatus(ctx, nil, console)
 	}
 	secret, err := r.getConsoleSecret(ctx, console)
 	if err != nil {
@@ -77,7 +78,7 @@ func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, consol
 		logger.Error(err, "unable to create server management console client")
 		return ctrl.Result{}, err
 	}
-
+	logger.Info("Successfully created console client", consoleClient)
 	if err := r.updateSecretToken(ctx, secret, consoleClient); err != nil {
 		logger.Error(err, "unable to update console credential secret with token")
 		return ctrl.Result{}, err
@@ -97,7 +98,7 @@ func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, consol
 		}
 		found := false
 		for _, cs := range managedServers {
-			if cs.Name == server.Spec.BMC.Address {
+			if cs.Hostname == fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", strings.Split(server.Name, "-")[0], strings.Split(server.Name, "-")[1]) {
 				found = true
 				break
 			}
@@ -150,7 +151,11 @@ func (r *ServerManagementReconciler) delete(ctx context.Context, console *consol
 	return ctrl.Result{}, nil
 }
 
-func (r *ServerManagementReconciler) createConsoleClient(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagement, secret *corev1.Secret) (*servermanagement.ServerManagementConsole, error) {
+func (r *ServerManagementReconciler) createConsoleClient(
+	ctx context.Context,
+	console *consolemaintenancev1alpha1.ServerManagement,
+	secret *corev1.Secret,
+) (*servermanagement.ServerManagementConsole, error) {
 	var err error
 	if secret == nil {
 		secret, err = r.getConsoleSecret(ctx, console)
@@ -173,6 +178,7 @@ func (r *ServerManagementReconciler) createConsoleClient(ctx context.Context, co
 		token = []byte("")
 	}
 
+	log.FromContext(ctx).Info("Creating console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.ConsoleURL)
 	return servermanagement.New(console.Spec.Manufacturer, servermanagement.ClientOptions{
 		Endpoint: console.Spec.ConsoleURL,
 		Username: string(username),
@@ -188,17 +194,17 @@ func (r *ServerManagementReconciler) getConsoleSecret(
 	secret := &corev1.Secret{}
 	var secretName string
 	switch console.Spec.Manufacturer {
-	case "Dell":
-		secretName = console.Spec.DellCredentialSecretRef
-	case "Lenovo":
-		secretName = console.Spec.LenovoCredentialSecretRef
-	case "HPE":
-		secretName = console.Spec.HPECredentialSecretRef
+	case string(bmc.ManufacturerDell):
+		secretName = console.Spec.DellCredentialSecretRef.Name
+	case string(bmc.ManufacturerLenovo):
+		secretName = console.Spec.LenovoCredentialSecretRef.Name
+	case string(bmc.ManufacturerHPE):
+		secretName = console.Spec.HPECredentialSecretRef.Name
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("unsupported manufacturer: %s", console.Spec.Manufacturer)
 	}
 	if secretName == "" {
-		return nil, nil
+		return nil, fmt.Errorf("no credential secret ref specified for manufacturer: %s", console.Spec.Manufacturer)
 	}
 	if err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: console.Namespace}, secret); err != nil {
 		log.FromContext(ctx).Error(err, "unable to get console credential secret")
@@ -247,9 +253,9 @@ func (r *ServerManagementReconciler) updateStatus(
 	consoleClient *servermanagement.ServerManagementConsole,
 	console *consolemaintenancev1alpha1.ServerManagement,
 ) (ctrl.Result, error) {
-	managedServers := int32(0)
-	unmanagedServers := int32(0)
-	totalServers := int32(0)
+	managedServers := 0
+	unmanagedServers := 0
+	totalServers := 0
 
 	serverList := &metalv1alpha1.ServerList{}
 	selector, err := metav1.LabelSelectorAsSelector(&console.Spec.ServerSelector)
@@ -261,7 +267,7 @@ func (r *ServerManagementReconciler) updateStatus(
 		log.FromContext(ctx).Error(err, "unable to list servers")
 		return ctrl.Result{}, err
 	}
-	totalServers = int32(len(serverList.Items))
+	totalServers = len(serverList.Items)
 	managedDevices, err := consoleClient.ListServers()
 	if err != nil {
 		log.FromContext(ctx).Error(err, "unable to list servers from console")
@@ -269,22 +275,23 @@ func (r *ServerManagementReconciler) updateStatus(
 	}
 	managedMap := make(map[string]bool)
 	for _, device := range managedDevices {
-		managedMap[device.Name] = true
+		managedMap[device.Hostname] = true
 	}
 	for _, server := range serverList.Items {
-		if managedMap[server.Spec.BMC.Address] {
+		if managedMap[fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", strings.Split(server.Name, "-")[0], strings.Split(server.Name, "-")[1])] {
 			managedServers++
+			log.FromContext(ctx).Info("Updating status", "totalServers", totalServers, "managedServersCount", (managedServers))
 		} else {
 			unmanagedServers++
 		}
 	}
 	consoleBase := console.DeepCopy()
-	console.Status.ManagedServers = managedServers
-	console.Status.UnmanagedServers = unmanagedServers
-	console.Status.TotalServers = totalServers
+	console.Status.ManagedServers = int32(managedServers)
+	console.Status.UnmanagedServers = int32(unmanagedServers)
+	console.Status.TotalServers = int32(totalServers)
 
 	if err := r.Status().Patch(ctx, console, client.MergeFrom(consoleBase)); err != nil {
-		log.FromContext(ctx).Error(err, "unable to update ServerManagementConsoleSet status")
+		log.FromContext(ctx).Error(err, "unable to update ServerManagement status")
 		return ctrl.Result{}, err
 	}
 	if totalServers > managedServers {

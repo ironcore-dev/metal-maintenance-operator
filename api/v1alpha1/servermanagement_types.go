@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -20,11 +21,11 @@ type ServerManagementSpec struct {
 	// Manufacturer is the manufacturer of the server management console (e.g., "Dell", "HPE", "Lenovo").
 	Manufacturer string `json:"manufacturer"`
 	// LenovoCredentialSecretRef references the secret containing Lenovo credentials.
-	LenovoCredentialSecretRef string `json:"lenovoCredentialSecretRef,omitempty"`
+	LenovoCredentialSecretRef v1.LocalObjectReference `json:"lenovoCredentialSecretRef,omitempty"`
 	// DellCredentialSecretRef references the secret containing Dell credentials.
-	DellCredentialSecretRef string `json:"dellCredentialSecretRef,omitempty"`
+	DellCredentialSecretRef v1.LocalObjectReference `json:"dellCredentialSecretRef,omitempty"`
 	// HPECredentialSecretRef references the secret containing HPE credentials.
-	HPECredentialSecretRef string `json:"hpeCredentialSecretRef,omitempty"`
+	HPECredentialSecretRef v1.LocalObjectReference `json:"hpeCredentialSecretRef,omitempty"`
 }
 
 // ServerManagementStatus defines the observed state of ServerManagement.
