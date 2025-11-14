@@ -9,7 +9,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	vendorconsolev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
@@ -48,9 +47,9 @@ var _ = Describe("ServerManagement Controller", func() {
 					GenerateName: "test-bmc-",
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &v1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
 
-					BMCSecretRef: v1.LocalObjectReference{
+					BMCSecretRef: corev1.LocalObjectReference{
 						Name: bmcSecret.Name,
 					},
 					Protocol: metalv1alpha1.Protocol{
@@ -72,7 +71,7 @@ var _ = Describe("ServerManagement Controller", func() {
 				Spec: metalv1alpha1.ServerSpec{
 					UUID:       "38947555-7742-3448-3784-823347823834",
 					SystemUUID: "38947555-7742-3448-3784-823347823834",
-					BMCRef: &v1.LocalObjectReference{
+					BMCRef: &corev1.LocalObjectReference{
 						Name: dellBMC.Name,
 					},
 					BMC: &metalv1alpha1.BMCAccess{
@@ -81,7 +80,7 @@ var _ = Describe("ServerManagement Controller", func() {
 							Port: 8000,
 						},
 						Address: "127.0.0.1",
-						BMCSecretRef: v1.LocalObjectReference{
+						BMCSecretRef: corev1.LocalObjectReference{
 							Name: bmcSecret.Name,
 						},
 					},
@@ -130,7 +129,7 @@ var _ = Describe("ServerManagement Controller", func() {
 					},
 					ConsoleURL:              "http://127.0.0.1:8000",
 					Manufacturer:            "Dell Inc.",
-					DellCredentialSecretRef: v1.LocalObjectReference{Name: dellSecret.Name},
+					DellCredentialSecretRef: corev1.LocalObjectReference{Name: dellSecret.Name},
 				},
 			}
 			Expect(k8sClient.Create(ctx, serverManagement)).To(Succeed())
@@ -151,7 +150,7 @@ var _ = Describe("ServerManagement Controller", func() {
 				Spec: metalv1alpha1.ServerSpec{
 					UUID:       "48947555-7742-3448-3784-823347823835",
 					SystemUUID: "48947555-7742-3448-3784-823347823835",
-					BMCRef: &v1.LocalObjectReference{
+					BMCRef: &corev1.LocalObjectReference{
 						Name: dellBMC.Name,
 					},
 					BMC: &metalv1alpha1.BMCAccess{

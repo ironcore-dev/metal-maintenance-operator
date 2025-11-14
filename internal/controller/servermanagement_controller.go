@@ -90,8 +90,8 @@ func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, consol
 	}
 	var errs []error
 	for _, server := range serverList.Items {
-		bmc := metalv1alpha1.BMC{}
-		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &bmc); err != nil {
+		metalBmc := metalv1alpha1.BMC{}
+		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &metalBmc); err != nil {
 			errs = append(errs, err)
 			logger.Error(err, "unable to get BMC for server", "server", server.Name)
 			continue
@@ -105,14 +105,14 @@ func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, consol
 		}
 		if !found {
 			bmcSecret := metalv1alpha1.BMCSecret{}
-			if err := r.Get(ctx, client.ObjectKey{Name: bmc.Spec.BMCSecretRef.Name, Namespace: bmc.Namespace}, &bmcSecret); err != nil {
+			if err := r.Get(ctx, client.ObjectKey{Name: metalBmc.Spec.BMCSecretRef.Name, Namespace: metalBmc.Namespace}, &bmcSecret); err != nil {
 				errs = append(errs, err)
 				logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
 				continue
 			}
 			node := strings.Split(server.Name, "-")
 			hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
-			if err := consoleClient.ImportServer(hostname, bmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"]); err != nil {
+			if err := consoleClient.ImportServer(hostname, metalBmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"]); err != nil {
 				errs = append(errs, err)
 				logger.Error(err, "unable to import server to console", "server", server.Name)
 				continue
@@ -132,14 +132,17 @@ func (r *ServerManagementReconciler) delete(ctx context.Context, console *consol
 	}
 	var errs []error
 	cclient, err := r.createConsoleClient(ctx, console, nil)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	for _, server := range serverList.Items {
-		bmc := metalv1alpha1.BMC{}
-		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &bmc); err != nil {
+		metalBmc := metalv1alpha1.BMC{}
+		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &metalBmc); err != nil {
 			log.FromContext(ctx).Error(err, "unable to get BMC for server", "server", server.Name)
 			errs = append(errs, err)
 			continue
 		}
-		if err := cclient.RemoveServer(server.Spec.BMC.Address, bmc.Status.IP); err != nil {
+		if err := cclient.RemoveServer(server.Spec.BMC.Address, metalBmc.Status.IP); err != nil {
 			log.FromContext(ctx).Error(err, "unable to remove server from console", "server", server.Name)
 			errs = append(errs, err)
 		}

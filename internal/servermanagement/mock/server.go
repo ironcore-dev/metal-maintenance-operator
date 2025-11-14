@@ -156,14 +156,20 @@ func (s *MockServer) handleRedfishGET(w http.ResponseWriter, r *http.Request) {
 
 func (s *MockServer) handleConsolePATCH(w http.ResponseWriter, r *http.Request) {
 	// Implement your PATCH handling logic here
+	s.log.Info("PATCH request received", "path", r.URL.Path)
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("PATCH not implemented"))
+	if _, err := w.Write([]byte("PATCH not implemented")); err != nil {
+		s.log.Error(err, "Failed to write response")
+	}
 }
 
 func (s *MockServer) handleConsoleDELETE(w http.ResponseWriter, r *http.Request) {
 	// Implement your DELETE handling logic here
+	s.log.Info("DELETE request received", "path", r.URL.Path)
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("DELETE not implemented"))
+	if _, err := w.Write([]byte("DELETE not implemented")); err != nil {
+		s.log.Error(err, "Failed to write response")
+	}
 }
 
 func (s *MockServer) Start(ctx context.Context) error {

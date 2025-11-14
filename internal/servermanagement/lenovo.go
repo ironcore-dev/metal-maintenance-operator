@@ -93,6 +93,9 @@ func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUse
 		return fmt.Errorf("error marshalling discovery payload: %w", err)
 	}
 	req, err := http.NewRequest("POST", discoveryURL.String(), bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("error creating discovery request: %w", err)
+	}
 	body, err := c.client.DoRequest(req, []int{202})
 	if err != nil {
 		return err
@@ -140,22 +143,22 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 
 func (c *LenovoClient) ListServers() ([]Device, error) {
 	serversURL := c.client.parsedURL.JoinPath("/nodes?status=managed&includeAttributes=uuid,fqdn")
-	var devices []Device
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {
-		return devices, fmt.Errorf("error creating list servers request: %w", err)
+		return []Device{}, fmt.Errorf("error creating list servers request: %w", err)
 	}
 
 	body, err := c.client.DoRequest(req, []int{http.StatusOK})
 	if err != nil {
-		return devices, fmt.Errorf("error executing list servers request: %w", err)
+		return []Device{}, fmt.Errorf("error executing list servers request: %w", err)
 	}
 
 	var nodeListResp NodeListResponse
 	if err := json.Unmarshal(body, &nodeListResp); err != nil {
-		return devices, fmt.Errorf("error parsing list servers response: %w", err)
+		return []Device{}, fmt.Errorf("error parsing list servers response: %w", err)
 	}
+	devices := make([]Device, 0, len(nodeListResp.NodeList))
 	for _, node := range nodeListResp.NodeList {
 		uuid, err := strconv.Atoi(node.UUID)
 		if err != nil {
