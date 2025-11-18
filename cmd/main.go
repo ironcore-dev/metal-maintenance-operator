@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+//
 // SPDX-License-Identifier: Apache-2.0
 
 package main
@@ -8,6 +9,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -23,6 +25,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	"github.com/ironcore-dev/maintenance-operator/internal/controller"
+	managerconsole "github.com/ironcore-dev/maintenance-operator/vendor-console"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -33,7 +40,8 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -167,7 +175,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "88d880f0.metal.ironcore.dev",
+		LeaderElectionID:       "88d880f0.ironcore.dev",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -185,6 +193,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.FirmwareUpdateDELLReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		ManagerNamespace: "default",
+		OMEConfig: &managerconsole.Config{
+			InsecureSkipVerify: true,
+			ReuseConnections:   false,
+		},
+		ResyncInterval: 30 * time.Second,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "FirmwareUpdateDELL")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
