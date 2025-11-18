@@ -41,6 +41,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 					SecretRef: &v1.LocalObjectReference{
 						Name: "example-secret",
 					},
+					CatalogRepositoryName: "example-catalog",
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"metal.ironcore.dev/Manufacturer": "bar",

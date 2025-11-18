@@ -91,6 +91,7 @@ spec:
                   kubbuilder:validation:Optional
                 properties:
                   fileName:
+                    description: FileName is the name of the catalog file to be created.
                     maxLength: 253
                     minLength: 1
                     type: string
@@ -324,12 +325,9 @@ spec:
             - serverSelector
             type: object
             x-kubernetes-validations:
-            - message: CreateCatalog is immutable when status is InProgress
-              rule: '!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state
-                != ''InProgress'' || self.createCatalog == oldSelf.createCatalog'
             - message: Either createCatalog or catalogName must be provided, but not
                 both.
-              rule: has(self.createCatalog) ^ has(self.catalogName)
+              rule: has(self.createCatalog) || has(self.catalogName)
           status:
             description: FirmwareUpdateDELLStatus defines the observed state of FirmwareUpdateDELL.
             properties:
@@ -432,6 +430,10 @@ spec:
                 type: object
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: CreateCatalog is immutable when status is InProgress
+          rule: '!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state
+            != ''InProgress'' || self.spec.createCatalog == oldSelf.spec.createCatalog'
     served: true
     storage: true
     subresources:
