@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/vendorconsole.ironcore.dev_firmwareupdatedells.yaml
+- bases/vendorconsole.ironcore.dev_firmwareupdatehpes.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

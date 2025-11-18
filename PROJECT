@@ -16,4 +16,12 @@ resources:
   kind: FirmwareUpdateDELL
   path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: ironcore.dev
+  group: vendorconsole
+  kind: FirmwareUpdateHPE
+  path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

@@ -98,13 +98,33 @@ func (c *ManagerClient) CreateSession(
 	}
 	defer resp.Body.Close() // nolint: errcheck
 
-	c.Auth = &AuthToken{AuthType: authMtd}
+	switch authMtd {
+	case DellToken:
+		c.Auth = &AuthToken{AuthType: authMtd}
 
-	c.Auth.Token = resp.Header.Get("X-Auth-Token")
-	c.Auth.Session = resp.Header.Get("Location")
+		c.Auth.Token = resp.Header.Get("X-Auth-Token")
+		c.Auth.Session = resp.Header.Get("Location")
 
-	if urlParser, err := neturl.ParseRequestURI(c.Auth.Session); err == nil {
-		c.Auth.Session = urlParser.RequestURI()
+		if urlParser, err := neturl.ParseRequestURI(c.Auth.Session); err == nil {
+			c.Auth.Session = urlParser.RequestURI()
+		}
+	case HPEToken:
+		c.Auth = &AuthToken{AuthType: authMtd}
+		sessionMap := map[string]any{}
+		respbody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body from: %v. \nwith error: %v", url.String(), err)
+		}
+		if err = json.Unmarshal(respbody, &sessionMap); err != nil {
+			return fmt.Errorf(
+				"failed to decode response from: %v. \nresponse: %v \twith error: %v",
+				url.String(),
+				string(respbody),
+				err,
+			)
+		}
+		c.Auth.Token = (sessionMap["sessionID"]).(string)
+		c.Auth.SessionId = c.Auth.Token
 	}
 
 	return err
@@ -253,7 +273,9 @@ func (c *ManagerClient) CreateRequestWithAuth(
 	}
 	if c.Config.HeaderCustomization == nil && header == nil {
 		req.Header = http.Header{
-			"Content-Type": []string{"application/json"},
+			"Content-Type":  []string{"application/json"},
+			"X-Api-Version": []string{"1400"},
+			"Accept":        []string{"application/json"},
 		}
 	} else if header != nil {
 		req.Header = header

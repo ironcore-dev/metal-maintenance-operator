@@ -26,10 +26,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+
+	vendorconsolev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 	"github.com/ironcore-dev/maintenance-operator/internal/controller"
 	managerconsole "github.com/ironcore-dev/maintenance-operator/vendor-console"
-	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -41,7 +42,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(vendorconsolev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -204,6 +205,19 @@ func main() {
 		ResyncInterval: 30 * time.Second,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FirmwareUpdateDELL")
+		os.Exit(1)
+	}
+	if err = (&controller.FirmwareUpdateHPEReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		ManagerNamespace: "default",
+		OVConfig: &managerconsole.Config{
+			InsecureSkipVerify: true,
+			ReuseConnections:   false,
+		},
+		ResyncInterval: 30 * time.Second,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "FirmwareUpdateHPE")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

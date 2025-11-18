@@ -46,6 +46,7 @@ rules:
   - vendorconsole.ironcore.dev
   resources:
   - firmwareupdatedells
+  - firmwareupdatehpes
   verbs:
   - create
   - delete
@@ -58,12 +59,14 @@ rules:
   - vendorconsole.ironcore.dev
   resources:
   - firmwareupdatedells/finalizers
+  - firmwareupdatehpes/finalizers
   verbs:
   - update
 - apiGroups:
   - vendorconsole.ironcore.dev
   resources:
   - firmwareupdatedells/status
+  - firmwareupdatehpes/status
   verbs:
   - get
   - patch

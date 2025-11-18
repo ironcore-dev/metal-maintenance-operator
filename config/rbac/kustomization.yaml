@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the {{ .ProjectName }} itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- firmwareupdatehpe_admin_role.yaml
+- firmwareupdatehpe_editor_role.yaml
+- firmwareupdatehpe_viewer_role.yaml
 - firmwareupdatedell_admin_role.yaml
 - firmwareupdatedell_editor_role.yaml
 - firmwareupdatedell_viewer_role.yaml
