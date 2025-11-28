@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- maintenance_v1alpha1_firmwareupdatedell.yaml
+- vendorconsole_v1alpha1_firmwareupdatehpe.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

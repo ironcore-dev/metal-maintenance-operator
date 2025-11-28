@@ -2,10 +2,26 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-cliVersion: 4.7.0
-domain: metal.ironcore.dev
+domain: ironcore.dev
 layout:
 - go.kubebuilder.io/v4
 projectName: maintenance-operator
 repo: github.com/ironcore-dev/maintenance-operator
+resources:
+- api:
+    crdVersion: v1
+  controller: true
+  domain: ironcore.dev
+  group: vendorconsole
+  kind: FirmwareUpdateDELL
+  path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: ironcore.dev
+  group: vendorconsole
+  kind: FirmwareUpdateHPE
+  path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

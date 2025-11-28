@@ -1,0 +1,19 @@
+apiVersion: vendorconsole.ironcore.dev/v1alpha1
+kind: FirmwareUpdateHPE
+metadata:
+  labels:
+    app.kubernetes.io/name: maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firmwareupdatehpe-sample
+spec:
+  ovURL: "https://oneview.qa-de-1.cloud.sap"
+  secretRef:
+    name: ome-credentials
+  serverSelector:
+    matchLabels:
+      manufacturer: hpe
+  serverMaintenancePolicy: Enforced
+  firmwareBundleUpdateOptions: ServerProfile
+  firmwareBundle:
+    name: "SPP_20231002_DL320_DL380_DL560_Gen11_v4"
+    version: "2024.02.05.04"
