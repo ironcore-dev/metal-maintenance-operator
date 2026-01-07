@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- vendorconsole_v1alpha1_servermanagement.yaml
+- maintenance_v1alpha1_console.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

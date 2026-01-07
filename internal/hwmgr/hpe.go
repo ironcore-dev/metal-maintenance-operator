@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package servermanagement
+package hwmgr
 
 import (
 	"github.com/HewlettPackard/oneview-golang/ov" // This is a common SDK path
@@ -19,7 +19,7 @@ func NewHPEClient(options ClientOptions) (c *HPEClient, err error) {
 	ovc := ClientOV.NewOVClient(
 		options.Username,
 		options.Password,
-		"options.Domain",
+		options.Domain,
 		options.Endpoint,
 		options.InsecureSkipVerify,
 		1,

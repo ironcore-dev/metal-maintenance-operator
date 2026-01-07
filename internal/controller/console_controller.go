@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"strings"
 
+	maintenancealpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	"github.com/ironcore-dev/maintenance-operator/internal/hwmgr"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -17,38 +20,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	consolemaintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
-	"github.com/ironcore-dev/maintenance-operator/internal/servermanagement"
-	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"github.com/ironcore-dev/metal-operator/bmc"
 )
 
-// ServerManagementReconciler reconciles a ServerManagement object
-type ServerManagementReconciler struct {
+// ConsoleReconciler reconciles a Console object
+type ConsoleReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=vendorconsole.metal.ironcore.dev,resources=servermanagements,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=vendorconsole.metal.ironcore.dev,resources=servermanagements/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=vendorconsole.metal.ironcore.dev,resources=servermanagements/finalizers,verbs=update
+// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles/finalizers,verbs=update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the ServerManagement object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.2/pkg/reconcile
-func (r *ServerManagementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Reconciling ServerManagement", "name", req.NamespacedName)
-	console := &consolemaintenancev1alpha1.ServerManagement{}
+	logger.Info("Reconciling Console", "name", req.NamespacedName)
+	console := &maintenancealpha1.Console{}
 	if err := r.Get(ctx, req.NamespacedName, console); err != nil {
-		logger.Error(err, "unable to fetch ServerManagement")
+		logger.Error(err, "unable to fetch Console")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if console.GetDeletionTimestamp() != nil {
@@ -57,7 +46,7 @@ func (r *ServerManagementReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return r.reconcileExists(ctx, console)
 }
 
-func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagement) (ctrl.Result, error) {
+func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *maintenancealpha1.Console) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	serverList, err := r.getServerList(ctx, console)
 	if err != nil {
@@ -125,7 +114,7 @@ func (r *ServerManagementReconciler) reconcileExists(ctx context.Context, consol
 	return r.updateStatus(ctx, consoleClient, console)
 }
 
-func (r *ServerManagementReconciler) delete(ctx context.Context, console *consolemaintenancev1alpha1.ServerManagement) (ctrl.Result, error) {
+func (r *ConsoleReconciler) delete(ctx context.Context, console *maintenancealpha1.Console) (ctrl.Result, error) {
 	serverList, err := r.getServerList(ctx, console)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -154,11 +143,11 @@ func (r *ServerManagementReconciler) delete(ctx context.Context, console *consol
 	return ctrl.Result{}, nil
 }
 
-func (r *ServerManagementReconciler) createConsoleClient(
+func (r *ConsoleReconciler) createConsoleClient(
 	ctx context.Context,
-	console *consolemaintenancev1alpha1.ServerManagement,
+	console *maintenancealpha1.Console,
 	secret *corev1.Secret,
-) (*servermanagement.ServerManagementConsole, error) {
+) (*hwmgr.Client, error) {
 	var err error
 	if secret == nil {
 		secret, err = r.getConsoleSecret(ctx, console)
@@ -182,7 +171,7 @@ func (r *ServerManagementReconciler) createConsoleClient(
 	}
 
 	log.FromContext(ctx).Info("Creating console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.ConsoleURL)
-	return servermanagement.New(console.Spec.Manufacturer, servermanagement.ClientOptions{
+	return hwmgr.New(console.Spec.Manufacturer, hwmgr.ClientOptions{
 		Endpoint: console.Spec.ConsoleURL,
 		Username: string(username),
 		Password: string(password),
@@ -190,35 +179,24 @@ func (r *ServerManagementReconciler) createConsoleClient(
 	})
 }
 
-func (r *ServerManagementReconciler) getConsoleSecret(
+func (r *ConsoleReconciler) getConsoleSecret(
 	ctx context.Context,
-	console *consolemaintenancev1alpha1.ServerManagement,
+	console *maintenancealpha1.Console,
 ) (*corev1.Secret, error) {
 	secret := &corev1.Secret{}
-	var secretName string
-	switch console.Spec.Manufacturer {
-	case string(bmc.ManufacturerDell):
-		secretName = console.Spec.DellCredentialSecretRef.Name
-	case string(bmc.ManufacturerLenovo):
-		secretName = console.Spec.LenovoCredentialSecretRef.Name
-	case string(bmc.ManufacturerHPE):
-		secretName = console.Spec.HPECredentialSecretRef.Name
-	default:
-		return nil, fmt.Errorf("unsupported manufacturer: %s", console.Spec.Manufacturer)
+	if console.Spec.BMCCredentialSecretRef.Name == "" {
+		return nil, fmt.Errorf("no credential secret ref specified")
 	}
-	if secretName == "" {
-		return nil, fmt.Errorf("no credential secret ref specified for manufacturer: %s", console.Spec.Manufacturer)
-	}
-	if err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: console.Namespace}, secret); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: console.Spec.BMCCredentialSecretRef.Name, Namespace: console.Namespace}, secret); err != nil {
 		log.FromContext(ctx).Error(err, "unable to get console credential secret")
 		return nil, err
 	}
 	return secret, nil
 }
 
-func (r *ServerManagementReconciler) getServerList(
+func (r *ConsoleReconciler) getServerList(
 	ctx context.Context,
-	console *consolemaintenancev1alpha1.ServerManagement,
+	console *maintenancealpha1.Console,
 ) (*metalv1alpha1.ServerList, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&console.Spec.ServerSelector)
 	if err != nil {
@@ -233,10 +211,10 @@ func (r *ServerManagementReconciler) getServerList(
 	return serverList, nil
 }
 
-func (r *ServerManagementReconciler) updateSecretToken(
+func (r *ConsoleReconciler) updateSecretToken(
 	ctx context.Context,
 	secret *corev1.Secret,
-	consoleClient *servermanagement.ServerManagementConsole,
+	consoleClient *hwmgr.Client,
 ) error {
 	token, err := consoleClient.GetAuthToken()
 	if err != nil {
@@ -251,10 +229,10 @@ func (r *ServerManagementReconciler) updateSecretToken(
 	return nil
 }
 
-func (r *ServerManagementReconciler) updateStatus(
+func (r *ConsoleReconciler) updateStatus(
 	ctx context.Context,
-	consoleClient *servermanagement.ServerManagementConsole,
-	console *consolemaintenancev1alpha1.ServerManagement,
+	consoleClient *hwmgr.Client,
+	console *maintenancealpha1.Console,
 ) (ctrl.Result, error) {
 	managedServers := 0
 	unmanagedServers := 0
@@ -304,9 +282,9 @@ func (r *ServerManagementReconciler) updateStatus(
 	return ctrl.Result{}, nil
 }
 
-func (r *ServerManagementReconciler) enqueueRequestsForServer(ctx context.Context, obj client.Object) []ctrl.Request {
+func (r *ConsoleReconciler) enqueueRequestsForServer(ctx context.Context, obj client.Object) []ctrl.Request {
 	var requests []ctrl.Request
-	consoleList := &consolemaintenancev1alpha1.ServerManagementList{}
+	consoleList := &maintenancealpha1.ConsoleList{}
 	if err := r.List(context.Background(), consoleList); err != nil {
 		return nil
 	}
@@ -328,9 +306,9 @@ func (r *ServerManagementReconciler) enqueueRequestsForServer(ctx context.Contex
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *ServerManagementReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ConsoleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&consolemaintenancev1alpha1.ServerManagement{}).
+		For(&maintenancealpha1.Console{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueRequestsForServer)).
 		Named("servermanagement").

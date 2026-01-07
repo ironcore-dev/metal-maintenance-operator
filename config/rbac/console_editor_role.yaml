@@ -1,7 +1,7 @@
 # This rule is not used by the project maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants permissions to create, update, and delete resources within the vendorconsole.metal.ironcore.dev.
+# Grants permissions to create, update, and delete resources within the maintenance.metal.ironcore.dev.
 # This role is intended for users who need to manage these resources
 # but should not control RBAC or manage permissions for others.
 
@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: maintenance-operator
     app.kubernetes.io/managed-by: kustomize
-  name: servermanagement-editor-role
+  name: console-editor-role
 rules:
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - servermanagements
+  - consoles
   verbs:
   - create
   - delete
@@ -26,8 +26,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - servermanagements/status
+  - consoles/status
   verbs:
   - get

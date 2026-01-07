@@ -22,7 +22,7 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the {{ .ProjectName }} itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
-- servermanagement_admin_role.yaml
-- servermanagement_editor_role.yaml
-- servermanagement_viewer_role.yaml
+- console_admin_role.yaml
+- console_editor_role.yaml
+- console_viewer_role.yaml
 

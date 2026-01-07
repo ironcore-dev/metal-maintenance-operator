@@ -5,9 +5,9 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - servermanagements
+  - consoles
   verbs:
   - create
   - delete
@@ -17,15 +17,15 @@ rules:
   - update
   - watch
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - servermanagements/finalizers
+  - consoles/finalizers
   verbs:
   - update
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - servermanagements/status
+  - consoles/status
   verbs:
   - get
   - patch

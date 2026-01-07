@@ -4,21 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: servermanagementconsolesets.console.maintenance.metal.ironcore.dev
+  name: consoles.console.maintenance.metal.ironcore.dev
 spec:
   group: console.maintenance.metal.ironcore.dev
   names:
-    kind: ServerManagementConsoleSet
-    listKind: ServerManagementConsoleSetList
-    plural: servermanagementconsolesets
-    singular: servermanagementconsoleset
+    kind: Console
+    listKind: ConsoleList
+    plural: consoles
+    singular: console
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ServerManagementConsoleSet is the Schema for the ServerManagementConsoleSets
-          API.
+        description: Console is the Schema for the consoles API.
         properties:
           apiVersion:
             description: |-
@@ -38,23 +37,25 @@ spec:
           metadata:
             type: object
           spec:
-            description: ServerManagementConsoleSetSpec defines the desired state
-              of ServerManagementConsoleSet.
+            description: ConsoleSpec defines the desired state of Console.
             properties:
+              bmcCredentialSecretRef:
+                description: BMCCredentialSecretRef references the secret containing
+                  BMC credentials.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               consoleURL:
                 description: ConsoleURL is the URL of the server management console.
-                type: string
-              dellCredentialSecretRef:
-                description: DellCredentialSecretRef references the secret containing
-                  Dell credentials.
-                type: string
-              hpeCredentialSecretRef:
-                description: HPECredentialSecretRef references the secret containing
-                  HPE credentials.
-                type: string
-              lenovoCredentialSecretRef:
-                description: LenovoCredentialSecretRef references the secret containing
-                  Lenovo credentials.
                 type: string
               manufacturer:
                 description: Manufacturer is the manufacturer of the server management
@@ -113,20 +114,18 @@ spec:
             - serverSelector
             type: object
           status:
-            description: ServerManagementConsoleSetStatus defines the observed state
-              of ServerManagementConsoleSet.
+            description: ConsoleStatus defines the observed state of Console.
             properties:
               managedServers:
+                description: ManagedServers number of managed servers.
                 format: int32
                 type: integer
-              state:
-                description: State represents the current state of the server management
-                  console.
-                type: string
               totalServers:
+                description: TotalServers total number of servers.
                 format: int32
                 type: integer
               unmanagedServers:
+                description: UnmanagedServers number of unmanaged servers.
                 format: int32
                 type: integer
             type: object

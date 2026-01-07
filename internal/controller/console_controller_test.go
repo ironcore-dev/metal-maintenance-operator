@@ -11,15 +11,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
-	vendorconsolev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	maintenance "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var _ = Describe("ServerManagement Controller", func() {
+var _ = Describe("Console Controller", func() {
 	ns := SetupTest()
 
-	serverManagement := &vendorconsolev1alpha1.ServerManagement{}
+	console := &maintenance.Console{}
 	dellServer := &metalv1alpha1.Server{}
 	dellSecret := &corev1.Secret{}
 	dellBMC := &metalv1alpha1.BMC{}
@@ -91,7 +91,7 @@ var _ = Describe("ServerManagement Controller", func() {
 
 		AfterEach(func() {
 			By("Cleanup the specific resource instance ServerManagement")
-			Expect(k8sClient.Delete(ctx, serverManagement)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, console)).To(Succeed())
 			By("Cleanup the specific resource instance Server")
 			Expect(k8sClient.Delete(ctx, dellServer)).To(Succeed())
 			By("Cleanup the specific resource instance BMCSecret")
@@ -115,26 +115,26 @@ var _ = Describe("ServerManagement Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, dellSecret)).To(Succeed())
 
-			By("Creating a ServerManagement resource")
-			serverManagement = &vendorconsolev1alpha1.ServerManagement{
+			By("Creating a Console resource")
+			console = &maintenance.Console{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-server-management",
+					Name:      "test-console",
 					Namespace: ns.Name,
 				},
-				Spec: vendorconsolev1alpha1.ServerManagementSpec{
+				Spec: maintenance.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"metal.ironcore.dev/Manufacturer": "Dell",
 						},
 					},
-					ConsoleURL:              "http://127.0.0.1:8000",
-					Manufacturer:            "Dell Inc.",
-					DellCredentialSecretRef: corev1.LocalObjectReference{Name: dellSecret.Name},
+					ConsoleURL:             "http://127.0.0.1:8000",
+					Manufacturer:           "Dell Inc.",
+					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: dellSecret.Name},
 				},
 			}
-			Expect(k8sClient.Create(ctx, serverManagement)).To(Succeed())
+			Expect(k8sClient.Create(ctx, console)).To(Succeed())
 			By("Verifying the reconciliation logic")
-			Eventually(Object(serverManagement)).Should(SatisfyAll(
+			Eventually(Object(console)).Should(SatisfyAll(
 				HaveField("Status.TotalServers", int32(1)),
 				HaveField("Status.ManagedServers", int32(1)),
 			))
@@ -163,7 +163,7 @@ var _ = Describe("ServerManagement Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, secondServer)).Should(Succeed())
 			By("Verifying the reconciliation logic updates for the second server")
-			Eventually(Object(serverManagement)).Should(SatisfyAll(
+			Eventually(Object(console)).Should(SatisfyAll(
 				HaveField("Status.TotalServers", int32(2)),
 				HaveField("Status.ManagedServers", int32(2)),
 			))

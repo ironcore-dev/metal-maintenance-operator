@@ -27,9 +27,10 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
-	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
-	"github.com/ironcore-dev/maintenance-operator/internal/servermanagement/mock"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+
+	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
+	"github.com/ironcore-dev/maintenance-operator/internal/hwmgr/mock"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -77,6 +78,9 @@ var _ = BeforeSuite(func() {
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(maintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 
+	err = maintenancev1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -119,7 +123,7 @@ func SetupTest() *corev1.Namespace {
 		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
 		// register reconciler here
-		Expect((&ServerManagementReconciler{
+		Expect((&ConsoleReconciler{
 			Client: k8sManager.GetClient(),
 			Scheme: k8sManager.GetScheme(),
 		}).SetupWithManager(k8sManager)).To(Succeed())

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package servermanagement
+package hwmgr
 
 import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -17,30 +17,30 @@ type Device struct {
 	HealthStatus int    `json:"HealthStatus"` // 4000 = OK, 4002 = Warning, etc.
 }
 
-type ServerManagementConsoleInterface interface {
+type ClientInterface interface {
 	ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error
 	RemoveServer(hostname string, IP metalv1alpha1.IP) error
 	ListServers() ([]Device, error)
 	GetAuthToken() (string, error)
 }
 
-type ServerManagementConsole struct {
-	Manufacturer string
-	ServerManagementConsoleInterface
+type Client struct {
+	Manufacturer bmc.Manufacturer
+	ClientInterface
 }
 
-func New(manufacturer string, options ClientOptions) (console *ServerManagementConsole, err error) {
-	console = &ServerManagementConsole{}
-	console.Manufacturer = manufacturer
+func New(manufacturer bmc.Manufacturer, options ClientOptions) (client *Client, err error) {
+	client = &Client{}
+	client.Manufacturer = manufacturer
 	switch manufacturer {
-	case string(bmc.ManufacturerDell):
-		console.ServerManagementConsoleInterface, err = NewDellClient(options)
+	case bmc.ManufacturerDell:
+		client.ClientInterface, err = NewDellClient(options)
 		return
-	case string(bmc.ManufacturerLenovo):
-		console.ServerManagementConsoleInterface, err = NewLenovoClient(options)
+	case bmc.ManufacturerLenovo:
+		client.ClientInterface, err = NewLenovoClient(options)
 		return
-	case string(bmc.ManufacturerHPE):
-		console.ServerManagementConsoleInterface, err = NewHPEClient(options)
+	case bmc.ManufacturerHPE:
+		client.ClientInterface, err = NewHPEClient(options)
 		return
 	}
 	return
