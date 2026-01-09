@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: consoles.console.maintenance.metal.ironcore.dev
+  name: consoles.maintenance.metal.ironcore.dev
 spec:
-  group: console.maintenance.metal.ironcore.dev
+  group: maintenance.metal.ironcore.dev
   names:
     kind: Console
     listKind: ConsoleList
