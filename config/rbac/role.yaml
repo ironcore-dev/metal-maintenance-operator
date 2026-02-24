@@ -5,6 +5,15 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles
@@ -30,3 +39,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - bmcs
+  - bmcsecrets
+  - servers
+  verbs:
+  - get
+  - list
+  - watch

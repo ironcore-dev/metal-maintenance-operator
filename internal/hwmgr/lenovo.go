@@ -73,7 +73,12 @@ type LenovoClient struct {
 }
 
 func NewLenovoClient(options ClientOptions) (c *LenovoClient, err error) {
-	return
+	c = &LenovoClient{}
+	c.client, err = NewClient(options)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {

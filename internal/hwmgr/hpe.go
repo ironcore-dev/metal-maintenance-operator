@@ -25,7 +25,7 @@ func NewHPEClient(options ClientOptions) (c *HPEClient, err error) {
 		1,
 		"",
 	)
-	c.client.APIKey = options.Token
+	ovc.APIKey = options.Token
 	c.client = ovc
 	return
 }
@@ -60,7 +60,7 @@ func (c *HPEClient) ListServers() ([]Device, error) {
 	if err != nil {
 		return []Device{}, err
 	}
-	devices := make([]Device, len(hpeServers.Members))
+	devices := make([]Device, 0, len(hpeServers.Members))
 	for _, srv := range hpeServers.Members {
 		device := Device{
 			// ID:       srv.UUID.String(),

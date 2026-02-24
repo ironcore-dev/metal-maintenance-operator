@@ -31,6 +31,10 @@ type ConsoleReconciler struct {
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles/finalizers,verbs=update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;patch
 
 func (r *ConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -67,7 +71,7 @@ func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *mainte
 		logger.Error(err, "unable to create server management console client")
 		return ctrl.Result{}, err
 	}
-	logger.Info("Successfully created console client", consoleClient)
+	logger.Info("Successfully created console client", "manufacturer", console.Spec.Manufacturer)
 	if err := r.updateSecretToken(ctx, secret, consoleClient); err != nil {
 		logger.Error(err, "unable to update console credential secret with token")
 		return ctrl.Result{}, err
@@ -85,9 +89,15 @@ func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *mainte
 			logger.Error(err, "unable to get BMC for server", "server", server.Name)
 			continue
 		}
+		node := strings.Split(server.Name, "-")
+		if len(node) < 2 {
+			logger.Info("Skipping server with invalid name format (expected format: node-rack-...)", "server", server.Name)
+			continue
+		}
+		hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
 		found := false
 		for _, cs := range managedServers {
-			if cs.Hostname == fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", strings.Split(server.Name, "-")[0], strings.Split(server.Name, "-")[1]) {
+			if cs.Hostname == hostname {
 				found = true
 				break
 			}
@@ -99,8 +109,6 @@ func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *mainte
 				logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
 				continue
 			}
-			node := strings.Split(server.Name, "-")
-			hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
 			if err := consoleClient.ImportServer(hostname, metalBmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"]); err != nil {
 				errs = append(errs, err)
 				logger.Error(err, "unable to import server to console", "server", server.Name)
@@ -259,7 +267,14 @@ func (r *ConsoleReconciler) updateStatus(
 		managedMap[device.Hostname] = true
 	}
 	for _, server := range serverList.Items {
-		if managedMap[fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", strings.Split(server.Name, "-")[0], strings.Split(server.Name, "-")[1])] {
+		node := strings.Split(server.Name, "-")
+		if len(node) < 2 {
+			log.FromContext(ctx).Info("Skipping server with invalid name format", "server", server.Name)
+			unmanagedServers++
+			continue
+		}
+		hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
+		if managedMap[hostname] {
 			managedServers++
 			log.FromContext(ctx).Info("Updating status", "totalServers", totalServers, "managedServersCount", (managedServers))
 		} else {
@@ -285,7 +300,7 @@ func (r *ConsoleReconciler) updateStatus(
 func (r *ConsoleReconciler) enqueueRequestsForServer(ctx context.Context, obj client.Object) []ctrl.Request {
 	var requests []ctrl.Request
 	consoleList := &maintenancealpha1.ConsoleList{}
-	if err := r.List(context.Background(), consoleList); err != nil {
+	if err := r.List(ctx, consoleList); err != nil {
 		return nil
 	}
 	for _, console := range consoleList.Items {
