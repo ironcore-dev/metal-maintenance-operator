@@ -120,6 +120,57 @@ spec:
                 description: ManagedServers number of managed servers.
                 format: int32
                 type: integer
+              pendingOperations:
+                description: PendingOperations tracks in-flight vendor operations.
+                items:
+                  description: PendingOperation tracks an in-flight vendor operation.
+                  properties:
+                    hostname:
+                      description: Hostname is the DNS name used for the server in
+                        the vendor console.
+                      type: string
+                    ip:
+                      description: IP is the BMC IP address of the server.
+                      type: string
+                    jobId:
+                      description: JobID is the vendor-specific job identifier for
+                        tracking.
+                      type: string
+                    lastChecked:
+                      description: LastChecked is when the job status was last polled.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message provides human-readable status information.
+                      type: string
+                    operationType:
+                      description: OperationType is the type of operation (Import
+                        or Remove).
+                      type: string
+                    retryCount:
+                      description: RetryCount tracks how many times the operation
+                        has been retried.
+                      format: int32
+                      type: integer
+                    serverName:
+                      description: ServerName is the name of the Server resource.
+                      type: string
+                    startTime:
+                      description: StartTime is when the operation was initiated.
+                      format: date-time
+                      type: string
+                    status:
+                      description: Status is the current status of the operation.
+                      type: string
+                  required:
+                  - hostname
+                  - ip
+                  - operationType
+                  - serverName
+                  - startTime
+                  - status
+                  type: object
+                type: array
               totalServers:
                 description: TotalServers total number of servers.
                 format: int32

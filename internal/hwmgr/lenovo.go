@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -85,8 +84,8 @@ func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUse
 	discoveryURL := c.client.parsedURL.JoinPath("/manageRequest?discovery=true")
 	discoveryPayload := ServerManageRequest{
 		IPAddresses: []string{IP.String()},
-		Username:    c.client.username,
-		Password:    c.client.password,
+		Username:    bmcUser,
+		Password:    bmcPassword,
 		Type:        "Rack-Tower Server",
 		SecurityDescriptor: ServerSecurityDescriptor{
 			ManagedAuthEnabled:   false,
@@ -114,21 +113,23 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 	if err != nil {
 		return fmt.Errorf("error listing servers: %w", err)
 	}
-	serverID := 0
+	serverUUID := ""
 	for _, server := range servers {
 		if server.Hostname == hostname {
-			serverID = server.ID
+			// For Lenovo, we need the actual UUID from the node
+			// Since Device.UUID field exists, we can use it
+			serverUUID = server.UUID
 			break
 		}
 	}
-	if serverID == 0 {
+	if serverUUID == "" {
 		return fmt.Errorf("server with hostname %s not found", hostname)
 	}
-	url := c.client.parsedURL.JoinPath("/unmanageRequest", hostname)
+	url := c.client.parsedURL.JoinPath("/unmanageRequest")
 	payload := ServerUnmanageRequest{
-		IPAddresses: []string{},
+		IPAddresses: []string{ip.String()},
 		Type:        "Rack-Tower Server",
-		UUID:        strconv.Itoa(serverID),
+		UUID:        serverUUID,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -165,12 +166,8 @@ func (c *LenovoClient) ListServers() ([]Device, error) {
 	}
 	devices := make([]Device, 0, len(nodeListResp.NodeList))
 	for _, node := range nodeListResp.NodeList {
-		uuid, err := strconv.Atoi(node.UUID)
-		if err != nil {
-			continue // skip nodes with non-integer UUIDs
-		}
 		device := Device{
-			ID:       uuid,
+			UUID:     node.UUID,
 			Name:     node.Name,
 			Hostname: node.HostName,
 			Model:    node.Type,
@@ -230,4 +227,104 @@ func (c *LenovoClient) createToken() (string, error) {
 	c.client.token = resp.Response.Session.CSRF
 
 	return c.client.token, nil
+}
+
+// ImportServerAsync initiates an asynchronous import and returns a job identifier.
+func (c *LenovoClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) (string, error) {
+	discoveryURL := c.client.parsedURL.JoinPath("/manageRequest?discovery=true")
+	discoveryPayload := ServerManageRequest{
+		IPAddresses: []string{IP.String()},
+		Username:    bmcUser,
+		Password:    bmcPassword,
+		Type:        "Rack-Tower Server",
+		SecurityDescriptor: ServerSecurityDescriptor{
+			ManagedAuthEnabled:   false,
+			ManagedAuthSupported: false,
+		},
+	}
+	payloadBytes, err := json.Marshal(discoveryPayload)
+	if err != nil {
+		return "", fmt.Errorf("error marshalling discovery payload: %w", err)
+	}
+	req, err := http.NewRequest("POST", discoveryURL.String(), bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return "", fmt.Errorf("error creating discovery request: %w", err)
+	}
+	body, err := c.client.DoRequest(req, []int{202})
+	if err != nil {
+		return "", err
+	}
+
+	// Try to parse the response for a job/task ID
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err == nil {
+		// Check for common job ID fields
+		if jobID, ok := response["jobId"].(string); ok && jobID != "" {
+			return jobID, nil
+		}
+		if taskID, ok := response["taskId"].(string); ok && taskID != "" {
+			return taskID, nil
+		}
+	}
+
+	// If no job ID in response, use hostname as identifier for polling
+	return hostname, nil
+}
+
+// RemoveServerAsync initiates an asynchronous remove operation.
+func (c *LenovoClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (string, error) {
+	// Lenovo's unmanage is synchronous, return empty job ID
+	err := c.RemoveServer(hostname, ip)
+	return "", err
+}
+
+// GetJobStatus retrieves the status of a Lenovo import job by polling managed nodes.
+func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
+	// For Lenovo, we poll the /nodes endpoint to check if the hostname appears
+	serversURL := c.client.parsedURL.JoinPath("/nodes?status=managed&includeAttributes=uuid,fqdn")
+
+	req, err := http.NewRequest("GET", serversURL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating nodes request: %w", err)
+	}
+
+	body, err := c.client.DoRequest(req, []int{http.StatusOK})
+	if err != nil {
+		return nil, fmt.Errorf("error executing nodes request: %w", err)
+	}
+
+	var nodeListResp NodeListResponse
+	if err := json.Unmarshal(body, &nodeListResp); err != nil {
+		return nil, fmt.Errorf("error parsing nodes response: %w", err)
+	}
+
+	// Check if the hostname (jobID) appears in the managed nodes
+	for _, node := range nodeListResp.NodeList {
+		if node.HostName == jobID {
+			return &JobInfo{
+				JobID:    jobID,
+				Status:   "completed",
+				Progress: 100,
+				Message:  "Server imported successfully",
+			}, nil
+		}
+	}
+
+	// Not found yet, still in progress
+	return &JobInfo{
+		JobID:    jobID,
+		Status:   "running",
+		Progress: 50,
+		Message:  "Import in progress",
+	}, nil
+}
+
+// IsJobComplete returns true if the Lenovo job is no longer running.
+func (c *LenovoClient) IsJobComplete(jobInfo *JobInfo) bool {
+	return jobInfo.Status == "completed"
+}
+
+// IsJobSuccessful returns true if the Lenovo job completed successfully.
+func (c *LenovoClient) IsJobSuccessful(jobInfo *JobInfo) bool {
+	return jobInfo.Status == "completed"
 }

@@ -109,28 +109,43 @@ func NewDellClient(options ClientOptions) (*DellClient, error) {
 }
 
 func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
-	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryService/DiscoveryJobs")
-	discoveryPayload := DiscoveryJobRequest{
-		JobName: "ImportServer-" + hostname,
-		ConnectionProfiles: []Credential{
+	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryConfigService/DiscoveryConfigGroups")
+
+	// Create ConnectionProfile as JSON string
+	connectionProfile := map[string]interface{}{
+		"profileName":        "",
+		"profileDescription": "",
+		"type":               "DISCOVERY",
+		"credentials": []map[string]interface{}{
 			{
-				CredentialType: 1,
-				UserName:       c.client.username,
-				Password:       c.client.password,
-			},
-		},
-		TargetTypes: []TargetType{
-			{
-				TargetTypeID: 1,
-				Addresses: []Address{
-					{
-						AddressType: 1,
-						Address:     IP.String(),
-					},
+				"type":     "WSMAN",
+				"authType": "Basic",
+				"modified": false,
+				"credentials": map[string]string{
+					"username": bmcUser,
+					"password": bmcPassword,
 				},
 			},
 		},
-		JobType: 1,
+	}
+	connectionProfileJSON, err := json.Marshal(connectionProfile)
+	if err != nil {
+		return fmt.Errorf("error marshalling connection profile: %w", err)
+	}
+
+	discoveryPayload := map[string]interface{}{
+		"DiscoveryConfigGroupName": "ImportServer-" + hostname,
+		"DiscoveryConfigModels": []map[string]interface{}{
+			{
+				"DiscoveryConfigTargets": []map[string]interface{}{
+					{
+						"NetworkAddressDetail": IP.String(),
+					},
+				},
+				"ConnectionProfile": string(connectionProfileJSON),
+				"DeviceType":        []int{1000}, // Server device type
+			},
+		},
 	}
 	payloadBytes, err := json.Marshal(discoveryPayload)
 	if err != nil {
@@ -140,16 +155,10 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 	if err != nil {
 		return fmt.Errorf("error creating discovery request: %w", err)
 	}
-	body, err := c.client.DoRequest(req, []int{http.StatusCreated})
+	_, err = c.client.DoRequest(req, []int{http.StatusCreated, http.StatusOK})
 	if err != nil {
 		return fmt.Errorf("error executing discovery request: %w", err)
 	}
-
-	var discoveryResp DiscoveryJobsResponse
-	if err := json.Unmarshal(body, &discoveryResp); err != nil {
-		return fmt.Errorf("error parsing discovery response: %w", err)
-	}
-	// Optionally, one could check the status of the discovery job here using discoveryResp.Value[0].Id
 
 	return nil
 }
@@ -250,4 +259,126 @@ func (c *DellClient) createToken() (string, error) {
 	}
 	c.client.token = authResp.Token
 	return authResp.Token, nil
+}
+
+// ImportServerAsync initiates an asynchronous import and returns the job ID.
+func (c *DellClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) (string, error) {
+	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryConfigService/DiscoveryConfigGroups")
+
+	connectionProfile := map[string]interface{}{
+		"profileName":        "",
+		"profileDescription": "",
+		"type":               "DISCOVERY",
+		"credentials": []map[string]interface{}{
+			{
+				"type":     "WSMAN",
+				"authType": "Basic",
+				"modified": false,
+				"credentials": map[string]string{
+					"username": bmcUser,
+					"password": bmcPassword,
+				},
+			},
+		},
+	}
+	connectionProfileJSON, err := json.Marshal(connectionProfile)
+	if err != nil {
+		return "", fmt.Errorf("error marshalling connection profile: %w", err)
+	}
+
+	discoveryPayload := map[string]interface{}{
+		"DiscoveryConfigGroupName": "ImportServer-" + hostname,
+		"DiscoveryConfigModels": []map[string]interface{}{
+			{
+				"DiscoveryConfigTargets": []map[string]interface{}{
+					{
+						"NetworkAddressDetail": IP.String(),
+					},
+				},
+				"ConnectionProfile": string(connectionProfileJSON),
+				"DeviceType":        []int{1000},
+			},
+		},
+	}
+	payloadBytes, err := json.Marshal(discoveryPayload)
+	if err != nil {
+		return "", fmt.Errorf("error marshalling discovery payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", discoveryURL.String(), bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return "", fmt.Errorf("error creating discovery request: %w", err)
+	}
+
+	respBody, err := c.client.DoRequest(req, []int{http.StatusCreated, http.StatusOK})
+	if err != nil {
+		return "", fmt.Errorf("error executing discovery request: %w", err)
+	}
+
+	// Parse response to extract DiscoveryConfigGroupId
+	var response map[string]interface{}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return "", fmt.Errorf("error parsing discovery response: %w", err)
+	}
+
+	// Extract job ID from response
+	if groupID, ok := response["DiscoveryConfigGroupId"].(float64); ok {
+		return fmt.Sprintf("%d", int(groupID)), nil
+	}
+
+	return "", fmt.Errorf("no DiscoveryConfigGroupId in response")
+}
+
+// RemoveServerAsync initiates an asynchronous remove operation.
+func (c *DellClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (string, error) {
+	// Dell's RemoveDevices is synchronous, return empty job ID
+	err := c.RemoveServer(hostname, ip)
+	return "", err
+}
+
+// GetJobStatus retrieves the status of a Dell discovery job.
+func (c *DellClient) GetJobStatus(jobID string) (*JobInfo, error) {
+	// Query the discovery jobs endpoint filtering by config group ID
+	jobsURL := c.client.parsedURL.JoinPath("/api/DiscoveryConfigService/Jobs")
+
+	req, err := http.NewRequest("GET", jobsURL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating job status request: %w", err)
+	}
+
+	respBody, err := c.client.DoRequest(req, []int{http.StatusOK})
+	if err != nil {
+		return nil, fmt.Errorf("error executing job status request: %w", err)
+	}
+
+	var jobsResp DiscoveryJobsResponse
+	if err := json.Unmarshal(respBody, &jobsResp); err != nil {
+		return nil, fmt.Errorf("error parsing jobs response: %w", err)
+	}
+
+	// Find the job with matching config group ID
+	for _, job := range jobsResp.Value {
+		if fmt.Sprintf("%d", job.ConfigGroup.Id) == jobID {
+			return &JobInfo{
+				JobID:    jobID,
+				Status:   fmt.Sprintf("%d", job.Status),
+				Progress: job.Progress,
+				Message:  job.State,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("job %s not found", jobID)
+}
+
+// IsJobComplete returns true if the Dell job is no longer running.
+func (c *DellClient) IsJobComplete(jobInfo *JobInfo) bool {
+	// Status 3002 = Running, anything else means complete
+	return jobInfo.Status != "3002"
+}
+
+// IsJobSuccessful returns true if the Dell job completed successfully.
+func (c *DellClient) IsJobSuccessful(jobInfo *JobInfo) bool {
+	// Status 3001 = Completed successfully
+	return jobInfo.Status == "3001"
 }

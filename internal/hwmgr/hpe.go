@@ -4,6 +4,8 @@
 package hwmgr
 
 import (
+	"fmt"
+
 	"github.com/HewlettPackard/oneview-golang/ov" // This is a common SDK path
 	"github.com/HewlettPackard/oneview-golang/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -14,15 +16,15 @@ type HPEClient struct {
 }
 
 func NewHPEClient(options ClientOptions) (c *HPEClient, err error) {
-	var ClientOV *ov.OVClient
 	c = &HPEClient{}
-	ovc := ClientOV.NewOVClient(
+	baseClient := &ov.OVClient{}
+	ovc := baseClient.NewOVClient(
 		options.Username,
 		options.Password,
 		options.Domain,
 		options.Endpoint,
 		options.InsecureSkipVerify,
-		1,
+		0, // 0 for auto-detect API version
 		"",
 	)
 	ovc.APIKey = options.Token
@@ -31,7 +33,10 @@ func NewHPEClient(options ClientOptions) (c *HPEClient, err error) {
 }
 
 func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
-	scp, _ := c.client.GetScopeByName("ScopeHardware")
+	scp, err := c.client.GetScopeByName("ScopeHardware")
+	if err != nil {
+		return fmt.Errorf("error getting scope: %w", err)
+	}
 	// hostname:  node005r-bb097.cc.qa-de-1.cloud.sap
 	rackServer := ov.ServerHardware{
 		Name:               hostname,
@@ -42,7 +47,7 @@ func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, 
 		ConfigurationState: "Managed",
 		InitialScopeUris:   []utils.Nstring{scp.URI},
 	}
-	_, err := c.client.AddRackServer(rackServer)
+	_, err = c.client.AddRackServer(rackServer)
 	return err
 }
 
@@ -81,4 +86,39 @@ func (c *HPEClient) GetAuthToken() (string, error) {
 		}
 	}
 	return c.client.APIKey, nil
+}
+
+// ImportServerAsync initiates an import operation.
+// HPE AddRackServer is synchronous, so this returns an empty job ID.
+func (c *HPEClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) (string, error) {
+	err := c.ImportServer(hostname, IP, bmcUser, bmcPassword)
+	return "", err
+}
+
+// RemoveServerAsync initiates a remove operation.
+// HPE DeleteServerHardware is synchronous, so this returns an empty job ID.
+func (c *HPEClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (string, error) {
+	err := c.RemoveServer(hostname, ip)
+	return "", err
+}
+
+// GetJobStatus retrieves the status of an HPE operation.
+// Since HPE operations are synchronous, this always returns completed.
+func (c *HPEClient) GetJobStatus(jobID string) (*JobInfo, error) {
+	return &JobInfo{
+		JobID:    "",
+		Status:   "completed",
+		Progress: 100,
+		Message:  "Synchronous operation completed",
+	}, nil
+}
+
+// IsJobComplete returns true for HPE operations (always synchronous).
+func (c *HPEClient) IsJobComplete(jobInfo *JobInfo) bool {
+	return true
+}
+
+// IsJobSuccessful returns true for HPE operations (always synchronous).
+func (c *HPEClient) IsJobSuccessful(jobInfo *JobInfo) bool {
+	return true
 }

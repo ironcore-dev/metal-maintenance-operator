@@ -1,6 +1,6 @@
 {
     "@odata.context": "some-link",
-    "@odata.count": 2,
+    "@odata.count": 4,
     "value": [
         {
             "@odata.id": "some-link/1",
@@ -22,6 +22,28 @@
             "Model": "PowerEdge R740",
             "SerialNumber": "ABC123456789",
             "Hostname": "node002r-bb001.cc.qa-de-1.cloud.sap",
+            "HealthStatus": 4000
+        },
+        {
+            "@odata.id": "some-link/3",
+            "@odata.type": "#Device.v1_0_0.Device",
+            "Id": 3,
+            "Name": "Dell Device 3",
+            "Manufacturer": "Dell Inc.",
+            "Model": "PowerEdge R740",
+            "SerialNumber": "ABC123456790",
+            "Hostname": "node003r-bb002.cc.qa-de-1.cloud.sap",
+            "HealthStatus": 4000
+        },
+        {
+            "@odata.id": "some-link/4",
+            "@odata.type": "#Device.v1_0_0.Device",
+            "Id": 4,
+            "Name": "Dell Device 99",
+            "Manufacturer": "Dell Inc.",
+            "Model": "PowerEdge R740",
+            "SerialNumber": "ABC123456799",
+            "Hostname": "node099r-bb099.cc.qa-de-1.cloud.sap",
             "HealthStatus": 4000
         }
     ]

@@ -33,7 +33,59 @@ type ConsoleStatus struct {
 	UnmanagedServers int32 `json:"unmanagedServers,omitempty"`
 	// TotalServers total number of servers.
 	TotalServers int32 `json:"totalServers,omitempty"`
+	// PendingOperations tracks in-flight vendor operations.
+	PendingOperations []PendingOperation `json:"pendingOperations,omitempty"`
 }
+
+// PendingOperation tracks an in-flight vendor operation.
+type PendingOperation struct {
+	// ServerName is the name of the Server resource.
+	ServerName string `json:"serverName"`
+	// Hostname is the DNS name used for the server in the vendor console.
+	Hostname string `json:"hostname"`
+	// IP is the BMC IP address of the server.
+	IP string `json:"ip"`
+	// OperationType is the type of operation (Import or Remove).
+	OperationType OperationType `json:"operationType"`
+	// JobID is the vendor-specific job identifier for tracking.
+	JobID string `json:"jobId,omitempty"`
+	// Status is the current status of the operation.
+	Status JobStatus `json:"status"`
+	// StartTime is when the operation was initiated.
+	StartTime metav1.Time `json:"startTime"`
+	// LastChecked is when the job status was last polled.
+	LastChecked metav1.Time `json:"lastChecked,omitempty"`
+	// RetryCount tracks how many times the operation has been retried.
+	RetryCount int32 `json:"retryCount,omitempty"`
+	// Message provides human-readable status information.
+	Message string `json:"message,omitempty"`
+}
+
+// OperationType defines the type of vendor operation.
+type OperationType string
+
+const (
+	// OperationTypeImport represents importing a server into the console.
+	OperationTypeImport OperationType = "Import"
+	// OperationTypeRemove represents removing a server from the console.
+	OperationTypeRemove OperationType = "Remove"
+)
+
+// JobStatus defines the status of a vendor operation.
+type JobStatus string
+
+const (
+	// JobStatusPending indicates the operation has been queued but not started.
+	JobStatusPending JobStatus = "Pending"
+	// JobStatusRunning indicates the operation is in progress.
+	JobStatusRunning JobStatus = "Running"
+	// JobStatusCompleted indicates the operation completed successfully.
+	JobStatusCompleted JobStatus = "Completed"
+	// JobStatusFailed indicates the operation failed.
+	JobStatusFailed JobStatus = "Failed"
+	// JobStatusTimedOut indicates the operation exceeded the timeout period.
+	JobStatusTimedOut JobStatus = "TimedOut"
+)
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status

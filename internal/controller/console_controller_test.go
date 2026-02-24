@@ -268,4 +268,177 @@ var _ = Describe("Console Controller", func() {
 			))
 		})
 	})
+
+	Context("When handling async operations", func() {
+		ctx := context.Background()
+
+		var asyncBMCSecret *metalv1alpha1.BMCSecret
+		var asyncBMC *metalv1alpha1.BMC
+		var asyncServer *metalv1alpha1.Server
+
+		BeforeEach(func() {
+			By("Creating a BMCSecret for async tests")
+			asyncBMCSecret = &metalv1alpha1.BMCSecret{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "async-bmc-secret-",
+					Namespace:    ns.Name,
+				},
+				Data: map[string][]byte{
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, asyncBMCSecret)).To(Succeed())
+
+			By("Creating a BMC for async tests")
+			asyncBMC = &metalv1alpha1.BMC{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "async-bmc-",
+					Namespace:    ns.Name,
+				},
+				Spec: metalv1alpha1.BMCSpec{
+					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					BMCSecretRef: corev1.LocalObjectReference{
+						Name: asyncBMCSecret.Name,
+					},
+					Protocol: metalv1alpha1.Protocol{
+						Name: metalv1alpha1.ProtocolRedfishLocal,
+						Port: 8000,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, asyncBMC)).To(Succeed())
+
+			By("Updating BMC Status with IP address")
+			Eventually(UpdateStatus(asyncBMC, func() {
+				asyncBMC.Status.IP = metalv1alpha1.MustParseIP("127.0.0.1")
+			})).Should(Succeed())
+
+			By("Creating a Server for async tests")
+			asyncServer = &metalv1alpha1.Server{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "node099-bb099",
+					Namespace: ns.Name,
+					Labels: map[string]string{
+						"metal.ironcore.dev/Manufacturer": "Dell",
+					},
+				},
+				Spec: metalv1alpha1.ServerSpec{
+					UUID:       "58947555-7742-3448-3784-823347823836",
+					SystemUUID: "58947555-7742-3448-3784-823347823836",
+					BMCRef: &corev1.LocalObjectReference{
+						Name: asyncBMC.Name,
+					},
+					BMC: &metalv1alpha1.BMCAccess{
+						Protocol: metalv1alpha1.Protocol{
+							Name: metalv1alpha1.ProtocolRedfishLocal,
+							Port: 8000,
+						},
+						Address: "127.0.0.1",
+						BMCSecretRef: corev1.LocalObjectReference{
+							Name: asyncBMCSecret.Name,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, asyncServer)).Should(Succeed())
+		})
+
+		AfterEach(func() {
+			By("Cleanup async test resources")
+			if asyncServer != nil {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, asyncServer))).To(Succeed())
+			}
+			if asyncBMC != nil {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, asyncBMC))).To(Succeed())
+			}
+			if asyncBMCSecret != nil {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, asyncBMCSecret))).To(Succeed())
+			}
+		})
+
+		It("should track pending import operations", func() {
+			By("Creating Console credential secret")
+			asyncSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "async-secret-",
+					Namespace:    ns.Name,
+				},
+				Data: map[string][]byte{
+					"username": []byte("admin"),
+					"password": []byte("password"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, asyncSecret)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, asyncSecret)
+
+			By("Creating a Console resource")
+			asyncConsole := &maintenance.Console{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "async-console-",
+					Namespace:    ns.Name,
+				},
+				Spec: maintenance.ConsoleSpec{
+					ServerSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"metal.ironcore.dev/Manufacturer": "Dell",
+						},
+					},
+					ConsoleURL:             "http://127.0.0.1:8000",
+					Manufacturer:           "Dell Inc.",
+					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: asyncSecret.Name},
+				},
+			}
+			Expect(k8sClient.Create(ctx, asyncConsole)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, asyncConsole)
+
+			By("Verifying server is eventually managed")
+			Eventually(Object(asyncConsole)).Should(SatisfyAll(
+				HaveField("Status.TotalServers", int32(1)),
+				HaveField("Status.ManagedServers", int32(1)),
+			))
+		})
+
+		It("should poll and complete pending operations", func() {
+			By("Creating Console credential secret")
+			pollSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "poll-secret-",
+					Namespace:    ns.Name,
+				},
+				Data: map[string][]byte{
+					"username": []byte("admin"),
+					"password": []byte("password"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, pollSecret)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, pollSecret)
+
+			By("Creating a Console resource")
+			pollConsole := &maintenance.Console{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "poll-console-",
+					Namespace:    ns.Name,
+				},
+				Spec: maintenance.ConsoleSpec{
+					ServerSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"metal.ironcore.dev/Manufacturer": "Dell",
+						},
+					},
+					ConsoleURL:             "http://127.0.0.1:8000",
+					Manufacturer:           "Dell Inc.",
+					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: pollSecret.Name},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pollConsole)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, pollConsole)
+
+			By("Verifying operations complete successfully")
+			Eventually(Object(pollConsole), "30s").Should(SatisfyAll(
+				HaveField("Status.PendingOperations", BeEmpty()),
+				HaveField("Status.ManagedServers", int32(1)),
+			))
+		})
+	})
 })

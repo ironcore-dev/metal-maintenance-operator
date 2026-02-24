@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	maintenancealpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
 	"github.com/ironcore-dev/maintenance-operator/internal/hwmgr"
@@ -52,6 +53,19 @@ func (r *ConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *maintenancealpha1.Console) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	// Step 1: Check pending operations first
+	requeueAfter, err := r.reconcilePendingOperations(ctx, console)
+	if err != nil {
+		logger.Error(err, "unable to reconcile pending operations")
+		return ctrl.Result{}, err
+	}
+	if requeueAfter > 0 {
+		logger.Info("Requeuing to check pending operations", "after", requeueAfter)
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
+	// Step 2: Get servers and client
 	serverList, err := r.getServerList(ctx, console)
 	if err != nil {
 		logger.Error(err, "unable to list servers")
@@ -61,65 +75,236 @@ func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *mainte
 	if len(serverList.Items) == 0 {
 		return r.updateStatus(ctx, nil, console)
 	}
+
 	secret, err := r.getConsoleSecret(ctx, console)
 	if err != nil {
 		logger.Error(err, "unable to get console credential secret")
 		return ctrl.Result{}, err
 	}
+
 	consoleClient, err := r.createConsoleClient(ctx, console, secret)
 	if err != nil {
 		logger.Error(err, "unable to create server management console client")
 		return ctrl.Result{}, err
 	}
 	logger.Info("Successfully created console client", "manufacturer", console.Spec.Manufacturer)
+
 	if err := r.updateSecretToken(ctx, secret, consoleClient); err != nil {
 		logger.Error(err, "unable to update console credential secret with token")
 		return ctrl.Result{}, err
 	}
+
 	managedServers, err := consoleClient.ListServers()
 	if err != nil {
 		logger.Error(err, "unable to list servers from console")
 		return ctrl.Result{}, err
 	}
-	var errs []error
-	for _, server := range serverList.Items {
-		metalBmc := metalv1alpha1.BMC{}
-		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &metalBmc); err != nil {
-			errs = append(errs, err)
-			logger.Error(err, "unable to get BMC for server", "server", server.Name)
+
+	// Step 3: Start new operations for unmanaged servers
+	if err := r.startNewOperations(ctx, console, serverList, managedServers, consoleClient); err != nil {
+		logger.Error(err, "unable to start new operations")
+		return ctrl.Result{}, err
+	}
+
+	// Step 4: Update status
+	return r.updateStatus(ctx, consoleClient, console)
+}
+
+// reconcilePendingOperations checks the status of pending operations and updates them.
+// Returns the duration after which to requeue if there are pending operations, or 0 if none.
+func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, console *maintenancealpha1.Console) (time.Duration, error) {
+	logger := log.FromContext(ctx)
+
+	if len(console.Status.PendingOperations) == 0 {
+		return 0, nil
+	}
+
+	// Get console client to check job statuses
+	secret, err := r.getConsoleSecret(ctx, console)
+	if err != nil {
+		return 0, fmt.Errorf("unable to get console secret: %w", err)
+	}
+
+	consoleClient, err := r.createConsoleClient(ctx, console, secret)
+	if err != nil {
+		return 0, fmt.Errorf("unable to create console client: %w", err)
+	}
+
+	const operationTimeout = 15 * time.Minute
+	const pollInterval = 10 * time.Second
+	now := metav1.Now()
+
+	updatedOps := make([]maintenancealpha1.PendingOperation, 0, len(console.Status.PendingOperations))
+	hasUpdates := false
+
+	for _, op := range console.Status.PendingOperations {
+		// Check if operation has timed out
+		if now.Sub(op.StartTime.Time) > operationTimeout {
+			logger.Info("Operation timed out", "server", op.ServerName, "operation", op.OperationType, "jobID", op.JobID)
+			op.Status = maintenancealpha1.JobStatusTimedOut
+			op.Message = "Operation exceeded 15 minute timeout"
+			op.LastChecked = now
+			hasUpdates = true
 			continue
 		}
+
+		// If jobID is empty, operation was synchronous and should be removed
+		if op.JobID == "" {
+			logger.Info("Removing synchronous operation", "server", op.ServerName, "operation", op.OperationType)
+			hasUpdates = true
+			continue
+		}
+
+		// Query job status
+		jobInfo, err := consoleClient.GetJobStatus(op.JobID)
+		if err != nil {
+			logger.Error(err, "Error checking job status", "jobID", op.JobID, "server", op.ServerName)
+			op.Message = fmt.Sprintf("Error checking status: %v", err)
+			op.LastChecked = now
+			updatedOps = append(updatedOps, op)
+			continue
+		}
+
+		op.LastChecked = now
+		op.Message = jobInfo.Message
+
+		if consoleClient.IsJobComplete(jobInfo) {
+			if consoleClient.IsJobSuccessful(jobInfo) {
+				logger.Info("Operation completed successfully", "server", op.ServerName, "operation", op.OperationType, "jobID", op.JobID)
+				op.Status = maintenancealpha1.JobStatusCompleted
+				hasUpdates = true
+				// Don't add to updatedOps - remove completed operations
+				continue
+			} else {
+				logger.Info("Operation failed", "server", op.ServerName, "operation", op.OperationType, "jobID", op.JobID)
+				op.Status = maintenancealpha1.JobStatusFailed
+				hasUpdates = true
+				// Don't add to updatedOps - remove failed operations for now
+				// TODO: Consider retry logic in future
+				continue
+			}
+		} else {
+			// Still running
+			if op.Status != maintenancealpha1.JobStatusRunning {
+				op.Status = maintenancealpha1.JobStatusRunning
+				hasUpdates = true
+			}
+			updatedOps = append(updatedOps, op)
+		}
+	}
+
+	// Update Console status if there were changes
+	if hasUpdates {
+		consoleBase := console.DeepCopy()
+		console.Status.PendingOperations = updatedOps
+		if err := r.Status().Patch(ctx, console, client.MergeFrom(consoleBase)); err != nil {
+			return 0, fmt.Errorf("unable to update Console status: %w", err)
+		}
+		logger.Info("Updated pending operations", "remaining", len(updatedOps))
+	}
+
+	// If there are still pending operations, requeue
+	if len(updatedOps) > 0 {
+		return pollInterval, nil
+	}
+
+	return 0, nil
+}
+
+// startNewOperations initiates import operations for servers that are not managed and not pending.
+func (r *ConsoleReconciler) startNewOperations(
+	ctx context.Context,
+	console *maintenancealpha1.Console,
+	serverList *metalv1alpha1.ServerList,
+	managedServers []hwmgr.Device,
+	consoleClient *hwmgr.Client,
+) error {
+	logger := log.FromContext(ctx)
+
+	// Build map of servers with pending operations
+	pendingMap := make(map[string]bool)
+	for _, op := range console.Status.PendingOperations {
+		pendingMap[op.ServerName] = true
+	}
+
+	// Build map of managed hostnames
+	managedMap := make(map[string]bool)
+	for _, device := range managedServers {
+		managedMap[device.Hostname] = true
+	}
+
+	newOperations := []maintenancealpha1.PendingOperation{}
+
+	for _, server := range serverList.Items {
+		// Skip if already pending
+		if pendingMap[server.Name] {
+			continue
+		}
+
+		// Parse hostname
 		node := strings.Split(server.Name, "-")
 		if len(node) < 2 {
-			logger.Info("Skipping server with invalid name format (expected format: node-rack-...)", "server", server.Name)
+			logger.Info("Skipping server with invalid name format", "server", server.Name)
 			continue
 		}
 		hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
-		found := false
-		for _, cs := range managedServers {
-			if cs.Hostname == hostname {
-				found = true
-				break
-			}
+
+		// Skip if already managed
+		if managedMap[hostname] {
+			continue
 		}
-		if !found {
-			bmcSecret := metalv1alpha1.BMCSecret{}
-			if err := r.Get(ctx, client.ObjectKey{Name: metalBmc.Spec.BMCSecretRef.Name, Namespace: metalBmc.Namespace}, &bmcSecret); err != nil {
-				errs = append(errs, err)
-				logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
-				continue
-			}
-			if err := consoleClient.ImportServer(hostname, metalBmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"]); err != nil {
-				errs = append(errs, err)
-				logger.Error(err, "unable to import server to console", "server", server.Name)
-				continue
-			}
+
+		// Get BMC
+		metalBmc := metalv1alpha1.BMC{}
+		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &metalBmc); err != nil {
+			logger.Error(err, "unable to get BMC for server", "server", server.Name)
+			continue
 		}
+
+		// Get BMC secret
+		bmcSecret := metalv1alpha1.BMCSecret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: metalBmc.Spec.BMCSecretRef.Name, Namespace: metalBmc.Namespace}, &bmcSecret); err != nil {
+			logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
+			continue
+		}
+
+		// Start async import
+		jobID, err := consoleClient.ImportServerAsync(hostname, metalBmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"])
+		if err != nil {
+			logger.Error(err, "unable to start import for server", "server", server.Name)
+			continue
+		}
+
+		// Create pending operation
+		now := metav1.Now()
+		operation := maintenancealpha1.PendingOperation{
+			ServerName:    server.Name,
+			Hostname:      hostname,
+			IP:            metalBmc.Status.IP.String(),
+			OperationType: maintenancealpha1.OperationTypeImport,
+			JobID:         jobID,
+			Status:        maintenancealpha1.JobStatusPending,
+			StartTime:     now,
+			LastChecked:   now,
+			RetryCount:    0,
+			Message:       "Import operation initiated",
+		}
+
+		newOperations = append(newOperations, operation)
+		logger.Info("Started import operation", "server", server.Name, "hostname", hostname, "jobID", jobID)
 	}
-	if len(errs) > 0 {
-		return ctrl.Result{}, errors.Join(errs...)
+
+	// Update Console status if new operations were started
+	if len(newOperations) > 0 {
+		consoleBase := console.DeepCopy()
+		console.Status.PendingOperations = append(console.Status.PendingOperations, newOperations...)
+		if err := r.Status().Patch(ctx, console, client.MergeFrom(consoleBase)); err != nil {
+			return fmt.Errorf("unable to update Console status with new operations: %w", err)
+		}
+		logger.Info("Added new pending operations", "count", len(newOperations))
 	}
-	return r.updateStatus(ctx, consoleClient, console)
+
+	return nil
 }
 
 func (r *ConsoleReconciler) delete(ctx context.Context, console *maintenancealpha1.Console) (ctrl.Result, error) {
@@ -257,15 +442,20 @@ func (r *ConsoleReconciler) updateStatus(
 		return ctrl.Result{}, err
 	}
 	totalServers = len(serverList.Items)
-	managedDevices, err := consoleClient.ListServers()
-	if err != nil {
-		log.FromContext(ctx).Error(err, "unable to list servers from console")
-		return ctrl.Result{}, err
-	}
+
+	// Only query console if we have servers and a client
 	managedMap := make(map[string]bool)
-	for _, device := range managedDevices {
-		managedMap[device.Hostname] = true
+	if totalServers > 0 && consoleClient != nil {
+		managedDevices, err := consoleClient.ListServers()
+		if err != nil {
+			log.FromContext(ctx).Error(err, "unable to list servers from console")
+			return ctrl.Result{}, err
+		}
+		for _, device := range managedDevices {
+			managedMap[device.Hostname] = true
+		}
 	}
+
 	for _, server := range serverList.Items {
 		node := strings.Split(server.Name, "-")
 		if len(node) < 2 {
