@@ -58,7 +58,6 @@ The maintenance-operator is a Kubernetes operator built with Kubebuilder that ma
 3. For each unmanaged server:
    - Fetches BMC resource to get server IP
    - Fetches BMC secret for credentials
-   - Constructs hostname as `{node}r-{rack}.cc.qa-de-1.cloud.sap` pattern
    - Calls vendor-specific ImportServer with BMC IP and credentials
 4. Updates Console status with managed/unmanaged counts
 5. Requeues if any servers remain unmanaged

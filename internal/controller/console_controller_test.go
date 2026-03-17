@@ -44,6 +44,7 @@ var _ = Describe("Console Controller", func() {
 			Expect(k8sClient.Create(ctx, bmcSecret)).To(Succeed())
 
 			By("Creating a BMC")
+			hostname := "node001r-bb001.qa-de-1.example.com"
 			dellBMC = &metalv1alpha1.BMC{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-bmc-",
@@ -51,6 +52,7 @@ var _ = Describe("Console Controller", func() {
 				},
 				Spec: metalv1alpha1.BMCSpec{
 					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					Hostname:    &hostname,
 
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: bmcSecret.Name,
@@ -78,7 +80,6 @@ var _ = Describe("Console Controller", func() {
 					},
 				},
 				Spec: metalv1alpha1.ServerSpec{
-					UUID:       "38947555-7742-3448-3784-823347823834",
 					SystemUUID: "38947555-7742-3448-3784-823347823834",
 					BMCRef: &corev1.LocalObjectReference{
 						Name: dellBMC.Name,
@@ -165,7 +166,6 @@ var _ = Describe("Console Controller", func() {
 					},
 				},
 				Spec: metalv1alpha1.ServerSpec{
-					UUID:       "48947555-7742-3448-3784-823347823835",
 					SystemUUID: "48947555-7742-3448-3784-823347823835",
 					BMCRef: &corev1.LocalObjectReference{
 						Name: dellBMC.Name,
@@ -291,6 +291,7 @@ var _ = Describe("Console Controller", func() {
 			Expect(k8sClient.Create(ctx, asyncBMCSecret)).To(Succeed())
 
 			By("Creating a BMC for async tests")
+			hostname := "node099r-bb099.qa-de-1.example.com"
 			asyncBMC = &metalv1alpha1.BMC{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "async-bmc-",
@@ -298,6 +299,7 @@ var _ = Describe("Console Controller", func() {
 				},
 				Spec: metalv1alpha1.BMCSpec{
 					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					Hostname:    &hostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: asyncBMCSecret.Name,
 					},
@@ -324,7 +326,6 @@ var _ = Describe("Console Controller", func() {
 					},
 				},
 				Spec: metalv1alpha1.ServerSpec{
-					UUID:       "58947555-7742-3448-3784-823347823836",
 					SystemUUID: "58947555-7742-3448-3784-823347823836",
 					BMCRef: &corev1.LocalObjectReference{
 						Name: asyncBMC.Name,

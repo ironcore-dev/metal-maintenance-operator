@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	maintenancealpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
@@ -240,41 +239,31 @@ func (r *ConsoleReconciler) startNewOperations(
 		if pendingMap[server.Name] {
 			continue
 		}
-
-		// Parse hostname
-		node := strings.Split(server.Name, "-")
-		if len(node) < 2 {
-			logger.Info("Skipping server with invalid name format", "server", server.Name)
+		metalBmc := &metalv1alpha1.BMC{}
+		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, metalBmc); err != nil {
+			logger.Error(err, "unable to get BMC for server", "server", server.Name)
 			continue
 		}
-		hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
-
+		hostname, err := r.getHostname(ctx, &server, metalBmc)
+		if err != nil {
+			logger.Error(err, "unable to fetch BMC hostname for server", "server", server.Name)
+			continue
+		}
 		// Skip if already managed
 		if managedMap[hostname] {
 			continue
 		}
-
-		// Get BMC
-		metalBmc := metalv1alpha1.BMC{}
-		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &metalBmc); err != nil {
-			logger.Error(err, "unable to get BMC for server", "server", server.Name)
-			continue
-		}
-
-		// Get BMC secret
 		bmcSecret := metalv1alpha1.BMCSecret{}
 		if err := r.Get(ctx, client.ObjectKey{Name: metalBmc.Spec.BMCSecretRef.Name, Namespace: metalBmc.Namespace}, &bmcSecret); err != nil {
 			logger.Error(err, "unable to get BMC secret for server", "server", server.Name)
 			continue
 		}
-
 		// Start async import
 		jobID, err := consoleClient.ImportServerAsync(hostname, metalBmc.Status.IP, bmcSecret.StringData["username"], bmcSecret.StringData["password"])
 		if err != nil {
 			logger.Error(err, "unable to start import for server", "server", server.Name)
 			continue
 		}
-
 		// Create pending operation
 		now := metav1.Now()
 		operation := maintenancealpha1.PendingOperation{
@@ -289,7 +278,6 @@ func (r *ConsoleReconciler) startNewOperations(
 			RetryCount:    0,
 			Message:       "Import operation initiated",
 		}
-
 		newOperations = append(newOperations, operation)
 		logger.Info("Started import operation", "server", server.Name, "hostname", hostname, "jobID", jobID)
 	}
@@ -457,13 +445,12 @@ func (r *ConsoleReconciler) updateStatus(
 	}
 
 	for _, server := range serverList.Items {
-		node := strings.Split(server.Name, "-")
-		if len(node) < 2 {
-			log.FromContext(ctx).Info("Skipping server with invalid name format", "server", server.Name)
+		hostname, err := r.getHostname(ctx, &server, nil)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "unable to fetch BMC hostname for server", "server", server.Name)
 			unmanagedServers++
 			continue
 		}
-		hostname := fmt.Sprintf("%sr-%s.cc.qa-de-1.cloud.sap", node[0], node[1])
 		if managedMap[hostname] {
 			managedServers++
 			log.FromContext(ctx).Info("Updating status", "totalServers", totalServers, "managedServersCount", (managedServers))
@@ -485,6 +472,32 @@ func (r *ConsoleReconciler) updateStatus(
 		return ctrl.Result{Requeue: true}, nil
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *ConsoleReconciler) getServerBMC(ctx context.Context, server metalv1alpha1.Server) (*metalv1alpha1.BMC, error) {
+	bmc := &metalv1alpha1.BMC{}
+	if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, bmc); err != nil {
+		log.FromContext(ctx).Error(err, "unable to get BMC for server", "server", server.Name)
+		return nil, err
+	}
+	return bmc, nil
+}
+
+func (r *ConsoleReconciler) getHostname(ctx context.Context, server *metalv1alpha1.Server, bmc *metalv1alpha1.BMC) (string, error) {
+	if bmc == nil {
+		var err error
+		bmc, err = r.getServerBMC(ctx, *server)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "unable to get BMC for server", "server", server.Name)
+			return "", err
+		}
+	}
+	if bmc.Spec.Hostname == nil || *bmc.Spec.Hostname == "" {
+		err := fmt.Errorf("hostname is empty in BMC spec")
+		log.FromContext(ctx).Error(err, "unable to get hostname for server", "server", server.Name)
+		return "", err
+	}
+	return *bmc.Spec.Hostname, nil
 }
 
 func (r *ConsoleReconciler) enqueueRequestsForServer(ctx context.Context, obj client.Object) []ctrl.Request {

@@ -37,7 +37,6 @@ func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, 
 	if err != nil {
 		return fmt.Errorf("error getting scope: %w", err)
 	}
-	// hostname:  node005r-bb097.cc.qa-de-1.cloud.sap
 	rackServer := ov.ServerHardware{
 		Name:               hostname,
 		Username:           bmcUser,
