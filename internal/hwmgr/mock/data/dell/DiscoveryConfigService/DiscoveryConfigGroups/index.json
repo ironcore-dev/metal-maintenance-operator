@@ -1,0 +1,10 @@
+{
+  "DiscoveryConfigGroupId": 123,
+  "DiscoveryConfigGroupName": "ImportServer-test",
+  "DiscoveryStatusEmailRecipient": "",
+  "DiscoveryConfigExpectedDeviceCount": 1,
+  "DiscoveryConfigEmailSender": "",
+  "TrapDestination": false,
+  "CommunityString": false,
+  "CreateGroup": true
+}

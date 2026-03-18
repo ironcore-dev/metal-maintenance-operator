@@ -1,0 +1,50 @@
+{
+  "@odata.context": "some-link",
+  "@odata.count": 4,
+  "value": [
+    {
+      "@odata.id": "some-link/1",
+      "@odata.type": "#Device.v1_0_0.Device",
+      "Id": 1,
+      "Name": "Dell Device 1",
+      "Manufacturer": "Dell Inc.",
+      "Model": "PowerEdge R740",
+      "SerialNumber": "ABC123456789",
+      "Hostname": "node001r-bb001.qa-de-1.example.com",
+      "HealthStatus": 4000
+    },
+    {
+      "@odata.id": "some-link/2",
+      "@odata.type": "#Device.v1_0_0.Device",
+      "Id": 2,
+      "Name": "Dell Device 2",
+      "Manufacturer": "Dell Inc.",
+      "Model": "PowerEdge R740",
+      "SerialNumber": "ABC123456789",
+      "Hostname": "node002r-bb001.region.example.com",
+      "HealthStatus": 4000
+    },
+    {
+      "@odata.id": "some-link/3",
+      "@odata.type": "#Device.v1_0_0.Device",
+      "Id": 3,
+      "Name": "Dell Device 3",
+      "Manufacturer": "Dell Inc.",
+      "Model": "PowerEdge R740",
+      "SerialNumber": "ABC123456790",
+      "Hostname": "node003r-bb002.region.example.com",
+      "HealthStatus": 4000
+    },
+    {
+      "@odata.id": "some-link/4",
+      "@odata.type": "#Device.v1_0_0.Device",
+      "Id": 4,
+      "Name": "Dell Device 99",
+      "Manufacturer": "Dell Inc.",
+      "Model": "PowerEdge R740",
+      "SerialNumber": "ABC123456799",
+      "Hostname": "node099r-bb099.qa-de-1.example.com",
+      "HealthStatus": 4000
+    }
+  ]
+}

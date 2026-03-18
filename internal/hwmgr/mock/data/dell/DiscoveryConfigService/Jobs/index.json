@@ -1,0 +1,23 @@
+{
+  "@odata.context": "/api/$metadata#Collection(DiscoveryConfigService.Jobs)",
+  "@odata.count": 1,
+  "value": [
+    {
+      "@odata.type": "#DiscoveryConfigService.DiscoveryJob",
+      "Id": 1001,
+      "Name": "Discovery Job",
+      "Description": "Server discovery job",
+      "StartTime": "2024-06-01T10:00:00Z",
+      "EndTime": "2024-06-01T10:05:00Z",
+      "Status": 3001,
+      "Progress": 100,
+      "State": "Completed",
+      "DeviceCount": 1,
+      "DiscoveredDeviceCount": 1,
+      "ConfigGroup": {
+        "Id": 123,
+        "Name": "ImportServer-test"
+      }
+    }
+  ]
+}

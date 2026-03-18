@@ -1,0 +1,24 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#DiscoveryService/DiscoveryJobs",
+    "@odata.count": 1,
+    "value": [
+        {
+            "@odata.id": "/redfish/v1/DiscoveryService/DiscoveryJobs/1",
+            "@odata.type": "#DiscoveryJob.v1_0_0.DiscoveryJob",
+            "Id": 1,
+            "Name": "Network Discovery Job 1",
+            "Description": "Discovery job for network devices",
+            "StartTime": "2024-06-01T10:00:00Z",
+            "EndTime": null,
+            "Status": 3002,
+            "Progress": 45,
+            "State": "Running",
+            "DeviceCount": 100,
+            "DiscoveredDeviceCount": 45,
+            "ConfigGroup": {
+                "Id": 1,
+                "Name": "Default Config Group"
+            }
+        }
+    ]
+}
