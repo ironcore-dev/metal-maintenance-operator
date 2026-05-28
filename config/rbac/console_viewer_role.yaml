@@ -1,4 +1,4 @@
-# This rule is not used by the project maintenance-operator itself.
+# This rule is not used by the project metal-maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
 # Grants read-only access to maintenance.metal.ironcore.dev resources.
@@ -9,7 +9,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
-    app.kubernetes.io/name: maintenance-operator
+    app.kubernetes.io/name: metal-maintenance-operator
     app.kubernetes.io/managed-by: kustomize
   name: console-viewer-role
 rules:

@@ -5,8 +5,8 @@
 domain: metal.ironcore.dev
 layout:
 - go.kubebuilder.io/v4
-projectName: maintenance-operator
-repo: github.com/ironcore-dev/maintenance-operator
+projectName: metal-maintenance-operator
+repo: github.com/ironcore-dev/metal-maintenance-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,6 +15,6 @@ resources:
   domain: metal.ironcore.dev
   group: maintenance
   kind: Console
-  path: github.com/ironcore-dev/maintenance-operator/api/v1alpha1
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

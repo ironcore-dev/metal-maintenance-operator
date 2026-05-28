@@ -58,7 +58,7 @@ func NewClient(options ClientOptions) (c *client, err error) {
 		options.HTTPClient = createClient(options)
 	}
 	if options.Agent == "" {
-		options.Agent = "maintenance-operator"
+		options.Agent = "metal-maintenance-operator"
 	}
 	c.httpClient = options.HTTPClient
 	c.token = options.Token

@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	maintenancealpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
-	"github.com/ironcore-dev/maintenance-operator/internal/hwmgr"
+	maintenancealpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

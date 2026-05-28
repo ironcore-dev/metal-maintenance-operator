@@ -29,8 +29,8 @@ import (
 	"github.com/ironcore-dev/controller-utils/modutils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 
-	maintenancev1alpha1 "github.com/ironcore-dev/maintenance-operator/api/v1alpha1"
-	"github.com/ironcore-dev/maintenance-operator/internal/hwmgr/mock"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr/mock"
 	// +kubebuilder:scaffold:imports
 )
 
