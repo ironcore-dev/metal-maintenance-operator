@@ -5,6 +5,8 @@
 domain: metal.ironcore.dev
 layout:
 - go.kubebuilder.io/v4
+plugins:
+  helm.kubebuilder.io/v1-alpha: {}
 projectName: metal-maintenance-operator
 repo: github.com/ironcore-dev/metal-maintenance-operator
 resources:
