@@ -2,7 +2,7 @@ apiVersion: maintenance.metal.ironcore.dev/v1alpha1
 kind: Console
 metadata:
   labels:
-    app.kubernetes.io/name: maintenance-operator
+    app.kubernetes.io/name: metal-maintenance-operator
     app.kubernetes.io/managed-by: kustomize
   name: console-sample
 spec:

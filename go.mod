@@ -1,4 +1,4 @@
-module github.com/ironcore-dev/maintenance-operator
+module github.com/ironcore-dev/metal-maintenance-operator
 
 go 1.25.6
 

@@ -1,7 +1,7 @@
 version = 1
-SPDX-PackageName = "maintenance-operator"
+SPDX-PackageName = "metal-maintenance-operator"
 SPDX-PackageSupplier = "IronCore authors <ospo@sap.com>"
-SPDX-PackageDownloadLocation = "https://github.com/ironcore-dev/maintenance-operator"
+SPDX-PackageDownloadLocation = "https://github.com/ironcore-dev/metal-maintenance-operator"
 
 [[annotations]]
 path = [

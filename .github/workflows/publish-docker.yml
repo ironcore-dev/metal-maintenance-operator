@@ -23,7 +23,7 @@ jobs:
     strategy:
       matrix:
         image:
-        - name: maintenance-operator-controller-manager
+        - name: metal-maintenance-operator-controller-manager
           target: manager
     permissions:
       contents: read

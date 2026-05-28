@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-The maintenance-operator is a Kubernetes operator built with Kubebuilder that manages server hardware through vendor management consoles (Dell OpenManage Enterprise, HPE OneView, Lenovo XClarity). It automatically imports physical servers from the metal-operator into these vendor management systems using their respective APIs.
+The metal-maintenance-operator is a Kubernetes operator built with Kubebuilder that manages server hardware through vendor management consoles (Dell OpenManage Enterprise, HPE OneView, Lenovo XClarity). It automatically imports physical servers from the metal-operator into these vendor management systems using their respective APIs.
 
 **Domain**: `metal.ironcore.dev`
 **API Group**: `maintenance.metal.ironcore.dev`
