@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"path"
 	"strings"
@@ -107,9 +108,7 @@ func (s *MockServer) handleRedfishPOST(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid JSON in embedded data", http.StatusInternalServerError)
 			return
 		}
-		for k, v := range update {
-			existing[k] = v
-		}
+		maps.Copy(existing, update)
 		s.mu.Lock()
 		s.overrides[urlPath] = existing
 		s.mu.Unlock()
@@ -204,13 +203,10 @@ func resolvePath(urlPath string) string {
 	if urlPath == "/" {
 		return "data/index.json"
 	}
-	trimmed := ""
-	if strings.HasPrefix(urlPath, "/api") {
-		trimmed := strings.TrimPrefix(urlPath, "/api")
-		trimmed = strings.Trim(trimmed, "/")
-		// add dell path
-		return path.Join("data", "dell", trimmed, "index.json")
+	if after, found := strings.CutPrefix(urlPath, "/api"); found {
+		after = strings.Trim(after, "/")
+		return path.Join("data", "dell", after, "index.json")
 	}
 
-	return path.Join("data", trimmed, "index.json")
+	return "data/index.json"
 }

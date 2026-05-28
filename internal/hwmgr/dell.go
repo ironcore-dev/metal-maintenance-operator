@@ -112,11 +112,11 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryConfigService/DiscoveryConfigGroups")
 
 	// Create ConnectionProfile as JSON string
-	connectionProfile := map[string]interface{}{
+	connectionProfile := map[string]any{
 		"profileName":        "",
 		"profileDescription": "",
 		"type":               "DISCOVERY",
-		"credentials": []map[string]interface{}{
+		"credentials": []map[string]any{
 			{
 				"type":     "WSMAN",
 				"authType": "Basic",
@@ -133,11 +133,11 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 		return fmt.Errorf("error marshalling connection profile: %w", err)
 	}
 
-	discoveryPayload := map[string]interface{}{
+	discoveryPayload := map[string]any{
 		"DiscoveryConfigGroupName": "ImportServer-" + hostname,
-		"DiscoveryConfigModels": []map[string]interface{}{
+		"DiscoveryConfigModels": []map[string]any{
 			{
-				"DiscoveryConfigTargets": []map[string]interface{}{
+				"DiscoveryConfigTargets": []map[string]any{
 					{
 						"NetworkAddressDetail": IP.String(),
 					},
@@ -265,11 +265,11 @@ func (c *DellClient) createToken() (string, error) {
 func (c *DellClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) (string, error) {
 	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryConfigService/DiscoveryConfigGroups")
 
-	connectionProfile := map[string]interface{}{
+	connectionProfile := map[string]any{
 		"profileName":        "",
 		"profileDescription": "",
 		"type":               "DISCOVERY",
-		"credentials": []map[string]interface{}{
+		"credentials": []map[string]any{
 			{
 				"type":     "WSMAN",
 				"authType": "Basic",
@@ -286,11 +286,11 @@ func (c *DellClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmc
 		return "", fmt.Errorf("error marshalling connection profile: %w", err)
 	}
 
-	discoveryPayload := map[string]interface{}{
+	discoveryPayload := map[string]any{
 		"DiscoveryConfigGroupName": "ImportServer-" + hostname,
-		"DiscoveryConfigModels": []map[string]interface{}{
+		"DiscoveryConfigModels": []map[string]any{
 			{
-				"DiscoveryConfigTargets": []map[string]interface{}{
+				"DiscoveryConfigTargets": []map[string]any{
 					{
 						"NetworkAddressDetail": IP.String(),
 					},
@@ -316,7 +316,7 @@ func (c *DellClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmc
 	}
 
 	// Parse response to extract DiscoveryConfigGroupId
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return "", fmt.Errorf("error parsing discovery response: %w", err)
 	}

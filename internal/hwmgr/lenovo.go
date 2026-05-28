@@ -256,7 +256,7 @@ func (c *LenovoClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, b
 	}
 
 	// Try to parse the response for a job/task ID
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.Unmarshal(body, &response); err == nil {
 		// Check for common job ID fields
 		if jobID, ok := response["jobId"].(string); ok && jobID != "" {
