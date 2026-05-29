@@ -270,6 +270,10 @@ addlicense: $(ADDLICENSE) ## Download addlicense locally if necessary.
 $(ADDLICENSE): $(LOCALBIN)
 	$(call go-install-tool,$(ADDLICENSE),github.com/google/addlicense,$(ADDLICENSE_VERSION))
 
+.PHONY: helm
+helm: manifests kubebuilder
+	"$(KUBEBUILDER)" edit --plugins=helm/v1-alpha
+
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # Note: All paths are quoted to work in directories containing spaces or parentheses.
 # $1 - target path with name of binary
