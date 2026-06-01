@@ -171,3 +171,16 @@ certManager:
 ##
 prometheus:
   enable: false
+
+## Additional Secret resources to render in the release namespace.
+## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).
+##
+# additionalSecrets:
+#   - name: my-secret
+#     labels:
+#       resources.gardener.cloud/purpose: token-requestor
+#     annotations:
+#       serviceaccount.resources.gardener.cloud/name: my-sa
+#     stringData:
+#       token: ""
+additionalSecrets: []
