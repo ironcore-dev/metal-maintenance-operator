@@ -1,0 +1,33 @@
+{{- if .Values.rbac.helpers.enable }}
+apiVersion: rbac.authorization.k8s.io/v1
+{{- if .Values.rbac.namespaced }}
+kind: Role
+{{- else }}
+kind: ClusterRole
+{{- end }}
+metadata:
+{{- if .Values.rbac.namespaced }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "metal-maintenance-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "console-viewer-role" "context" $) }}
+rules:
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - consoles
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - consoles/status
+  verbs:
+  - get
+{{- end }}

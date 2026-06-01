@@ -213,7 +213,7 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.12
 GOIMPORTS_VERSION ?= v0.45.0
-KUBEBUILDER_VERSION ?= v4.5.1
+KUBEBUILDER_VERSION ?= v4.14.0
 ADDLICENSE_VERSION ?= v1.1.1
 CRD_REF_DOCS_VERSION ?= v0.2.0
 
@@ -272,7 +272,7 @@ $(ADDLICENSE): $(LOCALBIN)
 
 .PHONY: helm
 helm: manifests kubebuilder
-	"$(KUBEBUILDER)" edit --plugins=helm/v1-alpha
+	"$(KUBEBUILDER)" edit --plugins=helm/v2-alpha
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # Note: All paths are quoted to work in directories containing spaces or parentheses.
