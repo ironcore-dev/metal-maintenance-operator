@@ -489,6 +489,9 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
+        env:
+        - name: FORCE_ENV_IN_CHART
+          value: "true"
         image: controller:latest
         livenessProbe:
           httpGet:
