@@ -1,5 +1,6 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+SANITIZER_IMG ?= metal-sanitizer:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -137,6 +138,18 @@ docker-build: ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+.PHONY: build-sanitizer
+build-sanitizer: ## Build metal-sanitizer binary.
+	go build -o bin/metal-sanitizer ./cmd/metal-sanitizer
+
+.PHONY: docker-build-sanitizer
+docker-build-sanitizer: ## Build docker image with the metal-sanitizer.
+	$(CONTAINER_TOOL) build --target metal-sanitizer -t ${SANITIZER_IMG} .
+
+.PHONY: docker-push-sanitizer
+docker-push-sanitizer: ## Push docker image with the metal-sanitizer.
+	$(CONTAINER_TOOL) push ${SANITIZER_IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:

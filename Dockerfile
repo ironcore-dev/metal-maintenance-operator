@@ -13,6 +13,7 @@ RUN go mod download
 
 # Copy the go source
 COPY cmd/main.go cmd/main.go
+COPY cmd/metal-sanitizer/ cmd/metal-sanitizer/
 COPY api/ api/
 COPY internal/ internal/
 
@@ -26,6 +27,11 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 
+FROM builder AS metal-sanitizer-builder
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o metal-sanitizer ./cmd/metal-sanitizer
+
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot AS manager
@@ -34,3 +40,14 @@ COPY --from=manager-builder /workspace/manager .
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
+
+# Runtime stage for metal-sanitizer: Debian-slim is required for util-linux (wipefs, blockdev, blkdiscard)
+# and coreutils (dd). These tools are invoked by metal-sanitizer at runtime to wipe block devices.
+FROM debian:testing-slim AS metal-sanitizer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        util-linux \
+        coreutils \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=metal-sanitizer-builder /workspace/metal-sanitizer /usr/local/bin/metal-sanitizer
+ENTRYPOINT ["/usr/local/bin/metal-sanitizer"]
