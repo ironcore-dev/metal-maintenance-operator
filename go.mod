@@ -7,7 +7,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/ironcore-dev/controller-utils v0.11.0
 	github.com/ironcore-dev/metal-operator v0.5.0
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.31.0
 	github.com/onsi/gomega v1.41.0
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
