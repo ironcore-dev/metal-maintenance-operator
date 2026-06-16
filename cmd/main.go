@@ -9,6 +9,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -54,6 +58,11 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var sanitizationNamespace string
+	var sanitizationImage string
+	var sanitizationTolerations []metalv1alpha1.Toleration
+	var reportBaseURL string
+	var sanitizedServerAddress string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -73,6 +82,14 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&sanitizationNamespace, "sanitization-namespace", "", "The namespace to use for the sanitization.")
+	flag.StringVar(&sanitizationImage, "sanitization-image", "", "The image to use for the sanitization.")
+	cli.TolerationsVar(&sanitizationTolerations, "sanitization-tolerations", sanitizationTolerations,
+		"Tolerations on the sanitization claim. Formatted key=[value]:effect.")
+	flag.StringVar(&reportBaseURL, "report-base-url", "",
+		"The base report URL for the sanitizer to report success to.")
+	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
+		"The address the sanitized server binds to.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -80,6 +97,19 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if sanitizationNamespace == "" {
+		setupLog.Error(nil, "Must specify --sanitization-namespace")
+		os.Exit(1)
+	}
+	if sanitizationImage == "" {
+		setupLog.Error(nil, "Must specify --sanitization-image")
+		os.Exit(1)
+	}
+	if reportBaseURL == "" {
+		setupLog.Error(nil, "Must specify --report-base-url")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -200,6 +230,29 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Console")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ServerSanitizationReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		SanitizationNamespace:   sanitizationNamespace,
+		SanitizationImage:       sanitizationImage,
+		SanitizationTolerations: sanitizationTolerations,
+		SanitizationIgnitionProvider: (&ignition.SanitizationProvider{
+			ReportBaseURL: reportBaseURL,
+		}).Ignition,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ServerSanitization")
+		os.Exit(1)
+	}
+
+	if err = (&server.SanitizedHandler{
+		Client:                mgr.GetClient(),
+		SanitizationNamespace: sanitizationNamespace,
+		Address:               sanitizedServerAddress,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create server", "server", "Sanitized")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
