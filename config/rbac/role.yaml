@@ -17,6 +17,8 @@ rules:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles
+  - maintenanceplanruns
+  - maintenanceplans
   verbs:
   - create
   - delete
@@ -29,16 +31,33 @@ rules:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles/finalizers
+  - maintenanceplanruns/finalizers
+  - maintenanceplans/finalizers
   verbs:
   - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles/status
+  - maintenanceplanruns/status
+  - maintenanceplans/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - biossettings
+  - biosversions
+  - bmcsettings
+  - bmcversions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
 - apiGroups:
   - metal.ironcore.dev
   resources:

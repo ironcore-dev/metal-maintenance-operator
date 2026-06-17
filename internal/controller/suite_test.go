@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -91,7 +92,51 @@ var _ = BeforeSuite(func() {
 
 	// set komega client
 	SetClient(k8sClient)
+
+	// Give controllers time to start their caches before asserting state.
+	SetDefaultEventuallyTimeout(10 * time.Second)
+	SetDefaultEventuallyPollingInterval(250 * time.Millisecond)
 })
+
+// SetupMaintenanceTest starts a manager with only the MaintenancePlan and
+// MaintenancePlanRun controllers registered. It returns a pointer to an empty
+// Namespace struct; the actual namespace is populated in the BeforeEach and is
+// only valid during specs that run after that hook.
+func SetupMaintenanceTest() {
+	BeforeEach(func(ctx SpecContext) {
+		var mgrCtx context.Context
+		mgrCtx, cancel := context.WithCancel(context.Background())
+		DeferCleanup(cancel)
+
+		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
+			Scheme: scheme.Scheme,
+			Controller: config.Controller{
+				SkipNameValidation: ptr.To(true),
+			},
+			Metrics: metricsserver.Options{
+				BindAddress: "0",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager for maintenance controllers")
+
+		Expect((&MaintenancePlanReconciler{
+			Client:   k8sManager.GetClient(),
+			Scheme:   k8sManager.GetScheme(),
+			Recorder: k8sManager.GetEventRecorderFor("maintenanceplan-controller"),
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		Expect((&MaintenancePlanRunReconciler{
+			Client:   k8sManager.GetClient(),
+			Scheme:   k8sManager.GetScheme(),
+			Recorder: k8sManager.GetEventRecorderFor("maintenanceplanrun-controller"),
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		go func() {
+			defer GinkgoRecover()
+			Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start maintenance manager")
+		}()
+	})
+}
 
 func SetupTest() *corev1.Namespace {
 	ns := &corev1.Namespace{}
