@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
@@ -85,6 +92,8 @@ rules:
   - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
+  - maintenanceplanruns
+  - maintenanceplans
   verbs:
   - create
   - delete
@@ -97,12 +106,16 @@ rules:
   - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/finalizers
+  - maintenanceplanruns/finalizers
+  - maintenanceplans/finalizers
   verbs:
   - update
 - apiGroups:
   - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
+  - maintenanceplanruns/status
+  - maintenanceplans/status
   verbs:
   - get
   - patch
