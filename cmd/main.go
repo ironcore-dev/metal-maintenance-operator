@@ -202,6 +202,24 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Console")
 		os.Exit(1)
 	}
+
+	if err = (&controller.MaintenancePlanReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("maintenanceplan-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MaintenancePlan")
+		os.Exit(1)
+	}
+
+	if err = (&controller.MaintenancePlanRunReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("maintenanceplanrun-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MaintenancePlanRun")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
