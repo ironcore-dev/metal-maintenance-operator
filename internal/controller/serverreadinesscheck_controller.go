@@ -99,7 +99,7 @@ func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, ch
 
 	var serverStatuses []maintenancealpha1.ServerReadinessStatus
 	for i := range servers {
-		status := r.validateServer(ctx, &servers[i], check)
+		status := r.validateServer(&servers[i], check)
 		serverStatuses = append(serverStatuses, status)
 		if err := r.setNetworkReadyCondition(ctx, &servers[i], status); err != nil {
 			return ctrl.Result{}, err
@@ -177,7 +177,7 @@ func (r *ServerReadinessCheckReconciler) listMatchingServers(ctx context.Context
 	return serverList.Items, nil
 }
 
-func (r *ServerReadinessCheckReconciler) validateServer(ctx context.Context, server *metalv1alpha1.Server, check *maintenancealpha1.ServerReadinessCheck) maintenancealpha1.ServerReadinessStatus {
+func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Server, check *maintenancealpha1.ServerReadinessCheck) maintenancealpha1.ServerReadinessStatus {
 	status := maintenancealpha1.ServerReadinessStatus{Name: server.Name, Ready: true}
 
 	// Index actual NICs by MAC for O(1) lookup
