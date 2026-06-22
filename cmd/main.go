@@ -8,6 +8,8 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
@@ -63,6 +65,7 @@ func main() {
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
+	var readinessChecks []string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -94,6 +97,12 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
+	flag.Func("readiness-checks",
+		"Comma-separated list of readiness check types to enable (supported: network)",
+		func(s string) error {
+			readinessChecks = strings.Split(s, ",")
+			return nil
+		})
 	opts := zap.Options{
 		Development: true,
 	}
@@ -260,6 +269,16 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	if slices.Contains(readinessChecks, "network") {
+		if err = (&controller.ServerReadinessCheckReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ServerReadinessCheck")
+			os.Exit(1)
+		}
+	}
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")
