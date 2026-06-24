@@ -48,10 +48,10 @@ type MaintenancePlanRunReconciler struct {
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=maintenanceplanruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=maintenanceplanruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=maintenanceplanruns/finalizers,verbs=update
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsettings,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcversions,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=biossettings,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=biosversions,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsettings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcversions,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=biossettings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=biosversions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 
@@ -698,8 +698,17 @@ func (r *MaintenancePlanRunReconciler) shouldSkipBMC(
 	if target == "" || baseline == "" {
 		return false, ""
 	}
-	if target <= baseline {
-		return true, fmt.Sprintf("baseline %s >= target %s", baseline, target)
+	// Settings stages apply to a specific firmware version: skip only when the
+	// firmware has already moved past this version (target < baseline).
+	// Version upgrade stages: skip when already at or beyond the target (target <= baseline).
+	if stage.Kind == maintenancev1alpha1.StageKindBMCSettings {
+		if target < baseline {
+			return true, fmt.Sprintf("baseline %s > target %s", baseline, target)
+		}
+	} else {
+		if target <= baseline {
+			return true, fmt.Sprintf("baseline %s >= target %s", baseline, target)
+		}
 	}
 	return false, ""
 }
@@ -714,8 +723,15 @@ func (r *MaintenancePlanRunReconciler) shouldSkipServer(
 	if target == "" || baseline == "" {
 		return false, ""
 	}
-	if target <= baseline {
-		return true, fmt.Sprintf("baseline %s >= target %s for server %s", baseline, target, serverName)
+	// Same logic: settings skip only when firmware has moved past this version.
+	if stage.Kind == maintenancev1alpha1.StageKindBIOSSettings {
+		if target < baseline {
+			return true, fmt.Sprintf("baseline %s > target %s for server %s", baseline, target, serverName)
+		}
+	} else {
+		if target <= baseline {
+			return true, fmt.Sprintf("baseline %s >= target %s for server %s", baseline, target, serverName)
+		}
 	}
 	return false, ""
 }
@@ -900,11 +916,85 @@ func (r *MaintenancePlanRunReconciler) checkCRStatus(
 // ── Deletion ──────────────────────────────────────────────────────────────────
 
 func (r *MaintenancePlanRunReconciler) reconcileDelete(ctx context.Context, run *maintenancev1alpha1.MaintenancePlanRun) (ctrl.Result, error) {
+	if err := r.deleteChildCRs(ctx, run); err != nil {
+		return ctrl.Result{}, err
+	}
 	controllerutil.RemoveFinalizer(run, planRunFinalizer)
 	if err := r.Update(ctx, run); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// deleteChildCRs deletes all child CRs owned by this run. BMCSettings (and other
+// child types) block deletion while InProgress via a validating webhook. We add
+// the force-delete annotation before each delete call so the webhook permits it.
+func (r *MaintenancePlanRunReconciler) deleteChildCRs(ctx context.Context, run *maintenancev1alpha1.MaintenancePlanRun) error {
+	matchRun := client.MatchingLabels{planRunOwnerLabel: run.Name}
+
+	bmcSettingsList := &metalv1alpha1.BMCSettingsList{}
+	if err := r.List(ctx, bmcSettingsList, matchRun); err != nil {
+		return fmt.Errorf("listing BMCSettings for deletion: %w", err)
+	}
+	for i := range bmcSettingsList.Items {
+		obj := &bmcSettingsList.Items[i]
+		if err := r.forceDelete(ctx, obj); err != nil {
+			return fmt.Errorf("deleting BMCSettings %s: %w", obj.Name, err)
+		}
+	}
+
+	bmcVersionList := &metalv1alpha1.BMCVersionList{}
+	if err := r.List(ctx, bmcVersionList, matchRun); err != nil {
+		return fmt.Errorf("listing BMCVersions for deletion: %w", err)
+	}
+	for i := range bmcVersionList.Items {
+		obj := &bmcVersionList.Items[i]
+		if err := r.forceDelete(ctx, obj); err != nil {
+			return fmt.Errorf("deleting BMCVersion %s: %w", obj.Name, err)
+		}
+	}
+
+	biosSettingsList := &metalv1alpha1.BIOSSettingsList{}
+	if err := r.List(ctx, biosSettingsList, matchRun); err != nil {
+		return fmt.Errorf("listing BIOSSettings for deletion: %w", err)
+	}
+	for i := range biosSettingsList.Items {
+		obj := &biosSettingsList.Items[i]
+		if err := r.forceDelete(ctx, obj); err != nil {
+			return fmt.Errorf("deleting BIOSSettings %s: %w", obj.Name, err)
+		}
+	}
+
+	biosVersionList := &metalv1alpha1.BIOSVersionList{}
+	if err := r.List(ctx, biosVersionList, matchRun); err != nil {
+		return fmt.Errorf("listing BIOSVersions for deletion: %w", err)
+	}
+	for i := range biosVersionList.Items {
+		obj := &biosVersionList.Items[i]
+		if err := r.forceDelete(ctx, obj); err != nil {
+			return fmt.Errorf("deleting BIOSVersion %s: %w", obj.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// forceDelete annotates obj to bypass the InProgress webhook guard then deletes it.
+func (r *MaintenancePlanRunReconciler) forceDelete(ctx context.Context, obj client.Object) error {
+	base := obj.DeepCopyObject().(client.Object)
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.OperationAnnotationForceUpdateOrDeleteInProgress
+	obj.SetAnnotations(annotations)
+	if err := r.Patch(ctx, obj, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+		return err
+	}
+	return nil
 }
 
 // ── Naming helpers ────────────────────────────────────────────────────────────
