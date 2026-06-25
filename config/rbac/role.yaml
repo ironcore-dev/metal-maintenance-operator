@@ -17,7 +17,6 @@ rules:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles
-  - serverreadinesschecks
   verbs:
   - create
   - delete
@@ -30,14 +29,12 @@ rules:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles/finalizers
-  - serverreadinesschecks/finalizers
   verbs:
   - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles/status
-  - serverreadinesschecks/status
   verbs:
   - get
   - patch
@@ -68,6 +65,32 @@ rules:
   - metal.ironcore.dev
   resources:
   - servers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks/status
   verbs:
   - get
   - patch
