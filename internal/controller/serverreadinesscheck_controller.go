@@ -6,8 +6,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
+	clientutils "github.com/ironcore-dev/controller-utils/clientutils"
 	maintenancealpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -17,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -72,20 +73,15 @@ func (r *ServerReadinessCheckReconciler) reconcileDelete(ctx context.Context, ch
 		}
 	}
 
-	controllerutil.RemoveFinalizer(check, serverReadinessCheckFinalizer)
-	if err := r.Update(ctx, check); err != nil {
+	if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, check, serverReadinessCheckFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
 	return ctrl.Result{}, nil
 }
 
 func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, check *maintenancealpha1.ServerReadinessCheck) (ctrl.Result, error) {
-	// Ensure finalizer
-	if !controllerutil.ContainsFinalizer(check, serverReadinessCheckFinalizer) {
-		controllerutil.AddFinalizer(check, serverReadinessCheckFinalizer)
-		if err := r.Update(ctx, check); err != nil {
-			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
-		}
+	if _, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, check, serverReadinessCheckFinalizer); err != nil {
+		return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 	}
 
 	if err := r.ensureReadinessRule(ctx, check); err != nil {
@@ -97,6 +93,8 @@ func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, ch
 		return ctrl.Result{}, err
 	}
 
+	// Patching each server's NetworkReady condition may trigger re-enqueue via the Server watch.
+	// This is harmless: the condition patch is idempotent and the reconcile will produce the same result.
 	var serverStatuses []maintenancealpha1.ServerReadinessStatus
 	for i := range servers {
 		status := r.validateServer(&servers[i], check)
@@ -126,9 +124,7 @@ func (r *ServerReadinessCheckReconciler) ensureReadinessRule(ctx context.Context
 		return r.Create(ctx, desired)
 	}
 
-	// ServerReadinessRule fields are immutable once created; if the selector diverged
-	// the only option is to delete and recreate.
-	if !labelSelectorsEqual(existing.Spec.ServerSelector, check.Spec.ServerSelector) {
+	if !reflect.DeepEqual(existing.Spec.ServerSelector, normalizeSelector(check.Spec.ServerSelector)) {
 		logger.Info("ServerReadinessRule selector diverged, recreating", "name", ruleName)
 		if err := r.Delete(ctx, existing); err != nil {
 			return fmt.Errorf("deleting diverged ServerReadinessRule %s: %w", ruleName, err)
@@ -301,18 +297,6 @@ func (r *ServerReadinessCheckReconciler) SetupWithManager(mgr ctrl.Manager) erro
 // readinessRuleName returns the cluster-scoped ServerReadinessRule name owned by this check.
 func readinessRuleName(check *maintenancealpha1.ServerReadinessCheck) string {
 	return fmt.Sprintf("mmo-%s-%s", check.Namespace, check.Name)
-}
-
-func labelSelectorsEqual(a, b metav1.LabelSelector) bool {
-	if len(a.MatchLabels) != len(b.MatchLabels) || len(a.MatchExpressions) != len(b.MatchExpressions) {
-		return false
-	}
-	for k, v := range a.MatchLabels {
-		if b.MatchLabels[k] != v {
-			return false
-		}
-	}
-	return true
 }
 
 // normalizeSelector ensures MatchLabels is never nil, which is required by the
