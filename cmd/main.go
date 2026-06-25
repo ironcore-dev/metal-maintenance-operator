@@ -82,14 +82,14 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&sanitizationNamespace, "sanitization-namespace", "", "The namespace to use for the sanitization.")
-	flag.StringVar(&sanitizationImage, "sanitization-image", "", "The image to use for the sanitization.")
+	flag.StringVar(&sanitizationNamespace, "sanitization-namespace", "", "Namespace where sanitization ServerClaims are created.")
+	flag.StringVar(&sanitizationImage, "sanitization-image", "", "Container image for the sanitization job.")
 	cli.TolerationsVar(&sanitizationTolerations, "sanitization-tolerations", sanitizationTolerations,
 		"Tolerations on the sanitization claim. Formatted key=[value]:effect.")
 	flag.StringVar(&reportBaseURL, "report-base-url", "",
-		"The base report URL for the sanitizer to report success to.")
+		"Base URL of this operator's sanitization callback server (e.g. http://metal-maintenance-operator.my-ns.svc.cluster.local:8082). The sanitizer POSTs to <base-url>/<sanitizationUID> when done.")
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
-		"The address the sanitized server binds to.")
+		"Address the sanitization callback HTTP server binds to. Sanitizers running on bare metal POST to this server to report completion.")
 	opts := zap.Options{
 		Development: true,
 	}
