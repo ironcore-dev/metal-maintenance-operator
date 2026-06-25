@@ -6,8 +6,10 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
@@ -95,7 +97,13 @@ func main() {
 	flag.Func("readiness-checks",
 		"Comma-separated list of readiness check types to enable (supported: network)",
 		func(s string) error {
-			readinessChecks = strings.Split(s, ",")
+			seen := map[string]struct{}{}
+			for _, raw := range strings.Split(s, ",") {
+				if gate := strings.TrimSpace(raw); gate != "" {
+					seen[gate] = struct{}{}
+				}
+			}
+			readinessChecks = slices.Collect(maps.Keys(seen))
 			return nil
 		})
 	opts := zap.Options{

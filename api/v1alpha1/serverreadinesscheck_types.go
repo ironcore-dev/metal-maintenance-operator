@@ -53,6 +53,9 @@ type ServerReadinessCheckSpec struct {
 type InterfaceMismatch struct {
 	// MACAddress is the MAC address of the interface that failed validation.
 	MACAddress string `json:"macAddress"`
+	// Reason is a machine-readable token identifying the failure type.
+	// +optional
+	Reason string `json:"reason,omitempty"`
 	// Message describes the mismatch.
 	Message string `json:"message"`
 }
