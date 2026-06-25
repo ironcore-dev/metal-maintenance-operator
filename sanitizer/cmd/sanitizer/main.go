@@ -131,6 +131,10 @@ func main() {
 	park()
 }
 
+// park blocks forever as PID 1 in the sanitizer initramfs. The sanitizer has
+// already POSTed its result to the manager; returning here would terminate
+// PID 1 and trigger a kernel panic before the manager can act on the report.
+// Bringing the server out of park (via reboot) is the controller's job.
 func park() {
 	select {}
 }

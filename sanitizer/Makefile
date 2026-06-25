@@ -47,6 +47,7 @@ fmt: goimports ## Run goimports against code.
 
 .PHONY: vet
 vet: ## Run go vet against code.
+	go vet ./...
 
 .PHONY: test
 test: kernel fmt vet ## Run tests.
