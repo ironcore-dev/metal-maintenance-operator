@@ -49,3 +49,49 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - serverreadinessrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - servers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks/status
+  verbs:
+  - get
+  - patch
+  - update
