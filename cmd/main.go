@@ -8,7 +8,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
@@ -266,12 +265,23 @@ func main() {
 	}
 	// +kubebuilder:scaffold:builder
 
-	if slices.Contains(readinessChecks, "network") {
-		if err = (&controller.ServerReadinessCheckReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "ServerReadinessCheck")
+	type setupFn func(ctrl.Manager) error
+	readinessCheckSetups := map[string]setupFn{
+		"network": func(mgr ctrl.Manager) error {
+			return (&controller.ServerReadinessCheckReconciler{
+				Client: mgr.GetClient(),
+				Scheme: mgr.GetScheme(),
+			}).SetupWithManager(mgr)
+		},
+	}
+	for _, gate := range readinessChecks {
+		setup, ok := readinessCheckSetups[gate]
+		if !ok {
+			setupLog.Error(nil, "unknown readiness check type", "type", gate)
+			os.Exit(1)
+		}
+		if err = setup(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ServerReadinessCheck", "type", gate)
 			os.Exit(1)
 		}
 	}
