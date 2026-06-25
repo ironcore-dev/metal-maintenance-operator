@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/ironcore-dev/controller-utils v0.12.0
 	github.com/ironcore-dev/metal-operator v0.5.1-0.20260604072140-4d8a1ea0f48c
-	github.com/onsi/ginkgo/v2 v2.31.0
+	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.0
 	github.com/spf13/pflag v1.0.10
 	k8s.io/api v0.36.1
