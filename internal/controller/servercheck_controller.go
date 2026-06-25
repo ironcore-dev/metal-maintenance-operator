@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	clientutils "github.com/ironcore-dev/controller-utils/clientutils"
-	maintenancealpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
+	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	serverReadinessCheckFinalizer = "maintenance.metal.ironcore.dev/serverreadinesscheck"
-	networkReadyConditionType     = "NetworkReady"
-	networkNotReadyTaintKey       = "metal.ironcore.dev/network-not-ready"
+	serverCheckFinalizer      = "readiness.metal.ironcore.dev/servercheck"
+	networkReadyConditionType = "NetworkReady"
+	networkNotReadyTaintKey   = "metal.ironcore.dev/network-not-ready"
 
 	reasonMatch            = "Match"
 	reasonNoExpectedSpec   = "NoExpectedSpec"
@@ -35,24 +35,24 @@ const (
 	reasonNeighborMismatch = "NeighborMismatch"
 )
 
-// ServerReadinessCheckReconciler reconciles a ServerReadinessCheck object.
-type ServerReadinessCheckReconciler struct {
+// ServerCheckReconciler reconciles a ServerCheck object.
+type ServerCheckReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=serverreadinesschecks,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=serverreadinesschecks/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=serverreadinesschecks/finalizers,verbs=update
+// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverchecks,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverchecks/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverchecks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=serverreadinessrules,verbs=get;list;watch;create;update;patch;delete
 
-func (r *ServerReadinessCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ServerCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Reconciling ServerReadinessCheck", "name", req.NamespacedName)
+	logger.Info("Reconciling ServerCheck", "name", req.NamespacedName)
 
-	check := &maintenancealpha1.ServerReadinessCheck{}
+	check := &readinessv1alpha1.ServerCheck{}
 	if err := r.Get(ctx, req.NamespacedName, check); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -63,10 +63,10 @@ func (r *ServerReadinessCheckReconciler) Reconcile(ctx context.Context, req ctrl
 	return r.reconcileExists(ctx, check)
 }
 
-func (r *ServerReadinessCheckReconciler) reconcileDelete(ctx context.Context, check *maintenancealpha1.ServerReadinessCheck) (ctrl.Result, error) {
+func (r *ServerCheckReconciler) reconcileDelete(ctx context.Context, check *readinessv1alpha1.ServerCheck) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	ruleName := readinessRuleName(check)
+	ruleName := serverCheckRuleName(check)
 	rule := &metalv1alpha1.ServerReadinessRule{}
 	if err := r.Get(ctx, client.ObjectKey{Name: ruleName}, rule); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -91,14 +91,14 @@ func (r *ServerReadinessCheckReconciler) reconcileDelete(ctx context.Context, ch
 		}
 	}
 
-	if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, check, serverReadinessCheckFinalizer); err != nil {
+	if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, check, serverCheckFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, check *maintenancealpha1.ServerReadinessCheck) (ctrl.Result, error) {
-	if _, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, check, serverReadinessCheckFinalizer); err != nil {
+func (r *ServerCheckReconciler) reconcileExists(ctx context.Context, check *readinessv1alpha1.ServerCheck) (ctrl.Result, error) {
+	if _, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, check, serverCheckFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 	}
 
@@ -114,7 +114,7 @@ func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, ch
 	// Patching each server's NetworkReady condition may trigger re-enqueue via the Server watch.
 	// This is harmless: the condition patch is idempotent and the reconcile will produce the same result.
 	hasSpec := len(check.Spec.Network.Interfaces) > 0
-	var serverStatuses []maintenancealpha1.ServerReadinessStatus
+	var serverStatuses []readinessv1alpha1.ServerReadinessStatus
 	for i := range servers {
 		status := r.validateServer(&servers[i], check)
 		serverStatuses = append(serverStatuses, status)
@@ -126,9 +126,9 @@ func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, ch
 	return ctrl.Result{}, r.updateStatus(ctx, check, serverStatuses)
 }
 
-func (r *ServerReadinessCheckReconciler) ensureReadinessRule(ctx context.Context, check *maintenancealpha1.ServerReadinessCheck) error {
+func (r *ServerCheckReconciler) ensureReadinessRule(ctx context.Context, check *readinessv1alpha1.ServerCheck) error {
 	logger := log.FromContext(ctx)
-	ruleName := readinessRuleName(check)
+	ruleName := serverCheckRuleName(check)
 
 	existing := &metalv1alpha1.ServerReadinessRule{}
 	err := r.Get(ctx, client.ObjectKey{Name: ruleName}, existing)
@@ -154,13 +154,13 @@ func (r *ServerReadinessCheckReconciler) ensureReadinessRule(ctx context.Context
 	return nil
 }
 
-func buildReadinessRule(name string, check *maintenancealpha1.ServerReadinessCheck) *metalv1alpha1.ServerReadinessRule {
+func buildReadinessRule(name string, check *readinessv1alpha1.ServerCheck) *metalv1alpha1.ServerReadinessRule {
 	return &metalv1alpha1.ServerReadinessRule{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				"maintenance.metal.ironcore.dev/owner-namespace": check.Namespace,
-				"maintenance.metal.ironcore.dev/owner-name":      check.Name,
+				"readiness.metal.ironcore.dev/owner-namespace": check.Namespace,
+				"readiness.metal.ironcore.dev/owner-name":      check.Name,
 			},
 		},
 		Spec: metalv1alpha1.ServerReadinessRuleSpec{
@@ -180,7 +180,7 @@ func buildReadinessRule(name string, check *maintenancealpha1.ServerReadinessChe
 	}
 }
 
-func (r *ServerReadinessCheckReconciler) listMatchingServers(ctx context.Context, check *maintenancealpha1.ServerReadinessCheck) ([]metalv1alpha1.Server, error) {
+func (r *ServerCheckReconciler) listMatchingServers(ctx context.Context, check *readinessv1alpha1.ServerCheck) ([]metalv1alpha1.Server, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&check.Spec.ServerSelector)
 	if err != nil {
 		return nil, fmt.Errorf("parsing serverSelector: %w", err)
@@ -192,8 +192,8 @@ func (r *ServerReadinessCheckReconciler) listMatchingServers(ctx context.Context
 	return serverList.Items, nil
 }
 
-func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Server, check *maintenancealpha1.ServerReadinessCheck) maintenancealpha1.ServerReadinessStatus {
-	status := maintenancealpha1.ServerReadinessStatus{Name: server.Name, Ready: true}
+func (r *ServerCheckReconciler) validateServer(server *metalv1alpha1.Server, check *readinessv1alpha1.ServerCheck) readinessv1alpha1.ServerReadinessStatus {
+	status := readinessv1alpha1.ServerReadinessStatus{Name: server.Name, Ready: true}
 
 	if len(check.Spec.Network.Interfaces) == 0 {
 		return status
@@ -210,7 +210,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 		actual, found := actualByMAC[mac]
 		if !found {
 			status.Ready = false
-			status.Mismatches = append(status.Mismatches, maintenancealpha1.InterfaceMismatch{
+			status.Mismatches = append(status.Mismatches, readinessv1alpha1.InterfaceMismatch{
 				MACAddress: expected.MACAddress,
 				Reason:     reasonInterfaceMissing,
 				Message:    "interface not found",
@@ -220,7 +220,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 
 		if expected.CarrierStatus != "" && actual.CarrierStatus != expected.CarrierStatus {
 			status.Ready = false
-			status.Mismatches = append(status.Mismatches, maintenancealpha1.InterfaceMismatch{
+			status.Mismatches = append(status.Mismatches, readinessv1alpha1.InterfaceMismatch{
 				MACAddress: expected.MACAddress,
 				Reason:     reasonCarrierDown,
 				Message:    fmt.Sprintf("carrierStatus: expected %q, got %q", expected.CarrierStatus, actual.CarrierStatus),
@@ -237,7 +237,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 			key := neighborKey{expectedNeighbor.SystemName, expectedNeighbor.PortID}
 			if _, ok := actualNeighbors[key]; !ok {
 				status.Ready = false
-				status.Mismatches = append(status.Mismatches, maintenancealpha1.InterfaceMismatch{
+				status.Mismatches = append(status.Mismatches, readinessv1alpha1.InterfaceMismatch{
 					MACAddress: expected.MACAddress,
 					Reason:     reasonNeighborMismatch,
 					Message:    fmt.Sprintf("LLDP neighbor not found: systemName=%q portID=%q", expectedNeighbor.SystemName, expectedNeighbor.PortID),
@@ -249,7 +249,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 	return status
 }
 
-func (r *ServerReadinessCheckReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, status maintenancealpha1.ServerReadinessStatus, hasSpec bool) error {
+func (r *ServerCheckReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, status readinessv1alpha1.ServerReadinessStatus, hasSpec bool) error {
 	serverBase := server.DeepCopy()
 
 	condition := metav1.Condition{
@@ -283,17 +283,17 @@ func (r *ServerReadinessCheckReconciler) setNetworkReadyCondition(ctx context.Co
 	return nil
 }
 
-func (r *ServerReadinessCheckReconciler) updateStatus(ctx context.Context, check *maintenancealpha1.ServerReadinessCheck, servers []maintenancealpha1.ServerReadinessStatus) error {
+func (r *ServerCheckReconciler) updateStatus(ctx context.Context, check *readinessv1alpha1.ServerCheck, servers []readinessv1alpha1.ServerReadinessStatus) error {
 	checkBase := check.DeepCopy()
 	check.Status.Servers = servers
 	if err := r.Status().Patch(ctx, check, client.MergeFrom(checkBase)); err != nil {
-		return fmt.Errorf("patching ServerReadinessCheck status: %w", err)
+		return fmt.Errorf("patching ServerCheck status: %w", err)
 	}
 	return nil
 }
 
-func (r *ServerReadinessCheckReconciler) enqueueFromServer(ctx context.Context, obj client.Object) []ctrl.Request {
-	checkList := &maintenancealpha1.ServerReadinessCheckList{}
+func (r *ServerCheckReconciler) enqueueFromServer(ctx context.Context, obj client.Object) []ctrl.Request {
+	checkList := &readinessv1alpha1.ServerCheckList{}
 	if err := r.List(ctx, checkList); err != nil {
 		return nil
 	}
@@ -316,17 +316,17 @@ func (r *ServerReadinessCheckReconciler) enqueueFromServer(ctx context.Context, 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *ServerReadinessCheckReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ServerCheckReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&maintenancealpha1.ServerReadinessCheck{}).
+		For(&readinessv1alpha1.ServerCheck{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueFromServer)).
-		Named("serverreadinesscheck").
+		Named("servercheck").
 		Complete(r)
 }
 
-// readinessRuleName returns the cluster-scoped ServerReadinessRule name owned by this check.
-func readinessRuleName(check *maintenancealpha1.ServerReadinessCheck) string {
+// serverCheckRuleName returns the cluster-scoped ServerReadinessRule name owned by this check.
+func serverCheckRuleName(check *readinessv1alpha1.ServerCheck) string {
 	return fmt.Sprintf("mmo-%s-%s", check.Namespace, check.Name)
 }
 
@@ -341,7 +341,7 @@ func normalizeSelector(s metav1.LabelSelector) metav1.LabelSelector {
 
 // dominantReason returns the highest-priority reason across a set of mismatches.
 // Priority: InterfaceMissing > CarrierDown > NeighborMismatch.
-func dominantReason(mismatches []maintenancealpha1.InterfaceMismatch) string {
+func dominantReason(mismatches []readinessv1alpha1.InterfaceMismatch) string {
 	reason := reasonNeighborMismatch
 	for _, m := range mismatches {
 		switch m.Reason {

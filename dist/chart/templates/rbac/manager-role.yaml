@@ -1,14 +1,8 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
-{{- if .Values.rbac.namespaced }}
-kind: Role
-{{- else }}
 kind: ClusterRole
-{{- end }}
 metadata:
-{{- if .Values.rbac.namespaced }}
-  namespace: {{ .Release.Namespace }}
-{{- end }}
-  name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "manager-role" "context" $) }}
+  name: manager-role
 rules:
 - apiGroups:
   - ""
@@ -23,7 +17,6 @@ rules:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles
-  - serverreadinesschecks
   verbs:
   - create
   - delete
@@ -36,14 +29,12 @@ rules:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles/finalizers
-  - serverreadinesschecks/finalizers
   verbs:
   - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
   - consoles/status
-  - serverreadinesschecks/status
   verbs:
   - get
   - patch
@@ -74,6 +65,32 @@ rules:
   - metal.ironcore.dev
   resources:
   - servers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - serverchecks/status
   verbs:
   - get
   - patch

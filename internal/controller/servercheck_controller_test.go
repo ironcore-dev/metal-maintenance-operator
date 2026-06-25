@@ -10,14 +10,14 @@ import (
 	. "github.com/onsi/gomega"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
-	maintenance "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
+	readiness "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("ServerReadinessCheck Controller", func() {
-	ns := SetupTest()
+var _ = Describe("ServerCheck Controller", func() {
+	ns := SetupNamespace()
 
 	ctx := context.Background()
 
@@ -42,9 +42,9 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 
 	Context("basic lifecycle", func() {
 		It("adds a finalizer and creates a ServerReadinessRule", func() {
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
@@ -55,11 +55,11 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 
 			By("expecting the finalizer to be set")
 			Eventually(Object(check)).Should(
-				HaveField("Finalizers", ContainElement(serverReadinessCheckFinalizer)),
+				HaveField("Finalizers", ContainElement(serverCheckFinalizer)),
 			)
 
 			By("expecting a ServerReadinessRule to be created")
-			ruleName := readinessRuleName(check)
+			ruleName := serverCheckRuleName(check)
 			rule := &metalv1alpha1.ServerReadinessRule{}
 			Eventually(func() error {
 				return k8sClient.Get(ctx, client.ObjectKey{Name: ruleName}, rule)
@@ -69,9 +69,9 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 		})
 
 		It("deletes the ServerReadinessRule and removes the finalizer on deletion", func() {
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-del-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-del-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
@@ -79,12 +79,12 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, check)).To(Succeed())
 
-			ruleName := readinessRuleName(check)
+			ruleName := serverCheckRuleName(check)
 			Eventually(func() error {
 				return k8sClient.Get(ctx, client.ObjectKey{Name: ruleName}, &metalv1alpha1.ServerReadinessRule{})
 			}, "10s").Should(Succeed())
 
-			By("deleting the ServerReadinessCheck")
+			By("deleting the ServerCheck")
 			Expect(k8sClient.Delete(ctx, check)).To(Succeed())
 
 			By("expecting the ServerReadinessRule to be deleted")
@@ -92,9 +92,9 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 				return k8sClient.Get(ctx, client.ObjectKey{Name: ruleName}, &metalv1alpha1.ServerReadinessRule{})
 			}, "10s").Should(MatchError(ContainSubstring("not found")))
 
-			By("expecting the ServerReadinessCheck to be gone")
+			By("expecting the ServerCheck to be gone")
 			Eventually(func() error {
-				return k8sClient.Get(ctx, client.ObjectKeyFromObject(check), &maintenance.ServerReadinessCheck{})
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(check), &readiness.ServerCheck{})
 			}, "10s").Should(MatchError(ContainSubstring("not found")))
 		})
 	})
@@ -106,14 +106,14 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-ready-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-ready-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
-					Network: maintenance.ExpectedNetworkSpec{
-						Interfaces: []maintenance.ExpectedInterface{
+					Network: readiness.ExpectedNetworkSpec{
+						Interfaces: []readiness.ExpectedInterface{
 							{MACAddress: "aa:bb:cc:dd:ee:01", CarrierStatus: "up"},
 						},
 					},
@@ -145,14 +145,14 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-miss-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-miss-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
-					Network: maintenance.ExpectedNetworkSpec{
-						Interfaces: []maintenance.ExpectedInterface{
+					Network: readiness.ExpectedNetworkSpec{
+						Interfaces: []readiness.ExpectedInterface{
 							{MACAddress: "aa:bb:cc:dd:ee:ff"},
 						},
 					},
@@ -186,14 +186,14 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-carrier-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-carrier-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
-					Network: maintenance.ExpectedNetworkSpec{
-						Interfaces: []maintenance.ExpectedInterface{
+					Network: readiness.ExpectedNetworkSpec{
+						Interfaces: []readiness.ExpectedInterface{
 							{MACAddress: "aa:bb:cc:00:00:01", CarrierStatus: "up"},
 						},
 					},
@@ -225,17 +225,17 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-lldp-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-lldp-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
-					Network: maintenance.ExpectedNetworkSpec{
-						Interfaces: []maintenance.ExpectedInterface{
+					Network: readiness.ExpectedNetworkSpec{
+						Interfaces: []readiness.ExpectedInterface{
 							{
 								MACAddress: "aa:bb:cc:00:01:01",
-								Neighbors: []maintenance.ExpectedNeighbor{
+								Neighbors: []readiness.ExpectedNeighbor{
 									{SystemName: "switch-a", PortID: "Ethernet1"},
 									{SystemName: "switch-b", PortID: "Ethernet99"},
 								},
@@ -265,9 +265,9 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-nospec-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-nospec-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"test-pool": "alpha"},
 					},
@@ -286,9 +286,9 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 		})
 
 		It("matches zero servers when selector does not match", func() {
-			check := &maintenance.ServerReadinessCheck{
-				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-empty-", Namespace: ns.Name},
-				Spec: maintenance.ServerReadinessCheckSpec{
+			check := &readiness.ServerCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "sc-empty-", Namespace: ns.Name},
+				Spec: readiness.ServerCheckSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{"nonexistent": "label"},
 					},
@@ -298,7 +298,7 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 			DeferCleanup(k8sClient.Delete, check)
 
 			Eventually(Object(check)).Should(
-				HaveField("Finalizers", ContainElement(serverReadinessCheckFinalizer)),
+				HaveField("Finalizers", ContainElement(serverCheckFinalizer)),
 			)
 			Consistently(Object(check), "2s").Should(
 				HaveField("Status.Servers", BeEmpty()),
