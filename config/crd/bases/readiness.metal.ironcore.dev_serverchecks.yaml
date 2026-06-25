@@ -4,21 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: serverreadinesschecks.maintenance.metal.ironcore.dev
+  name: serverchecks.readiness.metal.ironcore.dev
 spec:
-  group: maintenance.metal.ironcore.dev
+  group: readiness.metal.ironcore.dev
   names:
-    kind: ServerReadinessCheck
-    listKind: ServerReadinessCheckList
-    plural: serverreadinesschecks
-    singular: serverreadinesscheck
+    kind: ServerCheck
+    listKind: ServerCheckList
+    plural: serverchecks
+    singular: servercheck
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ServerReadinessCheck is the Schema for the serverreadinesschecks
-          API.
+        description: ServerCheck is the Schema for the serverchecks API.
         properties:
           apiVersion:
             description: |-
@@ -38,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: ServerReadinessCheckSpec defines the desired state of ServerReadinessCheck.
+            description: ServerCheckSpec defines the desired state of ServerCheck.
             properties:
               network:
                 description: Network defines the expected network wiring for selected
@@ -137,8 +136,7 @@ spec:
             - serverSelector
             type: object
           status:
-            description: ServerReadinessCheckStatus defines the observed state of
-              ServerReadinessCheck.
+            description: ServerCheckStatus defines the observed state of ServerCheck.
             properties:
               servers:
                 description: Servers holds the per-server validation results.

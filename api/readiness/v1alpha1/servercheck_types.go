@@ -39,8 +39,8 @@ type ExpectedNetworkSpec struct {
 	Interfaces []ExpectedInterface `json:"interfaces,omitempty"`
 }
 
-// ServerReadinessCheckSpec defines the desired state of ServerReadinessCheck.
-type ServerReadinessCheckSpec struct {
+// ServerCheckSpec defines the desired state of ServerCheck.
+type ServerCheckSpec struct {
 	// ServerSelector specifies a label selector to identify the servers to validate.
 	// +required
 	ServerSelector metav1.LabelSelector `json:"serverSelector"`
@@ -71,8 +71,8 @@ type ServerReadinessStatus struct {
 	Mismatches []InterfaceMismatch `json:"mismatches,omitempty"`
 }
 
-// ServerReadinessCheckStatus defines the observed state of ServerReadinessCheck.
-type ServerReadinessCheckStatus struct {
+// ServerCheckStatus defines the observed state of ServerCheck.
+type ServerCheckStatus struct {
 	// Servers holds the per-server validation results.
 	// +optional
 	Servers []ServerReadinessStatus `json:"servers,omitempty"`
@@ -82,24 +82,24 @@ type ServerReadinessCheckStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
 
-// ServerReadinessCheck is the Schema for the serverreadinesschecks API.
-type ServerReadinessCheck struct {
+// ServerCheck is the Schema for the serverchecks API.
+type ServerCheck struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ServerReadinessCheckSpec   `json:"spec,omitempty"`
-	Status ServerReadinessCheckStatus `json:"status,omitempty"`
+	Spec   ServerCheckSpec   `json:"spec,omitempty"`
+	Status ServerCheckStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ServerReadinessCheckList contains a list of ServerReadinessCheck.
-type ServerReadinessCheckList struct {
+// ServerCheckList contains a list of ServerCheck.
+type ServerCheckList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ServerReadinessCheck `json:"items"`
+	Items           []ServerCheck `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&ServerReadinessCheck{}, &ServerReadinessCheckList{})
+	SchemeBuilder.Register(&ServerCheck{}, &ServerCheckList{})
 }
