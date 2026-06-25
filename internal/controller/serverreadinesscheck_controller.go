@@ -27,6 +27,12 @@ const (
 	serverReadinessCheckFinalizer = "maintenance.metal.ironcore.dev/serverreadinesscheck"
 	networkReadyConditionType     = "NetworkReady"
 	networkNotReadyTaintKey       = "metal.ironcore.dev/network-not-ready"
+
+	reasonMatch            = "Match"
+	reasonNoExpectedSpec   = "NoExpectedSpec"
+	reasonInterfaceMissing = "InterfaceMissing"
+	reasonCarrierDown      = "CarrierDown"
+	reasonNeighborMismatch = "NeighborMismatch"
 )
 
 // ServerReadinessCheckReconciler reconciles a ServerReadinessCheck object.
@@ -73,6 +79,18 @@ func (r *ServerReadinessCheckReconciler) reconcileDelete(ctx context.Context, ch
 		}
 	}
 
+	servers, err := r.listMatchingServers(ctx, check)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	for i := range servers {
+		serverBase := servers[i].DeepCopy()
+		apimeta.RemoveStatusCondition(&servers[i].Status.Conditions, networkReadyConditionType)
+		if err := r.Status().Patch(ctx, &servers[i], client.MergeFrom(serverBase)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("clearing NetworkReady condition on server %s: %w", servers[i].Name, err)
+		}
+	}
+
 	if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, check, serverReadinessCheckFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
@@ -95,11 +113,12 @@ func (r *ServerReadinessCheckReconciler) reconcileExists(ctx context.Context, ch
 
 	// Patching each server's NetworkReady condition may trigger re-enqueue via the Server watch.
 	// This is harmless: the condition patch is idempotent and the reconcile will produce the same result.
+	hasSpec := len(check.Spec.Network.Interfaces) > 0
 	var serverStatuses []maintenancealpha1.ServerReadinessStatus
 	for i := range servers {
 		status := r.validateServer(&servers[i], check)
 		serverStatuses = append(serverStatuses, status)
-		if err := r.setNetworkReadyCondition(ctx, &servers[i], status); err != nil {
+		if err := r.setNetworkReadyCondition(ctx, &servers[i], status, hasSpec); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -176,6 +195,10 @@ func (r *ServerReadinessCheckReconciler) listMatchingServers(ctx context.Context
 func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Server, check *maintenancealpha1.ServerReadinessCheck) maintenancealpha1.ServerReadinessStatus {
 	status := maintenancealpha1.ServerReadinessStatus{Name: server.Name, Ready: true}
 
+	if len(check.Spec.Network.Interfaces) == 0 {
+		return status
+	}
+
 	// Index actual NICs by MAC for O(1) lookup
 	actualByMAC := make(map[string]metalv1alpha1.NetworkInterface, len(server.Status.NetworkInterfaces))
 	for _, nic := range server.Status.NetworkInterfaces {
@@ -189,6 +212,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 			status.Ready = false
 			status.Mismatches = append(status.Mismatches, maintenancealpha1.InterfaceMismatch{
 				MACAddress: expected.MACAddress,
+				Reason:     reasonInterfaceMissing,
 				Message:    "interface not found",
 			})
 			continue
@@ -198,6 +222,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 			status.Ready = false
 			status.Mismatches = append(status.Mismatches, maintenancealpha1.InterfaceMismatch{
 				MACAddress: expected.MACAddress,
+				Reason:     reasonCarrierDown,
 				Message:    fmt.Sprintf("carrierStatus: expected %q, got %q", expected.CarrierStatus, actual.CarrierStatus),
 			})
 		}
@@ -214,6 +239,7 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 				status.Ready = false
 				status.Mismatches = append(status.Mismatches, maintenancealpha1.InterfaceMismatch{
 					MACAddress: expected.MACAddress,
+					Reason:     reasonNeighborMismatch,
 					Message:    fmt.Sprintf("LLDP neighbor not found: systemName=%q portID=%q", expectedNeighbor.SystemName, expectedNeighbor.PortID),
 				})
 			}
@@ -223,24 +249,29 @@ func (r *ServerReadinessCheckReconciler) validateServer(server *metalv1alpha1.Se
 	return status
 }
 
-func (r *ServerReadinessCheckReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, status maintenancealpha1.ServerReadinessStatus) error {
+func (r *ServerReadinessCheckReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, status maintenancealpha1.ServerReadinessStatus, hasSpec bool) error {
 	serverBase := server.DeepCopy()
 
 	condition := metav1.Condition{
 		Type:               networkReadyConditionType,
 		ObservedGeneration: server.Generation,
 	}
-	if status.Ready {
+	switch {
+	case !hasSpec:
 		condition.Status = metav1.ConditionTrue
-		condition.Reason = "NetworkReady"
+		condition.Reason = reasonNoExpectedSpec
+		condition.Message = "No expected network interfaces configured"
+	case status.Ready:
+		condition.Status = metav1.ConditionTrue
+		condition.Reason = reasonMatch
 		condition.Message = "All expected network interfaces and neighbors are present"
-	} else {
+	default:
 		msgs := make([]string, 0, len(status.Mismatches))
 		for _, m := range status.Mismatches {
 			msgs = append(msgs, fmt.Sprintf("[%s] %s", m.MACAddress, m.Message))
 		}
 		condition.Status = metav1.ConditionFalse
-		condition.Reason = "NetworkMismatch"
+		condition.Reason = dominantReason(status.Mismatches)
 		condition.Message = strings.Join(msgs, "; ")
 	}
 
@@ -306,4 +337,19 @@ func normalizeSelector(s metav1.LabelSelector) metav1.LabelSelector {
 		s.MatchLabels = map[string]string{}
 	}
 	return s
+}
+
+// dominantReason returns the highest-priority reason across a set of mismatches.
+// Priority: InterfaceMissing > CarrierDown > NeighborMismatch.
+func dominantReason(mismatches []maintenancealpha1.InterfaceMismatch) string {
+	reason := reasonNeighborMismatch
+	for _, m := range mismatches {
+		switch m.Reason {
+		case reasonInterfaceMissing:
+			return reasonInterfaceMissing
+		case reasonCarrierDown:
+			reason = reasonCarrierDown
+		}
+	}
+	return reason
 }

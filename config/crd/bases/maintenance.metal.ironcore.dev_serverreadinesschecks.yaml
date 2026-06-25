@@ -159,6 +159,10 @@ spec:
                           message:
                             description: Message describes the mismatch.
                             type: string
+                          reason:
+                            description: Reason is a machine-readable token identifying
+                              the failure type.
+                            type: string
                         required:
                         - macAddress
                         - message

@@ -134,6 +134,7 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 				HaveField("Status.Conditions", ContainElement(SatisfyAll(
 					HaveField("Type", networkReadyConditionType),
 					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", reasonMatch),
 				))),
 			)
 		})
@@ -174,6 +175,7 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 				HaveField("Status.Conditions", ContainElement(SatisfyAll(
 					HaveField("Type", networkReadyConditionType),
 					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", reasonInterfaceMissing),
 				))),
 			)
 		})
@@ -204,9 +206,10 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 				HaveField("Status.Servers", ContainElement(SatisfyAll(
 					HaveField("Name", server.Name),
 					HaveField("Ready", BeFalse()),
-					HaveField("Mismatches", ContainElement(
+					HaveField("Mismatches", ContainElement(SatisfyAll(
 						HaveField("Message", ContainSubstring("carrierStatus")),
-					)),
+						HaveField("Reason", reasonCarrierDown),
+					))),
 				))),
 			)
 		})
@@ -248,9 +251,36 @@ var _ = Describe("ServerReadinessCheck Controller", func() {
 				HaveField("Status.Servers", ContainElement(SatisfyAll(
 					HaveField("Name", server.Name),
 					HaveField("Ready", BeFalse()),
-					HaveField("Mismatches", ContainElement(
+					HaveField("Mismatches", ContainElement(SatisfyAll(
 						HaveField("Message", ContainSubstring("switch-b")),
-					)),
+						HaveField("Reason", reasonNeighborMismatch),
+					))),
+				))),
+			)
+		})
+
+		It("sets NoExpectedSpec reason when no interfaces are configured", func() {
+			server := makeServer("srv-nospec-00000000000", []metalv1alpha1.NetworkInterface{
+				{MACAddress: "aa:bb:cc:00:02:01"},
+			})
+			DeferCleanup(k8sClient.Delete, server)
+
+			check := &maintenance.ServerReadinessCheck{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "src-nospec-", Namespace: ns.Name},
+				Spec: maintenance.ServerReadinessCheckSpec{
+					ServerSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"test-pool": "alpha"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, check)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, check)
+
+			Eventually(Object(server)).Should(
+				HaveField("Status.Conditions", ContainElement(SatisfyAll(
+					HaveField("Type", networkReadyConditionType),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", reasonNoExpectedSpec),
 				))),
 			)
 		})
