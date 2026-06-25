@@ -21,7 +21,14 @@ path = [
     "go.sum",
     "REUSE.toml",
     "hack/**",
-    "internal/hwmgr/mock/**"
+    "internal/hwmgr/mock/**",
+    "sanitizer/go.mod",
+    "sanitizer/go.sum",
+    "sanitizer/Makefile",
+    "sanitizer/hack/*.sh",
+    "sanitizer/hack/kernel/go.mod",
+    "sanitizer/hack/kernel/go.sum",
+    "internal/ignition/sanitization-ignition.yaml.gotmpl"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2024 SAP SE or an SAP affiliate company and IronCore contributors"

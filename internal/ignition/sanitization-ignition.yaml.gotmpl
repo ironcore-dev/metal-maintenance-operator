@@ -1,0 +1,10 @@
+variant: fcos
+version: "1.3.0"
+storage:
+    files:
+      - path: /sanitizer/config
+        contents:
+            inline: |
+                {
+                    "reportURL": "{{ .ReportURL }}"
+                }
