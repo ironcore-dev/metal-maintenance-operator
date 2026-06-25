@@ -90,7 +90,8 @@ func (r *ServerSanitizationReconciler) reconcileReleased(ctx context.Context, se
 
 func (r *ServerSanitizationReconciler) reconcileAvailable(ctx context.Context, server *metalv1alpha1.Server) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if getConditionStatus(server, conditionTypeSanitized) == metav1.ConditionTrue {
+	switch getConditionStatus(server, conditionTypeSanitized) {
+	case metav1.ConditionTrue:
 		log.V(1).Info("Server is sanitized, deleting any leftover sanitization resources")
 		var (
 			cleanupTypes = []client.Object{&metalv1alpha1.ServerClaim{}, &corev1.Secret{}}
@@ -105,6 +106,13 @@ func (r *ServerSanitizationReconciler) reconcileAvailable(ctx context.Context, s
 			}
 		}
 		return ctrl.Result{}, errors.Join(errs...)
+	case metav1.ConditionFalse:
+		// Sanitization was explicitly requested via the Released path; proceed to claim creation below.
+	default:
+		// Condition is Unknown: server reached Available without going through the Released sanitization
+		// path (e.g. a freshly discovered server). Do not sanitize it.
+		log.V(1).Info("Server has no pending sanitization request, skipping")
+		return ctrl.Result{}, nil
 	}
 
 	sanitizationClaim, err := r.getOrCreateSanitizationClaim(ctx, server)
