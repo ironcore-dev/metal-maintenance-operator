@@ -1,5 +1,8 @@
-## String to partially override chart.fullname template (will maintain the release name)
-##
+owner-info:
+  support-group: containers
+  helm-chart-url: https://github.com/ironcore-dev/metal-maintenance-operator/tree/main/dist/chart
+
+
 # nameOverride: ""
 
 ## String to fully override chart.fullname template
