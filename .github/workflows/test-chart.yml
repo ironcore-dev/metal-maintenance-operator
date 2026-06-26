@@ -42,6 +42,10 @@ jobs:
       - name: Verify Helm installation
         run: helm version
 
+      - name: Build Helm Chart dependencies
+        run: |
+          helm dependency build ./dist/chart
+
       - name: Lint Helm Chart
         run: |
           helm lint ./dist/chart

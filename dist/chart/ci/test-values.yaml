@@ -1,0 +1,8 @@
+global:
+  region: "eu-west-2"
+  tld: "example.com"
+  clusterType: "k8s"
+
+ingress:
+  enable: true
+  domain: "metal-maintenance-operator.k8s.eu-west-2.example.com"

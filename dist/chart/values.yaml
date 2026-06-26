@@ -1,5 +1,8 @@
-## String to partially override chart.fullname template (will maintain the release name)
-##
+owner-info:
+  support-group: containers
+  helm-chart-url: https://github.com/ironcore-dev/metal-maintenance-operator/tree/main/dist/chart
+
+
 # nameOverride: ""
 
 ## String to fully override chart.fullname template
@@ -184,3 +187,26 @@ prometheus:
 #     stringData:
 #       token: ""
 additionalSecrets: []
+
+## Ingress and Service for the sanitization report endpoint (port 8082).
+## Enable to expose the report callback URL to the sanitizer.
+##
+ingress:
+  enable: false
+
+  ## Port the sanitization report handler listens on.
+  ##
+  port: 8082
+
+  ## Domain for the ingress. Supports tpl rendering.
+  ## Example: "metal-maintenance-operator.{{ .Values.global.clusterType }}.{{ .Values.global.region }}.{{ .Values.global.tld }}"
+  ##
+  domain: ""
+
+  ## Enable TLS for the ingress.
+  ##
+  tls: true
+
+  ## Additional ingress annotations.
+  ##
+  annotations: {}

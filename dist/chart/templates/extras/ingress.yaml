@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enable }}
+{{- $domain := tpl .Values.ingress.domain . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "metal-maintenance-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: sanitized
+    port: {{ .Values.ingress.port }}
+    protocol: TCP
+    targetPort: {{ .Values.ingress.port }}
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "metal-maintenance-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.tls }}
+  tls:
+  - secretName: tls-{{ include "metal-maintenance-operator.fullname" . }}
+    hosts: [ {{ $domain }} ]
+  {{- end }}
+  rules:
+  - host: {{ $domain }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "metal-maintenance-operator.fullname" . }}
+            port:
+              number: {{ .Values.ingress.port }}
+{{- end }}
