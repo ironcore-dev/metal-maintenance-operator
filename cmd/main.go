@@ -104,7 +104,7 @@ func main() {
 		"Comma-separated list of readiness check types to enable (supported: network)",
 		func(s string) error {
 			seen := map[string]struct{}{}
-			for _, raw := range strings.Split(s, ",") {
+			for raw := range strings.SplitSeq(s, ",") {
 				if gate := strings.TrimSpace(raw); gate != "" {
 					seen[gate] = struct{}{}
 				}
