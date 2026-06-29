@@ -371,3 +371,63 @@ var _ = Describe("shouldSkipServer (unit)", func() {
 		Expect(skip).To(BeTrue())
 	})
 })
+
+var _ = Describe("targetBMCVersion (unit)", func() {
+	makeRunWithStages := func(stages ...maintenancev1alpha1.PlanStage) *maintenancev1alpha1.MaintenancePlanRun {
+		run := minimalRunForUnit("bmc", "srv")
+		run.Spec.Stages = stages
+		return run
+	}
+
+	It("returns empty when no BMCVersion stage exists", func() {
+		run := makeRunWithStages(maintenancev1alpha1.PlanStage{
+			Kind:     maintenancev1alpha1.StageKindBMCSettings,
+			Template: maintenancev1alpha1.StageTemplate{BMCSettings: &maintenancev1alpha1.PlanBMCSettingsTemplate{Version: "1.0"}},
+		})
+		Expect(targetBMCVersion(run)).To(BeEmpty())
+	})
+
+	It("returns the last BMCVersion stage version", func() {
+		run := makeRunWithStages(
+			maintenancev1alpha1.PlanStage{
+				Kind:     maintenancev1alpha1.StageKindBMCVersion,
+				Template: maintenancev1alpha1.StageTemplate{BMCVersion: &metalv1alpha1.BMCVersionTemplate{Version: "3.0", Image: metalv1alpha1.ImageSpec{URI: "x"}}},
+			},
+			maintenancev1alpha1.PlanStage{
+				Kind:     maintenancev1alpha1.StageKindBMCVersion,
+				Template: maintenancev1alpha1.StageTemplate{BMCVersion: &metalv1alpha1.BMCVersionTemplate{Version: "5.0", Image: metalv1alpha1.ImageSpec{URI: "x"}}},
+			},
+		)
+		Expect(targetBMCVersion(run)).To(Equal("5.0"))
+	})
+})
+
+var _ = Describe("targetBIOSVersion (unit)", func() {
+	makeRunWithStages := func(stages ...maintenancev1alpha1.PlanStage) *maintenancev1alpha1.MaintenancePlanRun {
+		run := minimalRunForUnit("bmc", "srv")
+		run.Spec.Stages = stages
+		return run
+	}
+
+	It("returns empty when no BIOSVersion stage exists", func() {
+		run := makeRunWithStages(maintenancev1alpha1.PlanStage{
+			Kind:     maintenancev1alpha1.StageKindBIOSSettings,
+			Template: maintenancev1alpha1.StageTemplate{BIOSSettings: &metalv1alpha1.BIOSSettingsTemplate{Version: "1.0"}},
+		})
+		Expect(targetBIOSVersion(run)).To(BeEmpty())
+	})
+
+	It("returns the last BIOSVersion stage version", func() {
+		run := makeRunWithStages(
+			maintenancev1alpha1.PlanStage{
+				Kind:     maintenancev1alpha1.StageKindBIOSVersion,
+				Template: maintenancev1alpha1.StageTemplate{BIOSVersion: &metalv1alpha1.BIOSVersionTemplate{Version: "2.0", Image: metalv1alpha1.ImageSpec{URI: "x"}}},
+			},
+			maintenancev1alpha1.PlanStage{
+				Kind:     maintenancev1alpha1.StageKindBIOSVersion,
+				Template: maintenancev1alpha1.StageTemplate{BIOSVersion: &metalv1alpha1.BIOSVersionTemplate{Version: "4.0", Image: metalv1alpha1.ImageSpec{URI: "x"}}},
+			},
+		)
+		Expect(targetBIOSVersion(run)).To(Equal("4.0"))
+	})
+})

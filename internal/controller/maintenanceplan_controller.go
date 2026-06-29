@@ -41,6 +41,7 @@ type MaintenancePlanReconciler struct {
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=maintenanceplanruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsettings;bmcversions;biossettings;biosversions,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *MaintenancePlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -104,6 +105,47 @@ func (r *MaintenancePlanReconciler) reconcilePlan(ctx context.Context, plan *mai
 			run.Status.Phase != maintenancev1alpha1.MaintenancePlanRunPhaseFailed {
 			activeCount++
 		}
+	}
+
+	// Check completed runs for firmware regression. If the hardware has been
+	// rolled back below the target BMC version, delete BMC-scoped final-stage
+	// CRs (version + settings for the BMC) before deleting the run. This clears
+	// the way for the new run to apply lower-version settings — a higher-version
+	// BMCSettings CR would otherwise block the webhook from accepting a new one.
+	// BIOS-scoped final CRs are unaffected by a BMC rollback and are left in place.
+	//
+	// We fetch the BMC directly rather than relying on groups so the check works
+	// even when no servers currently match the plan's serverSelector.
+	for bmcName, run := range existingByBMC {
+		if run.Status.Phase != maintenancev1alpha1.MaintenancePlanRunPhaseSucceeded {
+			continue
+		}
+		target := targetBMCVersion(run)
+		if target == "" {
+			continue
+		}
+		bmc := &metalv1alpha1.BMC{}
+		if err := r.Get(ctx, types.NamespacedName{Name: bmcName}, bmc); err != nil {
+			logger.Error(err, "failed to get BMC for regression check", "bmc", bmcName)
+			continue
+		}
+		if !(bmc.Status.FirmwareVersion < target) {
+			continue
+		}
+		if err := r.deleteBMCScopedFinalCRs(ctx, run); err != nil {
+			logger.Error(err, "failed to delete BMC-scoped final CRs before deleting regressed run", "run", run.Name)
+			continue
+		}
+		if err := r.Delete(ctx, run); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "failed to delete regressed run", "run", run.Name)
+			continue
+		}
+		delete(existingByBMC, bmcName)
+		logger.Info("deleted run due to firmware regression", "run", run.Name,
+			"current", bmc.Status.FirmwareVersion, "target", target)
+		r.Recorder.Eventf(plan, corev1.EventTypeWarning, "FirmwareRegression",
+			"BMC %s firmware regressed to %s (target %s) — restarting run",
+			bmcName, bmc.Status.FirmwareVersion, target)
 	}
 
 	// Create one run per unique BMC that doesn't have one yet.
@@ -251,6 +293,75 @@ func (r *MaintenancePlanReconciler) updatePlanStatus(
 	return nil
 }
 
+// targetBMCVersion returns the version from the last BMCVersion stage in the run, or "".
+func targetBMCVersion(run *maintenancev1alpha1.MaintenancePlanRun) string {
+	for i := len(run.Spec.Stages) - 1; i >= 0; i-- {
+		s := &run.Spec.Stages[i]
+		if s.Kind == maintenancev1alpha1.StageKindBMCVersion && s.Template.BMCVersion != nil {
+			return s.Template.BMCVersion.Version
+		}
+	}
+	return ""
+}
+
+// targetBIOSVersion returns the version from the last BIOSVersion stage in the run, or "".
+func targetBIOSVersion(run *maintenancev1alpha1.MaintenancePlanRun) string {
+	for i := len(run.Spec.Stages) - 1; i >= 0; i-- {
+		s := &run.Spec.Stages[i]
+		if s.Kind == maintenancev1alpha1.StageKindBIOSVersion && s.Template.BIOSVersion != nil {
+			return s.Template.BIOSVersion.Version
+		}
+	}
+	return ""
+}
+
+// deleteBMCScopedFinalCRs force-deletes the BMC-scoped final-stage CRs (BMCVersion
+// and BMCSettings) that belong to the given run. These must be removed when the BMC
+// firmware regresses so that the new run can apply the correct lower-version settings
+// — the BMCSettings webhook rejects duplicate CRs for the same BMC.
+// BIOS-scoped final CRs are deliberately not touched here.
+func (r *MaintenancePlanReconciler) deleteBMCScopedFinalCRs(ctx context.Context, run *maintenancev1alpha1.MaintenancePlanRun) error {
+	// Build names of BMC-scoped final-stage CRs (those without an AppliedSpec snapshot).
+	for i, ss := range run.Status.StageStatuses {
+		if ss.AppliedSpec != nil {
+			continue // intermediate — already deleted by the run controller
+		}
+		stage := &run.Spec.Stages[i]
+		if !isBMCScoped(stage.Kind) {
+			continue
+		}
+		name := bmcCRName(run.Name, stage.Name)
+		if err := r.deleteBMCScopedCRByKind(ctx, stage.Kind, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MaintenancePlanReconciler) deleteBMCScopedCRByKind(ctx context.Context, kind maintenancev1alpha1.StageKind, name string) error {
+	key := client.ObjectKey{Name: name}
+
+	// These CRs were silenced with ignore-reconciliation at run completion and are
+	// in a terminal state (Completed/Applied). Do NOT replace that annotation with
+	// force-update-or-delete-inprogress — doing so would temporarily un-silence the
+	// CR, giving metal-operator a window to create a spurious ServerMaintenance.
+	// Deletion of a non-InProgress CR is permitted by the webhook without the flag.
+	del := func(obj client.Object) error {
+		if err := r.Get(ctx, key, obj); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		return client.IgnoreNotFound(r.Delete(ctx, obj))
+	}
+
+	switch kind {
+	case maintenancev1alpha1.StageKindBMCSettings:
+		return del(&metalv1alpha1.BMCSettings{})
+	case maintenancev1alpha1.StageKindBMCVersion:
+		return del(&metalv1alpha1.BMCVersion{})
+	}
+	return nil
+}
+
 func (r *MaintenancePlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	enqueueForRun := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 		planName, ok := obj.GetLabels()[planOwnerLabel]
@@ -285,9 +396,32 @@ func (r *MaintenancePlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	})
 
+	enqueueForBMC := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		// When a BMC's firmware status changes, re-check all plans that have a
+		// completed run targeting this BMC so regression detection fires promptly.
+		runList := &maintenancev1alpha1.MaintenancePlanRunList{}
+		if err := mgr.GetClient().List(ctx, runList, client.MatchingLabels{bmcNameLabel: obj.GetName()}); err != nil {
+			return nil
+		}
+		seen := map[string]struct{}{}
+		var requests []reconcile.Request
+		for i := range runList.Items {
+			planName := runList.Items[i].Spec.PlanRef.Name
+			if _, ok := seen[planName]; ok {
+				continue
+			}
+			seen[planName] = struct{}{}
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: planName},
+			})
+		}
+		return requests
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&maintenancev1alpha1.MaintenancePlan{}).
 		Watches(&maintenancev1alpha1.MaintenancePlanRun{}, enqueueForRun).
 		Watches(&metalv1alpha1.Server{}, enqueueForServer).
+		Watches(&metalv1alpha1.BMC{}, enqueueForBMC).
 		Complete(r)
 }

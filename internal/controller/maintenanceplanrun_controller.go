@@ -147,12 +147,66 @@ func (r *MaintenancePlanRunReconciler) reconcileRun(ctx context.Context, run *ma
 		}
 	}
 
+	// Silence all remaining (final-stage) child CRs before marking the run
+	// Succeeded. This prevents metal-operator from attempting a direct jump if
+	// hardware is rolled back — regression detection is owned by the plan
+	// controller via its BMC watch, which recreates the run with the correct
+	// intermediate hops.
+	r.silenceFinalStageCRs(ctx, run)
+
 	run.Status.Phase = maintenancev1alpha1.MaintenancePlanRunPhaseSucceeded
 	now := metav1.Now()
 	run.Status.CompletionTime = &now
 	logger.Info("run completed successfully")
 	r.Recorder.Event(run, corev1.EventTypeNormal, "RunSucceeded", "all stages completed successfully")
 	return ctrl.Result{}, nil
+}
+
+// silenceFinalStageCRs patches ignore-reconciliation on all child CRs still
+// owned by this run (the final-stage CRs that were not deleted as intermediates).
+// This prevents metal-operator from acting if hardware regresses after the run
+// completes. Best-effort: errors are logged but do not block run completion.
+func (r *MaintenancePlanRunReconciler) silenceFinalStageCRs(ctx context.Context, run *maintenancev1alpha1.MaintenancePlanRun) {
+	logger := log.FromContext(ctx).WithValues("run", run.Name)
+	matchRun := client.MatchingLabels{planRunOwnerLabel: run.Name}
+
+	silence := func(obj client.Object) {
+		base := obj.DeepCopyObject().(client.Object)
+		ann := obj.GetAnnotations()
+		if ann == nil {
+			ann = map[string]string{}
+		}
+		ann[metalv1alpha1.OperationAnnotation] = metalv1alpha1.OperationAnnotationIgnore
+		obj.SetAnnotations(ann)
+		if err := r.Patch(ctx, obj, client.MergeFrom(base)); client.IgnoreNotFound(err) != nil {
+			logger.Error(err, "failed to silence final-stage CR", "name", obj.GetName())
+		}
+	}
+
+	bmcSettingsList := &metalv1alpha1.BMCSettingsList{}
+	if err := r.List(ctx, bmcSettingsList, matchRun); err == nil {
+		for i := range bmcSettingsList.Items {
+			silence(&bmcSettingsList.Items[i])
+		}
+	}
+	bmcVersionList := &metalv1alpha1.BMCVersionList{}
+	if err := r.List(ctx, bmcVersionList, matchRun); err == nil {
+		for i := range bmcVersionList.Items {
+			silence(&bmcVersionList.Items[i])
+		}
+	}
+	biosSettingsList := &metalv1alpha1.BIOSSettingsList{}
+	if err := r.List(ctx, biosSettingsList, matchRun); err == nil {
+		for i := range biosSettingsList.Items {
+			silence(&biosSettingsList.Items[i])
+		}
+	}
+	biosVersionList := &metalv1alpha1.BIOSVersionList{}
+	if err := r.List(ctx, biosVersionList, matchRun); err == nil {
+		for i := range biosVersionList.Items {
+			silence(&biosVersionList.Items[i])
+		}
+	}
 }
 
 // isIntermediateStage returns true when a later stage of the same kind exists,
@@ -785,11 +839,35 @@ func (r *MaintenancePlanRunReconciler) reconcileDelete(ctx context.Context, run 
 	return ctrl.Result{}, nil
 }
 
-// deleteChildCRs deletes all child CRs owned by this run. BMCSettings (and other
-// child types) block deletion while InProgress via a validating webhook. We add
-// the force-delete annotation before each delete call so the webhook permits it.
+// deleteChildCRs deletes intermediate-stage child CRs owned by this run.
+// Final-stage CRs (those whose StageStatus has no AppliedSpec snapshot) are
+// left in place — they represent the desired hardware state and should persist
+// independently of the run. The validating webhook blocks deletion of InProgress
+// CRs; we add the force-delete annotation before each delete call.
 func (r *MaintenancePlanRunReconciler) deleteChildCRs(ctx context.Context, run *maintenancev1alpha1.MaintenancePlanRun) error {
 	matchRun := client.MatchingLabels{planRunOwnerLabel: run.Name}
+
+	// Build the set of CR names that belong to final stages (AppliedSpec is nil).
+	// These CRs are kept; only intermediate-stage CRs (AppliedSpec non-nil) are deleted.
+	keepNames := map[string]struct{}{}
+	for i, ss := range run.Status.StageStatuses {
+		if ss.AppliedSpec != nil {
+			continue // intermediate — will be deleted
+		}
+		stage := &run.Spec.Stages[i]
+		if isBMCScoped(stage.Kind) {
+			keepNames[bmcCRName(run.Name, stage.Name)] = struct{}{}
+		} else {
+			for _, srv := range run.Spec.ServerRefs {
+				keepNames[serverCRName(run.Name, stage.Name, srv.Name)] = struct{}{}
+			}
+		}
+	}
+
+	shouldKeep := func(name string) bool {
+		_, ok := keepNames[name]
+		return ok
+	}
 
 	bmcSettingsList := &metalv1alpha1.BMCSettingsList{}
 	if err := r.List(ctx, bmcSettingsList, matchRun); err != nil {
@@ -797,6 +875,9 @@ func (r *MaintenancePlanRunReconciler) deleteChildCRs(ctx context.Context, run *
 	}
 	for i := range bmcSettingsList.Items {
 		obj := &bmcSettingsList.Items[i]
+		if shouldKeep(obj.Name) {
+			continue
+		}
 		if err := r.forceDelete(ctx, obj); err != nil {
 			return fmt.Errorf("deleting BMCSettings %s: %w", obj.Name, err)
 		}
@@ -808,6 +889,9 @@ func (r *MaintenancePlanRunReconciler) deleteChildCRs(ctx context.Context, run *
 	}
 	for i := range bmcVersionList.Items {
 		obj := &bmcVersionList.Items[i]
+		if shouldKeep(obj.Name) {
+			continue
+		}
 		if err := r.forceDelete(ctx, obj); err != nil {
 			return fmt.Errorf("deleting BMCVersion %s: %w", obj.Name, err)
 		}
@@ -819,6 +903,9 @@ func (r *MaintenancePlanRunReconciler) deleteChildCRs(ctx context.Context, run *
 	}
 	for i := range biosSettingsList.Items {
 		obj := &biosSettingsList.Items[i]
+		if shouldKeep(obj.Name) {
+			continue
+		}
 		if err := r.forceDelete(ctx, obj); err != nil {
 			return fmt.Errorf("deleting BIOSSettings %s: %w", obj.Name, err)
 		}
@@ -830,6 +917,9 @@ func (r *MaintenancePlanRunReconciler) deleteChildCRs(ctx context.Context, run *
 	}
 	for i := range biosVersionList.Items {
 		obj := &biosVersionList.Items[i]
+		if shouldKeep(obj.Name) {
+			continue
+		}
 		if err := r.forceDelete(ctx, obj); err != nil {
 			return fmt.Errorf("deleting BIOSVersion %s: %w", obj.Name, err)
 		}
