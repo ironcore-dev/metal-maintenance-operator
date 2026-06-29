@@ -12,8 +12,3 @@ keywords:
 
 annotations:
   kubebuilder.io/generated-by: kubebuilder
-
-dependencies:
-  - name: owner-info
-    version: 1.0.0
-    repository: oci://ghcr.io/sapcc/helm-charts

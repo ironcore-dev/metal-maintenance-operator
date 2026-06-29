@@ -72,9 +72,12 @@ jobs:
                   echo "version=$CHART_VERSION" >> $GITHUB_OUTPUT
 
             - name: Install Kustomize
+              env:
+                  KUSTOMIZE_VERSION: v5.8.1
               run: |
-                  curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-                  mv kustomize /usr/local/bin
+                  curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+                    | tar -xz -C /usr/local/bin kustomize
+                  chmod +x /usr/local/bin/kustomize
 
             - name: Install yq
               run: |
