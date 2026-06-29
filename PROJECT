@@ -5,6 +5,7 @@
 domain: metal.ironcore.dev
 layout:
 - go.kubebuilder.io/v4
+multigroup: true
 plugins:
   helm.kubebuilder.io/v2-alpha:
     manifests: dist/install.yaml
@@ -19,6 +20,15 @@ resources:
   domain: metal.ironcore.dev
   group: maintenance
   kind: Console
-  path: github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: metal.ironcore.dev
+  group: readiness
+  kind: ServerCheck
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1
   version: v1alpha1
 version: "3"

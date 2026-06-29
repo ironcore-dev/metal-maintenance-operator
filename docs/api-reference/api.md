@@ -2,6 +2,7 @@
 
 ## Packages
 - [maintenance.metal.ironcore.dev/v1alpha1](#maintenancemetalironcoredevv1alpha1)
+- [readiness.metal.ironcore.dev/v1alpha1](#readinessmetalironcoredevv1alpha1)
 
 
 ## maintenance.metal.ironcore.dev/v1alpha1
@@ -130,5 +131,154 @@ _Appears in:_
 | `lastChecked` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastChecked is when the job status was last polled. |  |  |
 | `retryCount` _integer_ | RetryCount tracks how many times the operation has been retried. |  |  |
 | `message` _string_ | Message provides human-readable status information. |  |  |
+
+
+
+## readiness.metal.ironcore.dev/v1alpha1
+
+Package v1alpha1 contains API Schema definitions for the readiness.metal.ironcore.dev v1alpha1 API group.
+
+### Resource Types
+- [ServerCheck](#servercheck)
+
+
+
+#### ExpectedInterface
+
+
+
+ExpectedInterface defines the expected state of a server network interface.
+
+
+
+_Appears in:_
+- [ExpectedNetworkSpec](#expectednetworkspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `macAddress` _string_ | MACAddress is the MAC address of the interface and acts as the primary key. |  |  |
+| `carrierStatus` _string_ | CarrierStatus is the expected operational carrier status (e.g. "up").<br />If omitted, carrier status is not checked. |  |  |
+| `neighbors` _[ExpectedNeighbor](#expectedneighbor) array_ | Neighbors lists the LLDP neighbors that must all be present on this interface.<br />If omitted or empty, neighbor presence is not checked. |  |  |
+
+
+#### ExpectedNeighbor
+
+
+
+ExpectedNeighbor defines an expected LLDP neighbor on a network interface.
+
+
+
+_Appears in:_
+- [ExpectedInterface](#expectedinterface)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `systemName` _string_ | SystemName is the LLDP system name of the expected neighbor (e.g. switch hostname). |  |  |
+| `portID` _string_ | PortID is the LLDP port identifier of the expected neighbor. |  |  |
+
+
+#### ExpectedNetworkSpec
+
+
+
+ExpectedNetworkSpec defines the expected network wiring for servers.
+
+
+
+_Appears in:_
+- [ServerCheckSpec](#servercheckspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `interfaces` _[ExpectedInterface](#expectedinterface) array_ | Interfaces is the list of expected network interfaces, keyed by MAC address. |  |  |
+
+
+#### InterfaceMismatch
+
+
+
+InterfaceMismatch describes a single wiring validation failure on a network interface.
+
+
+
+_Appears in:_
+- [ServerReadinessStatus](#serverreadinessstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `macAddress` _string_ | MACAddress is the MAC address of the interface that failed validation. |  |  |
+| `reason` _string_ | Reason is a machine-readable token identifying the failure type. |  |  |
+| `message` _string_ | Message describes the mismatch. |  |  |
+
+
+#### ServerCheck
+
+
+
+ServerCheck is the Schema for the serverchecks API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `readiness.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `ServerCheck` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[ServerCheckSpec](#servercheckspec)_ |  |  |  |
+| `status` _[ServerCheckStatus](#servercheckstatus)_ |  |  |  |
+
+
+#### ServerCheckSpec
+
+
+
+ServerCheckSpec defines the desired state of ServerCheck.
+
+
+
+_Appears in:_
+- [ServerCheck](#servercheck)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers to validate. |  |  |
+| `network` _[ExpectedNetworkSpec](#expectednetworkspec)_ | Network defines the expected network wiring for selected servers. |  |  |
+
+
+#### ServerCheckStatus
+
+
+
+ServerCheckStatus defines the observed state of ServerCheck.
+
+
+
+_Appears in:_
+- [ServerCheck](#servercheck)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `servers` _[ServerReadinessStatus](#serverreadinessstatus) array_ | Servers holds the per-server validation results. |  |  |
+
+
+#### ServerReadinessStatus
+
+
+
+ServerReadinessStatus holds the per-server validation result.
+
+
+
+_Appears in:_
+- [ServerCheckStatus](#servercheckstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the Server resource. |  |  |
+| `ready` _boolean_ | Ready is true when all expected interfaces and neighbors were found. |  |  |
+| `mismatches` _[InterfaceMismatch](#interfacemismatch) array_ | Mismatches lists validation failures for this server. |  |  |
 
 
