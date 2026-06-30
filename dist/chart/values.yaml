@@ -210,3 +210,8 @@ ingress:
   ## Additional ingress annotations.
   ##
   annotations: {}
+
+## Namespaces to create for ServerReadinessCheck objects.
+## Argora (or other spec writers) create ServerReadinessCheck objects in these namespaces.
+## Example: ["metal-servers"]
+serverReadinessNamespaces: []
