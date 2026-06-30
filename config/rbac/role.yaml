@@ -55,6 +55,7 @@ rules:
   - metal.ironcore.dev
   resources:
   - serverclaims
+  - serverreadinessrules
   verbs:
   - create
   - delete
@@ -77,6 +78,32 @@ rules:
   - metal.ironcore.dev
   resources:
   - servers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - networkwiringchecks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - networkwiringchecks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - readiness.metal.ironcore.dev
+  resources:
+  - networkwiringchecks/status
   verbs:
   - get
   - patch

@@ -21,4 +21,13 @@ resources:
   kind: Console
   path: github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: metal.ironcore.dev
+  group: readiness
+  kind: NetworkWiringCheck
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1
+  version: v1alpha1
 version: "3"
