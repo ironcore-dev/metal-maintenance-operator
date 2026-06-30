@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/maintenance.metal.ironcore.dev_consoles.yaml
+- bases/readiness.metal.ironcore.dev_networkwiringchecks.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
