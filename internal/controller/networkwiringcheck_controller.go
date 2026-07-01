@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	clientutils "github.com/ironcore-dev/controller-utils/clientutils"
@@ -141,6 +142,16 @@ func (r *NetworkWiringCheckReconciler) ensureReadinessRule(ctx context.Context, 
 		return r.Create(ctx, buildReadinessRule(ruleName, check))
 	}
 
+	desired := buildReadinessRule(ruleName, check)
+	if !reflect.DeepEqual(existing.Spec, desired.Spec) || !reflect.DeepEqual(existing.Labels, desired.Labels) {
+		base := existing.DeepCopy()
+		existing.Spec = desired.Spec
+		existing.Labels = desired.Labels
+		logger.Info("Updating ServerReadinessRule", "name", ruleName)
+		if err := r.Patch(ctx, existing, client.MergeFrom(base)); err != nil {
+			return fmt.Errorf("patching ServerReadinessRule %s: %w", ruleName, err)
+		}
+	}
 	return nil
 }
 

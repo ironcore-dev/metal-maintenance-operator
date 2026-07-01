@@ -99,6 +99,9 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverRef.name must not be empty
+                  rule: self.name != ''
               serverSelector:
                 description: |-
                   ServerSelector is a label selector used to build the ServerReadinessRule that gates
@@ -149,10 +152,20 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverSelector must not be empty; it must match exactly
+                    the server named in serverRef
+                  rule: self.matchLabels.size() > 0 || self.matchExpressions.size()
+                    > 0
             required:
             - serverRef
             - serverSelector
             type: object
+            x-kubernetes-validations:
+            - message: serverSelector must not be empty; it must match exactly the
+                server named in serverRef
+              rule: self.serverSelector.matchLabels.size() > 0 || self.serverSelector.matchExpressions.size()
+                > 0
           status:
             description: NetworkWiringCheckStatus defines the observed state of NetworkWiringCheck.
             properties:

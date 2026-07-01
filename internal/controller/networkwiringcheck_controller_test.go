@@ -26,9 +26,8 @@ var _ = Describe("NetworkWiringCheck Controller", func() {
 	makeServer := func(name string, nics []metalv1alpha1.NetworkInterface) *metalv1alpha1.Server {
 		s := &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ns.Name,
-				Labels:    map[string]string{"test-server": name},
+				Name:   name,
+				Labels: map[string]string{"test-server": name},
 			},
 			Spec: metalv1alpha1.ServerSpec{
 				SystemUUID: "aaaaaaaa-0000-0000-0000-" + name,
