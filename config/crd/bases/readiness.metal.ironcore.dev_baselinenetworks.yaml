@@ -1,27 +1,23 @@
-{{- if .Values.crd.enable }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: networkwiringchecks.readiness.metal.ironcore.dev
+  name: baselinenetworks.readiness.metal.ironcore.dev
 spec:
   group: readiness.metal.ironcore.dev
   names:
-    kind: NetworkWiringCheck
-    listKind: NetworkWiringCheckList
-    plural: networkwiringchecks
-    singular: networkwiringcheck
+    kind: BaselineNetwork
+    listKind: BaselineNetworkList
+    plural: baselinenetworks
+    singular: baselinenetwork
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: NetworkWiringCheck is the Schema for the networkwiringchecks
-          API.
+        description: BaselineNetwork is the Schema for the baselinenetworks API.
         properties:
           apiVersion:
             description: |-
@@ -41,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: NetworkWiringCheckSpec defines the desired state of NetworkWiringCheck.
+            description: BaselineNetworkSpec defines the desired state of BaselineNetwork.
             properties:
               network:
                 description: Network defines the expected network wiring for the server.
@@ -102,62 +98,14 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              serverSelector:
-                description: |-
-                  ServerSelector is a label selector used to build the ServerReadinessRule that gates
-                  server availability. It must select exactly the server identified by ServerRef.
-                  For single-system servers this is typically the BMC name label; for multi-system
-                  servers a unique label is required (see metal-operator#977).
-                properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
-                      properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
-                          description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
-                          type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverRef.name must not be empty
+                  rule: self.name != ''
             required:
             - serverRef
-            - serverSelector
             type: object
           status:
-            description: NetworkWiringCheckStatus defines the observed state of NetworkWiringCheck.
+            description: BaselineNetworkStatus defines the observed state of BaselineNetwork.
             properties:
               mismatches:
                 description: Mismatches lists validation failures for the server.
@@ -194,4 +142,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

@@ -282,7 +282,7 @@ func main() {
 	type setupFn func(ctrl.Manager) error
 	readinessCheckSetups := map[string]setupFn{
 		"network": func(mgr ctrl.Manager) error {
-			return (&controller.NetworkWiringCheckReconciler{
+			return (&controller.BaselineNetworkReconciler{
 				Client: mgr.GetClient(),
 				Scheme: mgr.GetScheme(),
 			}).SetupWithManager(mgr)
@@ -295,7 +295,7 @@ func main() {
 			os.Exit(1)
 		}
 		if err = setup(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "ServerReadinessCheck", "type", gate)
+			setupLog.Error(err, "unable to create controller", "controller", "BaselineNetwork", "type", gate)
 			os.Exit(1)
 		}
 	}

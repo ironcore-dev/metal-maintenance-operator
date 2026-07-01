@@ -58,18 +58,6 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - serverreadinessrules
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
   - servers/status
   verbs:
   - get
@@ -78,7 +66,7 @@ rules:
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
-  - networkwiringchecks
+  - baselinenetworks
   verbs:
   - create
   - delete
@@ -90,13 +78,13 @@ rules:
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
-  - networkwiringchecks/finalizers
+  - baselinenetworks/finalizers
   verbs:
   - update
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
-  - networkwiringchecks/status
+  - baselinenetworks/status
   verbs:
   - get
   - patch
