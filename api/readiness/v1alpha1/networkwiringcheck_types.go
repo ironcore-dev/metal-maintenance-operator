@@ -41,15 +41,18 @@ type ExpectedNetworkSpec struct {
 }
 
 // NetworkWiringCheckSpec defines the desired state of NetworkWiringCheck.
+// +kubebuilder:validation:XValidation:rule="self.serverSelector.matchLabels.size() > 0 || self.serverSelector.matchExpressions.size() > 0",message="serverSelector must not be empty; it must match exactly the server named in serverRef"
 type NetworkWiringCheckSpec struct {
 	// ServerRef references the cluster-scoped Server to validate.
 	// +required
+	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="serverRef.name must not be empty"
 	ServerRef corev1.LocalObjectReference `json:"serverRef"`
 	// ServerSelector is a label selector used to build the ServerReadinessRule that gates
 	// server availability. It must select exactly the server identified by ServerRef.
 	// For single-system servers this is typically the BMC name label; for multi-system
 	// servers a unique label is required (see metal-operator#977).
 	// +required
+	// +kubebuilder:validation:XValidation:rule="self.matchLabels.size() > 0 || self.matchExpressions.size() > 0",message="serverSelector must not be empty; it must match exactly the server named in serverRef"
 	ServerSelector metav1.LabelSelector `json:"serverSelector"`
 	// Network defines the expected network wiring for the server.
 	// +optional
