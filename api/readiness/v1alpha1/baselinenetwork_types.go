@@ -40,20 +40,12 @@ type ExpectedNetworkSpec struct {
 	Interfaces []ExpectedInterface `json:"interfaces,omitempty"`
 }
 
-// NetworkWiringCheckSpec defines the desired state of NetworkWiringCheck.
-// +kubebuilder:validation:XValidation:rule="self.serverSelector.matchLabels.size() > 0 || self.serverSelector.matchExpressions.size() > 0",message="serverSelector must not be empty; it must match exactly the server named in serverRef"
-type NetworkWiringCheckSpec struct {
+// BaselineNetworkSpec defines the desired state of BaselineNetwork.
+type BaselineNetworkSpec struct {
 	// ServerRef references the cluster-scoped Server to validate.
 	// +required
 	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="serverRef.name must not be empty"
 	ServerRef corev1.LocalObjectReference `json:"serverRef"`
-	// ServerSelector is a label selector used to build the ServerReadinessRule that gates
-	// server availability. It must select exactly the server identified by ServerRef.
-	// For single-system servers this is typically the BMC name label; for multi-system
-	// servers a unique label is required (see metal-operator#977).
-	// +required
-	// +kubebuilder:validation:XValidation:rule="self.matchLabels.size() > 0 || self.matchExpressions.size() > 0",message="serverSelector must not be empty; it must match exactly the server named in serverRef"
-	ServerSelector metav1.LabelSelector `json:"serverSelector"`
 	// Network defines the expected network wiring for the server.
 	// +optional
 	Network ExpectedNetworkSpec `json:"network,omitempty"`
@@ -70,8 +62,8 @@ type InterfaceMismatch struct {
 	Message string `json:"message"`
 }
 
-// NetworkWiringCheckStatus defines the observed state of NetworkWiringCheck.
-type NetworkWiringCheckStatus struct {
+// BaselineNetworkStatus defines the observed state of BaselineNetwork.
+type BaselineNetworkStatus struct {
 	// Ready is true when all expected interfaces and neighbors were found.
 	// +kubebuilder:default=false
 	Ready bool `json:"ready"`
@@ -84,24 +76,24 @@ type NetworkWiringCheckStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
 
-// NetworkWiringCheck is the Schema for the networkwiringchecks API.
-type NetworkWiringCheck struct {
+// BaselineNetwork is the Schema for the baselinenetworks API.
+type BaselineNetwork struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NetworkWiringCheckSpec   `json:"spec,omitempty"`
-	Status NetworkWiringCheckStatus `json:"status,omitempty"`
+	Spec   BaselineNetworkSpec   `json:"spec,omitempty"`
+	Status BaselineNetworkStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// NetworkWiringCheckList contains a list of NetworkWiringCheck.
-type NetworkWiringCheckList struct {
+// BaselineNetworkList contains a list of BaselineNetwork.
+type BaselineNetworkList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []NetworkWiringCheck `json:"items"`
+	Items           []BaselineNetwork `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&NetworkWiringCheck{}, &NetworkWiringCheckList{})
+	SchemeBuilder.Register(&BaselineNetwork{}, &BaselineNetworkList{})
 }
