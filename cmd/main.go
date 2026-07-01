@@ -6,8 +6,11 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
@@ -28,6 +31,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -43,6 +47,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -63,6 +68,7 @@ func main() {
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
+	var readinessChecks []string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -94,6 +100,18 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
+	flag.Func("readiness-checks",
+		"Comma-separated list of readiness check types to enable (supported: network)",
+		func(s string) error {
+			seen := map[string]struct{}{}
+			for raw := range strings.SplitSeq(s, ",") {
+				if gate := strings.TrimSpace(raw); gate != "" {
+					seen[gate] = struct{}{}
+				}
+			}
+			readinessChecks = slices.Collect(maps.Keys(seen))
+			return nil
+		})
 	opts := zap.Options{
 		Development: true,
 	}
@@ -260,6 +278,27 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	type setupFn func(ctrl.Manager) error
+	readinessCheckSetups := map[string]setupFn{
+		"network": func(mgr ctrl.Manager) error {
+			return (&controller.BaselineNetworkReconciler{
+				Client: mgr.GetClient(),
+				Scheme: mgr.GetScheme(),
+			}).SetupWithManager(mgr)
+		},
+	}
+	for _, gate := range readinessChecks {
+		setup, ok := readinessCheckSetups[gate]
+		if !ok {
+			setupLog.Error(nil, "unknown readiness check type", "type", gate)
+			os.Exit(1)
+		}
+		if err = setup(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "BaselineNetwork", "type", gate)
+			os.Exit(1)
+		}
+	}
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")
