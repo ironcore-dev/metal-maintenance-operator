@@ -9,9 +9,12 @@ rules:
   resources:
   - secrets
   verbs:
+  - create
+  - delete
   - get
   - list
   - patch
+  - update
   - watch
 - apiGroups:
   - maintenance.metal.ironcore.dev
@@ -44,8 +47,37 @@ rules:
   resources:
   - bmcs
   - bmcsecrets
-  - servers
   verbs:
   - get
   - list
   - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - serverclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - servers
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - servers/status
+  verbs:
+  - get
+  - patch
+  - update
