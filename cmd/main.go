@@ -6,11 +6,8 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
@@ -68,7 +65,6 @@ func main() {
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
-	var readinessChecks []string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -100,18 +96,6 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
-	flag.Func("readiness-checks",
-		"Comma-separated list of readiness check types to enable (supported: network)",
-		func(s string) error {
-			seen := map[string]struct{}{}
-			for raw := range strings.SplitSeq(s, ",") {
-				if gate := strings.TrimSpace(raw); gate != "" {
-					seen[gate] = struct{}{}
-				}
-			}
-			readinessChecks = slices.Collect(maps.Keys(seen))
-			return nil
-		})
 	opts := zap.Options{
 		Development: true,
 	}
@@ -279,25 +263,12 @@ func main() {
 	}
 	// +kubebuilder:scaffold:builder
 
-	type setupFn func(ctrl.Manager) error
-	readinessCheckSetups := map[string]setupFn{
-		"network": func(mgr ctrl.Manager) error {
-			return (&controller.ServerWiringReconciler{
-				Client: mgr.GetClient(),
-				Scheme: mgr.GetScheme(),
-			}).SetupWithManager(mgr)
-		},
-	}
-	for _, gate := range readinessChecks {
-		setup, ok := readinessCheckSetups[gate]
-		if !ok {
-			setupLog.Error(nil, "unknown readiness check type", "type", gate)
-			os.Exit(1)
-		}
-		if err = setup(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "ServerWiring", "type", gate)
-			os.Exit(1)
-		}
+	if err = (&controller.ServerWiringReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ServerWiring")
+		os.Exit(1)
 	}
 
 	if metricsCertWatcher != nil {
