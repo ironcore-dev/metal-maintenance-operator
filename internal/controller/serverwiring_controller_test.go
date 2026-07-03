@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("BaselineNetwork Controller", func() {
+var _ = Describe("ServerWiring Controller", func() {
 	ns := SetupNamespace()
 
 	makeServer := func(ctx SpecContext, name string, nics []metalv1alpha1.NetworkInterface) *metalv1alpha1.Server {
@@ -35,10 +35,10 @@ var _ = Describe("BaselineNetwork Controller", func() {
 		return s
 	}
 
-	makeBaseline := func(server *metalv1alpha1.Server, network readiness.ExpectedNetworkSpec, nameSuffix string) *readiness.BaselineNetwork {
-		return &readiness.BaselineNetwork{
+	makeServerWiring := func(server *metalv1alpha1.Server, network readiness.ExpectedNetworkSpec, nameSuffix string) *readiness.ServerWiring {
+		return &readiness.ServerWiring{
 			ObjectMeta: metav1.ObjectMeta{GenerateName: "bn-" + nameSuffix + "-", Namespace: ns.Name},
-			Spec: readiness.BaselineNetworkSpec{
+			Spec: readiness.ServerWiringSpec{
 				ServerRef: corev1.LocalObjectReference{Name: server.Name},
 				Network:   network,
 			},
@@ -50,12 +50,12 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			server := makeServer(ctx, "srv-lifecycle-000000000", nil)
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{}, "lifecycle")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(func() { _ = client.IgnoreNotFound(k8sClient.Delete(ctx, baseline)) })
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{}, "lifecycle")
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(func() { _ = client.IgnoreNotFound(k8sClient.Delete(ctx, wiring)) })
 
-			Eventually(Object(baseline)).Should(
-				HaveField("Finalizers", ContainElement(baselineNetworkFinalizer)),
+			Eventually(Object(wiring)).Should(
+				HaveField("Finalizers", ContainElement(serverWiringFinalizer)),
 			)
 		})
 
@@ -63,18 +63,18 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			server := makeServer(ctx, "srv-delete-0000000000", nil)
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{}, "delete")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{}, "delete")
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
 
-			Eventually(Object(baseline)).Should(
-				HaveField("Finalizers", ContainElement(baselineNetworkFinalizer)),
+			Eventually(Object(wiring)).Should(
+				HaveField("Finalizers", ContainElement(serverWiringFinalizer)),
 			)
 
-			By("deleting the BaselineNetwork")
-			Expect(k8sClient.Delete(ctx, baseline)).To(Succeed())
+			By("deleting the ServerWiring")
+			Expect(k8sClient.Delete(ctx, wiring)).To(Succeed())
 
 			Eventually(func() error {
-				return k8sClient.Get(ctx, client.ObjectKeyFromObject(baseline), &readiness.BaselineNetwork{})
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(wiring), &readiness.ServerWiring{})
 			}, "10s").Should(MatchError(ContainSubstring("not found")))
 		})
 	})
@@ -86,15 +86,15 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
 					{MACAddress: "aa:bb:cc:dd:ee:01", CarrierStatus: "up"},
 				},
 			}, "ready")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(k8sClient.Delete, baseline)
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
 
-			Eventually(Object(baseline)).Should(SatisfyAll(
+			Eventually(Object(wiring)).Should(SatisfyAll(
 				HaveField("Status.Ready", BeTrue()),
 				HaveField("Status.Mismatches", BeEmpty()),
 			))
@@ -114,15 +114,15 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
 					{MACAddress: "aa:bb:cc:dd:ee:ff"},
 				},
 			}, "miss")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(k8sClient.Delete, baseline)
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
 
-			Eventually(Object(baseline)).Should(SatisfyAll(
+			Eventually(Object(wiring)).Should(SatisfyAll(
 				HaveField("Status.Ready", BeFalse()),
 				HaveField("Status.Mismatches", ContainElement(
 					HaveField("Message", ContainSubstring("interface not found")),
@@ -144,15 +144,15 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
 					{MACAddress: "aa:bb:cc:00:00:01", CarrierStatus: "up"},
 				},
 			}, "carrier")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(k8sClient.Delete, baseline)
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
 
-			Eventually(Object(baseline)).Should(SatisfyAll(
+			Eventually(Object(wiring)).Should(SatisfyAll(
 				HaveField("Status.Ready", BeFalse()),
 				HaveField("Status.Mismatches", ContainElement(SatisfyAll(
 					HaveField("Message", ContainSubstring("carrierStatus")),
@@ -172,7 +172,7 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
 					{
 						MACAddress: "aa:bb:cc:00:01:01",
@@ -183,10 +183,10 @@ var _ = Describe("BaselineNetwork Controller", func() {
 					},
 				},
 			}, "lldp")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(k8sClient.Delete, baseline)
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
 
-			Eventually(Object(baseline)).Should(SatisfyAll(
+			Eventually(Object(wiring)).Should(SatisfyAll(
 				HaveField("Status.Ready", BeFalse()),
 				HaveField("Status.Mismatches", ContainElement(SatisfyAll(
 					HaveField("Message", ContainSubstring("switch-b")),
@@ -201,9 +201,9 @@ var _ = Describe("BaselineNetwork Controller", func() {
 			})
 			DeferCleanup(k8sClient.Delete, server)
 
-			baseline := makeBaseline(server, readiness.ExpectedNetworkSpec{}, "nospec")
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(k8sClient.Delete, baseline)
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{}, "nospec")
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
 
 			Eventually(Object(server)).Should(
 				HaveField("Status.Conditions", ContainElement(SatisfyAll(
@@ -215,19 +215,19 @@ var _ = Describe("BaselineNetwork Controller", func() {
 		})
 
 		It("does nothing when the referenced server does not exist", func(ctx SpecContext) {
-			baseline := &readiness.BaselineNetwork{
+			wiring := &readiness.ServerWiring{
 				ObjectMeta: metav1.ObjectMeta{GenerateName: "bn-noserver-", Namespace: ns.Name},
-				Spec: readiness.BaselineNetworkSpec{
+				Spec: readiness.ServerWiringSpec{
 					ServerRef: corev1.LocalObjectReference{Name: "nonexistent-server"},
 				},
 			}
-			Expect(k8sClient.Create(ctx, baseline)).To(Succeed())
-			DeferCleanup(k8sClient.Delete, baseline)
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
 
-			Eventually(Object(baseline)).Should(
-				HaveField("Finalizers", ContainElement(baselineNetworkFinalizer)),
+			Eventually(Object(wiring)).Should(
+				HaveField("Finalizers", ContainElement(serverWiringFinalizer)),
 			)
-			Consistently(Object(baseline), "2s").Should(
+			Consistently(Object(wiring), "2s").Should(
 				HaveField("Status.Ready", BeFalse()),
 			)
 		})

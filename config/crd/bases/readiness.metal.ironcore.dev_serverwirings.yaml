@@ -4,20 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: baselinenetworks.readiness.metal.ironcore.dev
+  name: serverwirings.readiness.metal.ironcore.dev
 spec:
   group: readiness.metal.ironcore.dev
   names:
-    kind: BaselineNetwork
-    listKind: BaselineNetworkList
-    plural: baselinenetworks
-    singular: baselinenetwork
+    kind: ServerWiring
+    listKind: ServerWiringList
+    plural: serverwirings
+    singular: serverwiring
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: BaselineNetwork is the Schema for the baselinenetworks API.
+        description: ServerWiring is the Schema for the serverwirings API.
         properties:
           apiVersion:
             description: |-
@@ -37,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: BaselineNetworkSpec defines the desired state of BaselineNetwork.
+            description: ServerWiringSpec defines the desired state of ServerWiring.
             properties:
               network:
                 description: Network defines the expected network wiring for the server.
@@ -105,7 +105,7 @@ spec:
             - serverRef
             type: object
           status:
-            description: BaselineNetworkStatus defines the observed state of BaselineNetwork.
+            description: ServerWiringStatus defines the observed state of ServerWiring.
             properties:
               mismatches:
                 description: Mismatches lists validation failures for the server.

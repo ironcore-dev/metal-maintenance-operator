@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	baselineNetworkFinalizer  = "readiness.metal.ironcore.dev/baselinenetwork"
+	serverWiringFinalizer     = "readiness.metal.ironcore.dev/serverwiring"
 	networkReadyConditionType = "NetworkReady"
 
 	reasonMatch            = "Match"
@@ -31,38 +31,38 @@ const (
 	reasonCarrierDown      = "CarrierDown"
 	reasonNeighborMismatch = "NeighborMismatch"
 
-	// serverRefNameField is the field index path used to map Server names back to BaselineNetworks.
+	// serverRefNameField is the field index path used to map Server names back to ServerWirings.
 	serverRefNameField = ".spec.serverRef.name"
 )
 
-// BaselineNetworkReconciler reconciles a BaselineNetwork object.
-type BaselineNetworkReconciler struct {
+// ServerWiringReconciler reconciles a ServerWiring object.
+type ServerWiringReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=baselinenetworks,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=baselinenetworks/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=baselinenetworks/finalizers,verbs=update
+// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverwirings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverwirings/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverwirings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 
-func (r *BaselineNetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ServerWiringReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Reconciling BaselineNetwork", "name", req.NamespacedName)
+	logger.Info("Reconciling ServerWiring", "name", req.NamespacedName)
 
-	baseline := &readinessv1alpha1.BaselineNetwork{}
-	if err := r.Get(ctx, req.NamespacedName, baseline); err != nil {
+	wiring := &readinessv1alpha1.ServerWiring{}
+	if err := r.Get(ctx, req.NamespacedName, wiring); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	return r.reconcileExists(ctx, baseline)
+	return r.reconcileExists(ctx, wiring)
 }
 
-func (r *BaselineNetworkReconciler) reconcileDelete(ctx context.Context, baseline *readinessv1alpha1.BaselineNetwork) (ctrl.Result, error) {
+func (r *ServerWiringReconciler) reconcileDelete(ctx context.Context, wiring *readinessv1alpha1.ServerWiring) (ctrl.Result, error) {
 	server := &metalv1alpha1.Server{}
-	if err := r.Get(ctx, client.ObjectKey{Name: baseline.Spec.ServerRef.Name}, server); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: wiring.Spec.ServerRef.Name}, server); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("getting server %s: %w", baseline.Spec.ServerRef.Name, err)
+			return ctrl.Result{}, fmt.Errorf("getting server %s: %w", wiring.Spec.ServerRef.Name, err)
 		}
 	} else {
 		serverBase := server.DeepCopy()
@@ -72,43 +72,43 @@ func (r *BaselineNetworkReconciler) reconcileDelete(ctx context.Context, baselin
 		}
 	}
 
-	if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, baseline, baselineNetworkFinalizer); err != nil {
+	if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, wiring, serverWiringFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *BaselineNetworkReconciler) reconcileExists(ctx context.Context, baseline *readinessv1alpha1.BaselineNetwork) (ctrl.Result, error) {
-	if _, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, baseline, baselineNetworkFinalizer); err != nil {
+func (r *ServerWiringReconciler) reconcileExists(ctx context.Context, wiring *readinessv1alpha1.ServerWiring) (ctrl.Result, error) {
+	if _, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, wiring, serverWiringFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 	}
 
-	if baseline.GetDeletionTimestamp() != nil {
-		return r.reconcileDelete(ctx, baseline)
+	if wiring.GetDeletionTimestamp() != nil {
+		return r.reconcileDelete(ctx, wiring)
 	}
 
 	server := &metalv1alpha1.Server{}
-	if err := r.Get(ctx, client.ObjectKey{Name: baseline.Spec.ServerRef.Name}, server); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: wiring.Spec.ServerRef.Name}, server); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, fmt.Errorf("getting server %s: %w", baseline.Spec.ServerRef.Name, err)
+		return ctrl.Result{}, fmt.Errorf("getting server %s: %w", wiring.Spec.ServerRef.Name, err)
 	}
 
-	hasSpec := len(baseline.Spec.Network.Interfaces) > 0
-	mismatches, ready := r.validateServer(server, baseline)
+	hasSpec := len(wiring.Spec.Network.Interfaces) > 0
+	mismatches, ready := r.validateServer(server, wiring)
 
 	if err := r.setNetworkReadyCondition(ctx, server, ready, hasSpec, mismatches); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, r.updateStatus(ctx, baseline, ready, mismatches)
+	return ctrl.Result{}, r.updateStatus(ctx, wiring, ready, mismatches)
 }
 
-func (r *BaselineNetworkReconciler) validateServer(server *metalv1alpha1.Server, baseline *readinessv1alpha1.BaselineNetwork) (mismatches []readinessv1alpha1.InterfaceMismatch, ready bool) {
+func (r *ServerWiringReconciler) validateServer(server *metalv1alpha1.Server, wiring *readinessv1alpha1.ServerWiring) (mismatches []readinessv1alpha1.InterfaceMismatch, ready bool) {
 	ready = true
 
-	if len(baseline.Spec.Network.Interfaces) == 0 {
+	if len(wiring.Spec.Network.Interfaces) == 0 {
 		return nil, true
 	}
 
@@ -117,7 +117,7 @@ func (r *BaselineNetworkReconciler) validateServer(server *metalv1alpha1.Server,
 		actualByMAC[strings.ToLower(nic.MACAddress)] = nic
 	}
 
-	for _, expected := range baseline.Spec.Network.Interfaces {
+	for _, expected := range wiring.Spec.Network.Interfaces {
 		mac := strings.ToLower(expected.MACAddress)
 		actual, found := actualByMAC[mac]
 		if !found {
@@ -160,7 +160,7 @@ func (r *BaselineNetworkReconciler) validateServer(server *metalv1alpha1.Server,
 	return mismatches, ready
 }
 
-func (r *BaselineNetworkReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, ready, hasSpec bool, mismatches []readinessv1alpha1.InterfaceMismatch) error {
+func (r *ServerWiringReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, ready, hasSpec bool, mismatches []readinessv1alpha1.InterfaceMismatch) error {
 	serverBase := server.DeepCopy()
 
 	condition := metav1.Condition{
@@ -194,29 +194,29 @@ func (r *BaselineNetworkReconciler) setNetworkReadyCondition(ctx context.Context
 	return nil
 }
 
-func (r *BaselineNetworkReconciler) updateStatus(ctx context.Context, baseline *readinessv1alpha1.BaselineNetwork, ready bool, mismatches []readinessv1alpha1.InterfaceMismatch) error {
-	baselineBase := baseline.DeepCopy()
-	baseline.Status.Ready = ready
-	baseline.Status.Mismatches = mismatches
-	if err := r.Status().Patch(ctx, baseline, client.MergeFrom(baselineBase)); err != nil {
-		return fmt.Errorf("patching BaselineNetwork status: %w", err)
+func (r *ServerWiringReconciler) updateStatus(ctx context.Context, wiring *readinessv1alpha1.ServerWiring, ready bool, mismatches []readinessv1alpha1.InterfaceMismatch) error {
+	wiringBase := wiring.DeepCopy()
+	wiring.Status.Ready = ready
+	wiring.Status.Mismatches = mismatches
+	if err := r.Status().Patch(ctx, wiring, client.MergeFrom(wiringBase)); err != nil {
+		return fmt.Errorf("patching ServerWiring status: %w", err)
 	}
 	return nil
 }
 
-func (r *BaselineNetworkReconciler) enqueueFromServer(ctx context.Context, obj client.Object) []ctrl.Request {
-	baselineList := &readinessv1alpha1.BaselineNetworkList{}
-	if err := r.List(ctx, baselineList,
+func (r *ServerWiringReconciler) enqueueFromServer(ctx context.Context, obj client.Object) []ctrl.Request {
+	wiringList := &readinessv1alpha1.ServerWiringList{}
+	if err := r.List(ctx, wiringList,
 		client.MatchingFields{serverRefNameField: obj.GetName()},
 	); err != nil {
 		return nil
 	}
-	requests := make([]ctrl.Request, 0, len(baselineList.Items))
-	for _, baseline := range baselineList.Items {
+	requests := make([]ctrl.Request, 0, len(wiringList.Items))
+	for _, wiring := range wiringList.Items {
 		requests = append(requests, ctrl.Request{
 			NamespacedName: client.ObjectKey{
-				Name:      baseline.Name,
-				Namespace: baseline.Namespace,
+				Name:      wiring.Name,
+				Namespace: wiring.Namespace,
 			},
 		})
 	}
@@ -224,27 +224,27 @@ func (r *BaselineNetworkReconciler) enqueueFromServer(ctx context.Context, obj c
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *BaselineNetworkReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ServerWiringReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
-		&readinessv1alpha1.BaselineNetwork{},
+		&readinessv1alpha1.ServerWiring{},
 		serverRefNameField,
 		func(obj client.Object) []string {
-			baseline := obj.(*readinessv1alpha1.BaselineNetwork)
-			if baseline.Spec.ServerRef.Name == "" {
+			wiring := obj.(*readinessv1alpha1.ServerWiring)
+			if wiring.Spec.ServerRef.Name == "" {
 				return nil
 			}
-			return []string{baseline.Spec.ServerRef.Name}
+			return []string{wiring.Spec.ServerRef.Name}
 		},
 	); err != nil {
 		return fmt.Errorf("indexing %s: %w", serverRefNameField, err)
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&readinessv1alpha1.BaselineNetwork{}).
+		For(&readinessv1alpha1.ServerWiring{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueFromServer)).
-		Named("baselinenetwork").
+		Named("serverwiring").
 		Complete(r)
 }
 

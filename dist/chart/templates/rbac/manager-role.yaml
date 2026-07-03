@@ -90,7 +90,7 @@ rules:
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
-  - baselinenetworks
+  - serverwirings
   verbs:
   - create
   - delete
@@ -102,13 +102,13 @@ rules:
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
-  - baselinenetworks/finalizers
+  - serverwirings/finalizers
   verbs:
   - update
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
-  - baselinenetworks/status
+  - serverwirings/status
   verbs:
   - get
   - patch

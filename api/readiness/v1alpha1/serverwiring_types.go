@@ -40,8 +40,8 @@ type ExpectedNetworkSpec struct {
 	Interfaces []ExpectedInterface `json:"interfaces,omitempty"`
 }
 
-// BaselineNetworkSpec defines the desired state of BaselineNetwork.
-type BaselineNetworkSpec struct {
+// ServerWiringSpec defines the desired state of ServerWiring.
+type ServerWiringSpec struct {
 	// ServerRef references the cluster-scoped Server to validate.
 	// +required
 	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="serverRef.name must not be empty"
@@ -62,8 +62,8 @@ type InterfaceMismatch struct {
 	Message string `json:"message"`
 }
 
-// BaselineNetworkStatus defines the observed state of BaselineNetwork.
-type BaselineNetworkStatus struct {
+// ServerWiringStatus defines the observed state of ServerWiring.
+type ServerWiringStatus struct {
 	// Ready is true when all expected interfaces and neighbors were found.
 	// +kubebuilder:default=false
 	Ready bool `json:"ready"`
@@ -76,24 +76,24 @@ type BaselineNetworkStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
 
-// BaselineNetwork is the Schema for the baselinenetworks API.
-type BaselineNetwork struct {
+// ServerWiring is the Schema for the serverwirings API.
+type ServerWiring struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   BaselineNetworkSpec   `json:"spec,omitempty"`
-	Status BaselineNetworkStatus `json:"status,omitempty"`
+	Spec   ServerWiringSpec   `json:"spec,omitempty"`
+	Status ServerWiringStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// BaselineNetworkList contains a list of BaselineNetwork.
-type BaselineNetworkList struct {
+// ServerWiringList contains a list of ServerWiring.
+type ServerWiringList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []BaselineNetwork `json:"items"`
+	Items           []ServerWiring `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&BaselineNetwork{}, &BaselineNetworkList{})
+	SchemeBuilder.Register(&ServerWiring{}, &ServerWiringList{})
 }
