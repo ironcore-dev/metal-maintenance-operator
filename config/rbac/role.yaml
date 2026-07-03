@@ -17,32 +17,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
-  resources:
-  - consoles
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - maintenance.metal.ironcore.dev
-  resources:
-  - consoles/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - maintenance.metal.ironcore.dev
-  resources:
-  - consoles/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcs
@@ -103,6 +77,32 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles/status
   verbs:
   - get
   - patch

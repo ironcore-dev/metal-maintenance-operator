@@ -1,4 +1,4 @@
-apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+apiVersion: vendorconsole.metal.ironcore.dev/v1alpha1
 kind: Console
 metadata:
   labels:

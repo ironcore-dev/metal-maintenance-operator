@@ -17,13 +17,13 @@ metadata:
   name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "console-admin-role" "context" $) }}
 rules:
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
   - '*'
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:

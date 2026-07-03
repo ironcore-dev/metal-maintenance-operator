@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package maintenance
+package vendorconsole
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	maintenancealpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,9 +28,9 @@ type ConsoleReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=consoles/finalizers,verbs=update
+// +kubebuilder:rbac:groups=vendorconsole.metal.ironcore.dev,resources=consoles,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=vendorconsole.metal.ironcore.dev,resources=consoles/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=vendorconsole.metal.ironcore.dev,resources=consoles/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch
@@ -39,7 +39,7 @@ type ConsoleReconciler struct {
 func (r *ConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Console", "name", req.NamespacedName)
-	console := &maintenancealpha1.Console{}
+	console := &vendorconsolev1alpha1.Console{}
 	if err := r.Get(ctx, req.NamespacedName, console); err != nil {
 		logger.Error(err, "unable to fetch Console")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -50,7 +50,7 @@ func (r *ConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.reconcileExists(ctx, console)
 }
 
-func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *maintenancealpha1.Console) (ctrl.Result, error) {
+func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *vendorconsolev1alpha1.Console) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Step 1: Check pending operations first
@@ -111,7 +111,7 @@ func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *mainte
 
 // reconcilePendingOperations checks the status of pending operations and updates them.
 // Returns the duration after which to requeue if there are pending operations, or 0 if none.
-func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, console *maintenancealpha1.Console) (time.Duration, error) {
+func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, console *vendorconsolev1alpha1.Console) (time.Duration, error) {
 	logger := log.FromContext(ctx)
 
 	if len(console.Status.PendingOperations) == 0 {
@@ -133,14 +133,14 @@ func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, cons
 	const pollInterval = 10 * time.Second
 	now := metav1.Now()
 
-	updatedOps := make([]maintenancealpha1.PendingOperation, 0, len(console.Status.PendingOperations))
+	updatedOps := make([]vendorconsolev1alpha1.PendingOperation, 0, len(console.Status.PendingOperations))
 	hasUpdates := false
 
 	for _, op := range console.Status.PendingOperations {
 		// Check if operation has timed out
 		if now.Sub(op.StartTime.Time) > operationTimeout {
 			logger.Info("Operation timed out", "server", op.ServerName, "operation", op.OperationType, "jobID", op.JobID)
-			op.Status = maintenancealpha1.JobStatusTimedOut
+			op.Status = vendorconsolev1alpha1.JobStatusTimedOut
 			op.Message = "Operation exceeded 15 minute timeout"
 			op.LastChecked = now
 			hasUpdates = true
@@ -170,13 +170,13 @@ func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, cons
 		if consoleClient.IsJobComplete(jobInfo) {
 			if consoleClient.IsJobSuccessful(jobInfo) {
 				logger.Info("Operation completed successfully", "server", op.ServerName, "operation", op.OperationType, "jobID", op.JobID)
-				op.Status = maintenancealpha1.JobStatusCompleted
+				op.Status = vendorconsolev1alpha1.JobStatusCompleted
 				hasUpdates = true
 				// Don't add to updatedOps - remove completed operations
 				continue
 			} else {
 				logger.Info("Operation failed", "server", op.ServerName, "operation", op.OperationType, "jobID", op.JobID)
-				op.Status = maintenancealpha1.JobStatusFailed
+				op.Status = vendorconsolev1alpha1.JobStatusFailed
 				hasUpdates = true
 				// Don't add to updatedOps - remove failed operations for now
 				// TODO: Consider retry logic in future
@@ -184,8 +184,8 @@ func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, cons
 			}
 		} else {
 			// Still running
-			if op.Status != maintenancealpha1.JobStatusRunning {
-				op.Status = maintenancealpha1.JobStatusRunning
+			if op.Status != vendorconsolev1alpha1.JobStatusRunning {
+				op.Status = vendorconsolev1alpha1.JobStatusRunning
 				hasUpdates = true
 			}
 			updatedOps = append(updatedOps, op)
@@ -213,7 +213,7 @@ func (r *ConsoleReconciler) reconcilePendingOperations(ctx context.Context, cons
 // startNewOperations initiates import operations for servers that are not managed and not pending.
 func (r *ConsoleReconciler) startNewOperations(
 	ctx context.Context,
-	console *maintenancealpha1.Console,
+	console *vendorconsolev1alpha1.Console,
 	serverList *metalv1alpha1.ServerList,
 	managedServers []hwmgr.Device,
 	consoleClient *hwmgr.Client,
@@ -232,7 +232,7 @@ func (r *ConsoleReconciler) startNewOperations(
 		managedMap[device.Hostname] = true
 	}
 
-	newOperations := []maintenancealpha1.PendingOperation{}
+	newOperations := []vendorconsolev1alpha1.PendingOperation{}
 
 	for _, server := range serverList.Items {
 		// Skip if already pending
@@ -266,13 +266,13 @@ func (r *ConsoleReconciler) startNewOperations(
 		}
 		// Create pending operation
 		now := metav1.Now()
-		operation := maintenancealpha1.PendingOperation{
+		operation := vendorconsolev1alpha1.PendingOperation{
 			ServerName:    server.Name,
 			Hostname:      hostname,
 			IP:            metalBmc.Status.IP.String(),
-			OperationType: maintenancealpha1.OperationTypeImport,
+			OperationType: vendorconsolev1alpha1.OperationTypeImport,
 			JobID:         jobID,
-			Status:        maintenancealpha1.JobStatusPending,
+			Status:        vendorconsolev1alpha1.JobStatusPending,
 			StartTime:     now,
 			LastChecked:   now,
 			RetryCount:    0,
@@ -295,7 +295,7 @@ func (r *ConsoleReconciler) startNewOperations(
 	return nil
 }
 
-func (r *ConsoleReconciler) delete(ctx context.Context, console *maintenancealpha1.Console) (ctrl.Result, error) {
+func (r *ConsoleReconciler) delete(ctx context.Context, console *vendorconsolev1alpha1.Console) (ctrl.Result, error) {
 	serverList, err := r.getServerList(ctx, console)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -326,7 +326,7 @@ func (r *ConsoleReconciler) delete(ctx context.Context, console *maintenancealph
 
 func (r *ConsoleReconciler) createConsoleClient(
 	ctx context.Context,
-	console *maintenancealpha1.Console,
+	console *vendorconsolev1alpha1.Console,
 	secret *corev1.Secret,
 ) (*hwmgr.Client, error) {
 	var err error
@@ -362,7 +362,7 @@ func (r *ConsoleReconciler) createConsoleClient(
 
 func (r *ConsoleReconciler) getConsoleSecret(
 	ctx context.Context,
-	console *maintenancealpha1.Console,
+	console *vendorconsolev1alpha1.Console,
 ) (*corev1.Secret, error) {
 	secret := &corev1.Secret{}
 	if console.Spec.BMCCredentialSecretRef.Name == "" {
@@ -377,7 +377,7 @@ func (r *ConsoleReconciler) getConsoleSecret(
 
 func (r *ConsoleReconciler) getServerList(
 	ctx context.Context,
-	console *maintenancealpha1.Console,
+	console *vendorconsolev1alpha1.Console,
 ) (*metalv1alpha1.ServerList, error) {
 	selector, err := metav1.LabelSelectorAsSelector(&console.Spec.ServerSelector)
 	if err != nil {
@@ -413,7 +413,7 @@ func (r *ConsoleReconciler) updateSecretToken(
 func (r *ConsoleReconciler) updateStatus(
 	ctx context.Context,
 	consoleClient *hwmgr.Client,
-	console *maintenancealpha1.Console,
+	console *vendorconsolev1alpha1.Console,
 ) (ctrl.Result, error) {
 	managedServers := 0
 	unmanagedServers := 0
@@ -502,7 +502,7 @@ func (r *ConsoleReconciler) getHostname(ctx context.Context, server *metalv1alph
 
 func (r *ConsoleReconciler) enqueueRequestsForServer(ctx context.Context, obj client.Object) []ctrl.Request {
 	var requests []ctrl.Request
-	consoleList := &maintenancealpha1.ConsoleList{}
+	consoleList := &vendorconsolev1alpha1.ConsoleList{}
 	if err := r.List(ctx, consoleList); err != nil {
 		return nil
 	}
@@ -526,7 +526,7 @@ func (r *ConsoleReconciler) enqueueRequestsForServer(ctx context.Context, obj cl
 // SetupWithManager sets up the controller with the Manager.
 func (r *ConsoleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&maintenancealpha1.Console{}).
+		For(&vendorconsolev1alpha1.Console{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueRequestsForServer)).
 		Named("servermanagement").

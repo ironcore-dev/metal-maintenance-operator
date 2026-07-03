@@ -23,7 +23,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
@@ -35,13 +35,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/finalizers
   verbs:
   - update
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:

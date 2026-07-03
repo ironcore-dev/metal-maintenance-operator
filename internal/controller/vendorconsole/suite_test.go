@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package maintenance
+package vendorconsole
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr/mock"
 	. "github.com/onsi/ginkgo/v2"
@@ -19,7 +21,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
-	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
+	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -36,14 +38,9 @@ var (
 	k8sClient client.Client
 )
 
-const (
-	sanitizationNamespace = "metal-maintenance-sanitization"
-	sanitizationImage     = "metal-maintenance-sanitization:latest"
-)
-
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Controller Suite")
+	RunSpecs(t, "VendorConsole Controller Suite")
 }
 
 var _ = BeforeSuite(func() {
@@ -65,7 +62,7 @@ var _ = BeforeSuite(func() {
 	DeferCleanup(testEnv.Stop)
 
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
-	Expect(readinessv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	Expect(vendorconsolev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -74,10 +71,6 @@ var _ = BeforeSuite(func() {
 
 	log.SetLogger(GinkgoLogr)
 	SetClient(k8sClient)
-
-	Expect(k8sClient.Create(context.TODO(), &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: sanitizationNamespace},
-	})).To(Succeed())
 
 	mgrCtx, cancel := context.WithCancel(context.Background())
 	DeferCleanup(cancel)
@@ -88,21 +81,12 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
-	Expect((&ServerSanitizationReconciler{
-		Client:                k8sManager.GetClient(),
-		Scheme:                k8sManager.GetScheme(),
-		SanitizationNamespace: sanitizationNamespace,
-		SanitizationImage:     sanitizationImage,
-		SanitizationIgnitionProvider: func(
-			ctx context.Context,
-			server *metalv1alpha1.Server,
-			sanitizationUID string,
-		) ([]byte, error) {
-			return fmt.Appendf(nil, "%s/%s", server.UID, sanitizationUID), nil
-		},
+	Expect((&ConsoleReconciler{
+		Client: k8sManager.GetClient(),
+		Scheme: k8sManager.GetScheme(),
 	}).SetupWithManager(k8sManager)).To(Succeed())
 
-	mockServer := mock.NewMockServer(GinkgoLogr, ":8002")
+	mockServer := mock.NewMockServer(GinkgoLogr, ":8000")
 	mockCtx, cancel := context.WithCancel(context.Background())
 	DeferCleanup(cancel)
 
@@ -110,6 +94,15 @@ var _ = BeforeSuite(func() {
 		defer GinkgoRecover()
 		Expect(mockServer.Start(mockCtx)).To(Succeed(), "failed to start mock Redfish server")
 	}()
+
+	Eventually(func() error {
+		resp, err := http.Get("http://127.0.0.1:8000/api/SessionService/Sessions")
+		if err != nil {
+			return err
+		}
+		_ = resp.Body.Close()
+		return nil
+	}, 5*time.Second, 50*time.Millisecond).Should(Succeed(), "mock server did not become ready")
 
 	go func() {
 		defer GinkgoRecover()

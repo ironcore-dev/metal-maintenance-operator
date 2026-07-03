@@ -18,9 +18,9 @@ resources:
     namespaced: true
   controller: true
   domain: metal.ironcore.dev
-  group: maintenance
+  group: vendorconsole
   kind: Console
-  path: github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -28,16 +28,7 @@ resources:
   controller: true
   domain: metal.ironcore.dev
   group: readiness
-  kind: ServerCheck
-  path: github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1
-  version: v1alpha1
-- api:
-    crdVersion: v1
-    namespaced: true
-  controller: true
-  domain: metal.ironcore.dev
-  group: readiness
-  kind: NetworkWiringCheck
+  kind: ServerWiring
   path: github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1
   version: v1alpha1
 version: "3"

@@ -17,7 +17,7 @@ metadata:
   name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "console-viewer-role" "context" $) }}
 rules:
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
@@ -25,7 +25,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:

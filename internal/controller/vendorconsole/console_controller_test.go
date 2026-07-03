@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package maintenance
+package vendorconsole
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
-	maintenance "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	vendorconsole "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -20,7 +20,7 @@ import (
 var _ = Describe("Console Controller", func() {
 	ns := SetupNamespace()
 
-	console := &maintenance.Console{}
+	console := &vendorconsole.Console{}
 	dellServer := &metalv1alpha1.Server{}
 	dellSecret := &corev1.Secret{}
 	dellBMC := &metalv1alpha1.BMC{}
@@ -131,12 +131,12 @@ var _ = Describe("Console Controller", func() {
 			Expect(k8sClient.Create(ctx, dellSecret)).To(Succeed())
 
 			By("Creating a Console resource")
-			console = &maintenance.Console{
+			console = &vendorconsole.Console{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-console",
 					Namespace: ns.Name,
 				},
-				Spec: maintenance.ConsoleSpec{
+				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"metal.ironcore.dev/Manufacturer": "Dell",
@@ -213,12 +213,12 @@ var _ = Describe("Console Controller", func() {
 			DeferCleanup(k8sClient.Delete, emptySecret)
 
 			By("Creating a Console with selector matching no servers")
-			emptyConsole := &maintenance.Console{
+			emptyConsole := &vendorconsole.Console{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "empty-console-",
 					Namespace:    ns.Name,
 				},
-				Spec: maintenance.ConsoleSpec{
+				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"nonexistent": "label",
@@ -242,12 +242,12 @@ var _ = Describe("Console Controller", func() {
 
 		It("should handle Console with missing credential secret", func() {
 			By("Creating a Console referencing non-existent secret")
-			noSecretConsole := &maintenance.Console{
+			noSecretConsole := &vendorconsole.Console{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "no-secret-console-",
 					Namespace:    ns.Name,
 				},
-				Spec: maintenance.ConsoleSpec{
+				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"test": "label",
@@ -374,12 +374,12 @@ var _ = Describe("Console Controller", func() {
 			DeferCleanup(k8sClient.Delete, asyncSecret)
 
 			By("Creating a Console resource")
-			asyncConsole := &maintenance.Console{
+			asyncConsole := &vendorconsole.Console{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "async-console-",
 					Namespace:    ns.Name,
 				},
-				Spec: maintenance.ConsoleSpec{
+				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"metal.ironcore.dev/Manufacturer": "Dell",
@@ -416,12 +416,12 @@ var _ = Describe("Console Controller", func() {
 			DeferCleanup(k8sClient.Delete, pollSecret)
 
 			By("Creating a Console resource")
-			pollConsole := &maintenance.Console{
+			pollConsole := &vendorconsole.Console{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "poll-console-",
 					Namespace:    ns.Name,
 				},
-				Spec: maintenance.ConsoleSpec{
+				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"metal.ironcore.dev/Manufacturer": "Dell",
