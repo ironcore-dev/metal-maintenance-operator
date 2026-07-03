@@ -28,9 +28,10 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller"
+	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
+	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -231,7 +232,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.ConsoleReconciler{
+	if err = (&maintenancectrl.ConsoleReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
@@ -239,7 +240,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.ServerSanitizationReconciler{
+	if err = (&maintenancectrl.ServerSanitizationReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		SanitizationNamespace:   sanitizationNamespace,
@@ -263,7 +264,7 @@ func main() {
 	}
 	// +kubebuilder:scaffold:builder
 
-	if err = (&controller.ServerWiringReconciler{
+	if err = (&readinessctrl.ServerWiringReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {

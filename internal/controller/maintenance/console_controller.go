@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package controller
+package maintenance
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	maintenancealpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
+	maintenancealpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
