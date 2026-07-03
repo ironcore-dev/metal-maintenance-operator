@@ -31,4 +31,13 @@ resources:
   kind: ServerWiring
   path: github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: true
+  domain: maintenance.metal.ironcore.dev
+  group: vendorconsole
+  kind: FirmwareUpdateDELL
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1
+  version: v1alpha1
 version: "3"

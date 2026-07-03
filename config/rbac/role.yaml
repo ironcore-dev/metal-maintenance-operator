@@ -29,6 +29,7 @@ rules:
   - metal.ironcore.dev
   resources:
   - serverclaims
+  - servermaintenances
   verbs:
   - create
   - delete
@@ -40,6 +41,15 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - servermaintenances/status
+  - servers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - servers
   verbs:
   - get
@@ -48,9 +58,27 @@ rules:
   - update
   - watch
 - apiGroups:
-  - metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
-  - servers/status
+  - firmwareupdatedells
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - firmwareupdatedells/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - firmwareupdatedells/status
   verbs:
   - get
   - patch

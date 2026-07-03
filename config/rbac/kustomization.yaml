@@ -25,4 +25,7 @@ resources:
 - console_admin_role.yaml
 - console_editor_role.yaml
 - console_viewer_role.yaml
+- firmwareupdatedell_admin_role.yaml
+- firmwareupdatedell_editor_role.yaml
+- firmwareupdatedell_viewer_role.yaml
 
