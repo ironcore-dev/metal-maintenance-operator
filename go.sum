@@ -101,8 +101,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/ironcore-dev/controller-utils v0.12.0 h1:0OBUzV+Zkh6K+2h4LtqAjWru19/5d3ucuUK5qMzt1rs=
 github.com/ironcore-dev/controller-utils v0.12.0/go.mod h1:LHSeOLcIbPIkSiryKpZ30E/zDSWHTnkZD4w69+kPdMw=
-github.com/ironcore-dev/metal-operator v0.5.1-0.20260604072140-4d8a1ea0f48c h1:KPZtIdqvcFZvaL7p9IjUTKGZNtK4pI0bJLgEIQrmyL8=
-github.com/ironcore-dev/metal-operator v0.5.1-0.20260604072140-4d8a1ea0f48c/go.mod h1:0sbUkeBBJMUfWt6MqjQHu+aTwTrgge7kQLRJaeEI1/U=
+github.com/ironcore-dev/metal-operator v0.5.1-0.20260616102915-15f14ed5787e h1:5JCz4ex9iqj8ljsGOoUTj2A/HSXP1hWqKqTn2GFB77U=
+github.com/ironcore-dev/metal-operator v0.5.1-0.20260616102915-15f14ed5787e/go.mod h1:xcEzY0ddXCP1n59J9SRu/RamKXag4jA+ITArFOnQOVs=
 github.com/joshdk/go-junit v1.0.0 h1:S86cUKIdwBHWwA6xCmFlf3RTLfVXYQfvanM5Uh+K6GE=
 github.com/joshdk/go-junit v1.0.0/go.mod h1:TiiV0PqkaNfFXjEiyjWM3XXrhVyCa1K4Zfga6W52ung=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=
@@ -199,6 +199,8 @@ go.opentelemetry.io/proto/otlp v1.9.0 h1:l706jCMITVouPOqEnii2fIAuO3IVGBRPV5ICjce
 go.opentelemetry.io/proto/otlp v1.9.0/go.mod h1:xE+Cx5E/eEHw+ISFkwPLwCZefwVjY+pqKg1qcK03+/4=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
+go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
+go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
 go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
 go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=
 go.uber.org/zap v1.27.1 h1:08RqriUEv8+ArZRYSTXy1LeBScaMpVSTBhCeaZYfMYc=
