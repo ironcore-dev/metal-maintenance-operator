@@ -1,7 +1,7 @@
 # This rule is not used by the project metal-maintenance-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to maintenance.metal.ironcore.dev resources.
+# Grants read-only access to vendorconsole.metal.ironcore.dev resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 
@@ -14,7 +14,7 @@ metadata:
   name: console-viewer-role
 rules:
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
@@ -22,7 +22,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:

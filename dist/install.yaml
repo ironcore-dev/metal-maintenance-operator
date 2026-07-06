@@ -156,9 +156,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: consoles.maintenance.metal.ironcore.dev
+  name: consoles.vendorconsole.metal.ironcore.dev
 spec:
-  group: maintenance.metal.ironcore.dev
+  group: vendorconsole.metal.ironcore.dev
   names:
     kind: Console
     listKind: ConsoleList
@@ -397,13 +397,13 @@ metadata:
   name: metal-maintenance-operator-console-admin-role
 rules:
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
   - '*'
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:
@@ -418,7 +418,7 @@ metadata:
   name: metal-maintenance-operator-console-editor-role
 rules:
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
@@ -430,7 +430,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:
@@ -445,7 +445,7 @@ metadata:
   name: metal-maintenance-operator-console-viewer-role
 rules:
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
@@ -453,7 +453,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:
@@ -474,7 +474,7 @@ rules:
   - patch
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
   verbs:
@@ -486,13 +486,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/finalizers
   verbs:
   - update
 - apiGroups:
-  - maintenance.metal.ironcore.dev
+  - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
   verbs:

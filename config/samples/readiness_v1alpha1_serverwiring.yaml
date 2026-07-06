@@ -1,0 +1,15 @@
+apiVersion: readiness.metal.ironcore.dev/v1alpha1
+kind: ServerWiring
+metadata:
+  name: serverwiring-sample
+  namespace: metal-servers
+spec:
+  serverRef:
+    name: server-sample
+  network:
+    interfaces:
+      - macAddress: "aa:bb:cc:dd:ee:ff"
+        carrierStatus: up
+        neighbors:
+          - systemName: spine-01
+            portID: Ethernet1/1

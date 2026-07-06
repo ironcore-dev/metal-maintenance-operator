@@ -29,8 +29,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller"
+	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
+	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
+	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
+	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -43,7 +45,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(vendorconsolev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
@@ -231,15 +233,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.ConsoleReconciler{
+	if err = (&vendorconsolectrl.ConsoleReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Console")
+		setupLog.Error(err, "Unable to create Console controller")
 		os.Exit(1)
 	}
 
-	if err = (&controller.ServerSanitizationReconciler{
+	if err = (&maintenancectrl.ServerSanitizationReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		SanitizationNamespace:   sanitizationNamespace,
@@ -249,7 +251,7 @@ func main() {
 			ReportBaseURL: reportBaseURL,
 		}).Ignition,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ServerSanitization")
+		setupLog.Error(err, "Unable to create ServerSanitization controller")
 		os.Exit(1)
 	}
 
@@ -258,18 +260,17 @@ func main() {
 		SanitizationNamespace: sanitizationNamespace,
 		Address:               sanitizedServerAddress,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create server", "server", "Sanitized")
+		setupLog.Error(err, "Unable to create Sanitized handler")
 		os.Exit(1)
 	}
-	// +kubebuilder:scaffold:builder
-
-	if err = (&controller.ServerWiringReconciler{
+	if err = (&readinessctrl.ServerWiringReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ServerWiring")
+		setupLog.Error(err, "Unable to create ServerWiring controller")
 		os.Exit(1)
 	}
+	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")

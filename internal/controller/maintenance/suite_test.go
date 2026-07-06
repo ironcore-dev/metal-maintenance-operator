@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package controller
+package maintenance
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/modutils"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -51,11 +50,11 @@ var _ = BeforeSuite(func() {
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			filepath.Join("..", "..", "config", "crd", "bases"),
+			filepath.Join("..", "..", "..", "config", "crd", "bases"),
 			filepath.Join(modutils.Dir("github.com/ironcore-dev/metal-operator", "config", "crd", "bases")),
 		},
 		ErrorIfCRDPathMissing: true,
-		BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s",
+		BinaryAssetsDirectory: filepath.Join("..", "..", "..", "bin", "k8s",
 			fmt.Sprintf("1.36.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
 	}
 
@@ -66,7 +65,6 @@ var _ = BeforeSuite(func() {
 	DeferCleanup(testEnv.Stop)
 
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
-	Expect(maintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(readinessv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
@@ -90,11 +88,6 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
-	Expect((&ConsoleReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
-	}).SetupWithManager(k8sManager)).To(Succeed())
-
 	Expect((&ServerSanitizationReconciler{
 		Client:                k8sManager.GetClient(),
 		Scheme:                k8sManager.GetScheme(),
@@ -109,12 +102,7 @@ var _ = BeforeSuite(func() {
 		},
 	}).SetupWithManager(k8sManager)).To(Succeed())
 
-	Expect((&ServerWiringReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
-	}).SetupWithManager(k8sManager)).To(Succeed())
-
-	mockServer := mock.NewMockServer(GinkgoLogr, ":8000")
+	mockServer := mock.NewMockServer(GinkgoLogr, ":8002")
 	mockCtx, cancel := context.WithCancel(context.Background())
 	DeferCleanup(cancel)
 
