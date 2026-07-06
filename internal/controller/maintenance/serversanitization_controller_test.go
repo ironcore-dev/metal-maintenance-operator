@@ -20,6 +20,8 @@ import (
 )
 
 var _ = Describe("Server Sanitization Controller", func() {
+	_ = SetupNamespace()
+
 	It("should sanitize a server after release", func(ctx SpecContext) {
 		By("Creating a BMCSecret")
 		bmcSecret := &metalv1alpha1.BMCSecret{
