@@ -263,8 +263,6 @@ func main() {
 		setupLog.Error(err, "Unable to create Sanitized handler")
 		os.Exit(1)
 	}
-	// +kubebuilder:scaffold:builder
-
 	if err = (&readinessctrl.ServerWiringReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -272,6 +270,7 @@ func main() {
 		setupLog.Error(err, "Unable to create ServerWiring controller")
 		os.Exit(1)
 	}
+	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")

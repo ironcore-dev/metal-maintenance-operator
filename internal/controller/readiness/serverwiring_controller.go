@@ -209,6 +209,7 @@ func (r *ServerWiringReconciler) enqueueFromServer(ctx context.Context, obj clie
 	if err := r.List(ctx, wiringList,
 		client.MatchingFields{serverRefNameField: obj.GetName()},
 	); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list ServerWirings for Server", "server", obj.GetName())
 		return nil
 	}
 	requests := make([]ctrl.Request, 0, len(wiringList.Items))
