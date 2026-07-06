@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
@@ -21,11 +22,19 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	// +kubebuilder:scaffold:imports
+)
+
+const (
+	pollingInterval      = 50 * time.Millisecond
+	eventuallyTimeout    = 5 * time.Second
+	consistentlyDuration = 1 * time.Second
 )
 
 var (
@@ -35,11 +44,17 @@ var (
 )
 
 func TestControllers(t *testing.T) {
+	SetDefaultConsistentlyPollingInterval(pollingInterval)
+	SetDefaultEventuallyPollingInterval(pollingInterval)
+	SetDefaultEventuallyTimeout(eventuallyTimeout)
+	SetDefaultConsistentlyDuration(consistentlyDuration)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Readiness Controller Suite")
 }
 
 var _ = BeforeSuite(func() {
+	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
@@ -65,37 +80,39 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	log.SetLogger(GinkgoLogr)
 	SetClient(k8sClient)
-
-	mgrCtx, cancel := context.WithCancel(context.Background())
-	DeferCleanup(cancel)
-
-	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:  scheme.Scheme,
-		Metrics: metricsserver.Options{BindAddress: "0"},
-	})
-	Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
-
-	Expect((&ServerWiringReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
-	}).SetupWithManager(k8sManager)).To(Succeed())
-
-	go func() {
-		defer GinkgoRecover()
-		Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start manager")
-	}()
 })
 
 func SetupNamespace() *corev1.Namespace {
 	ns := &corev1.Namespace{}
 	BeforeEach(func(ctx SpecContext) {
+		mgrCtx, cancel := context.WithCancel(context.Background())
+		DeferCleanup(cancel)
+
 		*ns = corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"},
 		}
 		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
 		DeferCleanup(k8sClient.Delete, ns)
+
+		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
+			Scheme: scheme.Scheme,
+			Controller: config.Controller{
+				SkipNameValidation: new(true),
+			},
+			Metrics: metricsserver.Options{BindAddress: "0"},
+		})
+		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
+
+		Expect((&ServerWiringReconciler{
+			Client: k8sManager.GetClient(),
+			Scheme: k8sManager.GetScheme(),
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		go func() {
+			defer GinkgoRecover()
+			Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start manager")
+		}()
 	})
 	return ns
 }
