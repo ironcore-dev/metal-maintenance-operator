@@ -24,7 +24,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/config"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -40,9 +40,10 @@ const (
 )
 
 var (
-	testEnv   *envtest.Environment
-	cfg       *rest.Config
-	k8sClient client.Client
+	testEnv    *envtest.Environment
+	cfg        *rest.Config
+	k8sClient  client.Client
+	mockServer *mock.MockServer
 )
 
 func TestControllers(t *testing.T) {
@@ -85,7 +86,7 @@ var _ = BeforeSuite(func() {
 	SetClient(k8sClient)
 
 	// Mock server binds a fixed port so it is started once for the whole suite.
-	mockServer := mock.NewMockServer(GinkgoLogr, ":8000")
+	mockServer = mock.NewMockServer(GinkgoLogr, ":8000")
 	mockCtx, cancel := context.WithCancel(context.Background())
 	DeferCleanup(cancel)
 
@@ -116,13 +117,7 @@ func SetupNamespace() *corev1.Namespace {
 		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
 		DeferCleanup(k8sClient.Delete, ns)
 
-		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme: scheme.Scheme,
-			Controller: config.Controller{
-				SkipNameValidation: new(true),
-			},
-			Metrics: metricsserver.Options{BindAddress: "0"},
-		})
+		k8sManager, err := newTestManager(cfg)
 		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
 		Expect((&ConsoleReconciler{
@@ -136,4 +131,14 @@ func SetupNamespace() *corev1.Namespace {
 		}()
 	})
 	return ns
+}
+
+func newTestManager(restCfg *rest.Config) (ctrl.Manager, error) {
+	return ctrl.NewManager(restCfg, ctrl.Options{
+		Scheme: scheme.Scheme,
+		Controller: ctrlconfig.Controller{
+			SkipNameValidation: new(true),
+		},
+		Metrics: metricsserver.Options{BindAddress: "0"},
+	})
 }

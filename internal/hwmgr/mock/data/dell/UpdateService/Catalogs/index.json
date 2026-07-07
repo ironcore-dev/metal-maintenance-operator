@@ -1,0 +1,31 @@
+{
+  "@odata.context": "/api/$metadata#Collection(UpdateService.Catalog)",
+  "@odata.count": 1,
+  "value": [
+    {
+      "Id": 10,
+      "Filename": "catalog.xml",
+      "SourcePath": "downloads.dell.com/catalog/catalog.xml",
+      "Status": "Completed",
+      "TaskId": 100,
+      "BaseLocation": "downloads.dell.com",
+      "ManifestIdentifier": "manifest-001",
+      "ReleaseIdentifier": "release-001",
+      "ManifestVersion": "1.0",
+      "CreatedDate": "2024-01-01T00:00:00Z",
+      "LastUpdated": "2024-01-01T00:00:00Z",
+      "BundlesCount": 5,
+      "Repository": {
+        "Id": 1,
+        "Name": "test-repo",
+        "Description": "Test Repository",
+        "Source": "downloads.dell.com",
+        "DomainName": "",
+        "Username": "",
+        "Password": "",
+        "CheckCertificate": false,
+        "RepositoryType": "DELL_ONLINE"
+      }
+    }
+  ]
+}

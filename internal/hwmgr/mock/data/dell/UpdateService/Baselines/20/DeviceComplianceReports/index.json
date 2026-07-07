@@ -1,0 +1,20 @@
+{
+  "@odata.count": 1,
+  "value": [
+    {
+      "Id": 1,
+      "DeviceId": 1,
+      "ServiceTag": "ABC1234",
+      "DeviceModel": "PowerEdge R740",
+      "DeviceTypeName": "SERVER",
+      "DeviceName": "Dell Device 1",
+      "FirmwareStatus": "OK",
+      "ComplianceStatus": "OK",
+      "DeviceTypeId": 1000,
+      "RebootRequired": false,
+      "DeviceFirmwareUpdateCapable": true,
+      "DeviceUserFirmwareUpdateCapable": true,
+      "ComponentComplianceReports": []
+    }
+  ]
+}

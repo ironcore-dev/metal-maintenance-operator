@@ -1,0 +1,36 @@
+{
+  "@odata.context": "/api/$metadata#Collection(UpdateService.DeviceComplianceReport)",
+  "@odata.count": 2,
+  "value": [
+    {
+      "Id": 1,
+      "DeviceId": 1,
+      "ServiceTag": "ABC1234",
+      "DeviceModel": "PowerEdge R740",
+      "DeviceTypeName": "SERVER",
+      "DeviceName": "Dell Device 1",
+      "FirmwareStatus": "NonCompliant",
+      "ComplianceStatus": "CRITICAL",
+      "DeviceTypeId": 1000,
+      "RebootRequired": true,
+      "DeviceFirmwareUpdateCapable": true,
+      "DeviceUserFirmwareUpdateCapable": true,
+      "ComponentComplianceReports": []
+    },
+    {
+      "Id": 2,
+      "DeviceId": 2,
+      "ServiceTag": "DEF5678",
+      "DeviceModel": "PowerEdge R740",
+      "DeviceTypeName": "SERVER",
+      "DeviceName": "Dell Device 2",
+      "FirmwareStatus": "OK",
+      "ComplianceStatus": "OK",
+      "DeviceTypeId": 1000,
+      "RebootRequired": false,
+      "DeviceFirmwareUpdateCapable": true,
+      "DeviceUserFirmwareUpdateCapable": true,
+      "ComponentComplianceReports": []
+    }
+  ]
+}

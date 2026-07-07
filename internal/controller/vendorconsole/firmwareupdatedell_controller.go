@@ -27,9 +27,7 @@ import (
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
-	vendorconsole "github.com/ironcore-dev/metal-maintenance-operator/vendor-console"
-	vendorClient "github.com/ironcore-dev/metal-maintenance-operator/vendor-console/client"
-	"github.com/ironcore-dev/metal-maintenance-operator/vendor-console/ome"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,24 +39,26 @@ const (
 	FirmwareUpgradeCompletedCondition = "UpdateCompleted"
 )
 
+var errNoSecretData = errors.New("no secret data found for accessing OME console")
+
 // FirmwareUpdateDELLReconciler reconciles a FirmwareUpdateDELL object
 type FirmwareUpdateDELLReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	ManagerNamespace string
-	OMEConfig        *vendorconsole.Config
+	OMEConfig        *hwmgr.MgrConfig
 	ResyncInterval   time.Duration
 }
 
 type catalogTaskStruct struct {
-	catalog             *ome.DellCatalogDetails
+	catalog             *hwmgr.DellCatalogDetails
 	baselineTask        *baselineTaskStruct
-	targets             []ome.DellTarget
+	targets             []hwmgr.DellTarget
 	jobCompletionStatus bool
 }
 
 type baselineTaskStruct struct {
-	baseline            *ome.DellBaseline
+	baseline            *hwmgr.DellBaseline
 	selectedServers     []metalv1alpha1.Server
 	jobCompletionStatus bool
 }
@@ -127,9 +127,15 @@ func (r *FirmwareUpdateDELLReconciler) delete(
 	log := ctrl.LoggerFrom(ctx)
 	consoleClient, err := r.getVendorConsoleClient(ctx, firmwareDell)
 	if err != nil {
-		return ctrl.Result{}, err
+		if errors.Is(err, errNoSecretData) || apierrors.IsNotFound(err) {
+			log.V(1).Info("Secret not found during delete, removing finalizer without closing OME session")
+		} else {
+			return ctrl.Result{}, err
+		}
 	}
-	defer consoleClient.CloseSession(ctx) // nolint:errcheck
+	if consoleClient != nil {
+		defer consoleClient.CloseSession(ctx) // nolint:errcheck
+	}
 	log.V(1).Info("Ensuring that the finalizer is removed")
 	if modified, err := clientutils.PatchEnsureNoFinalizer(ctx, r.Client, firmwareDell, DellFirmwareUpdateFinalizer); err != nil || modified {
 		return ctrl.Result{}, err
@@ -272,7 +278,7 @@ func (r *FirmwareUpdateDELLReconciler) handleInProgressState(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
 	servers []metalv1alpha1.Server,
-	consoleClient *ome.OME,
+	consoleClient *hwmgr.DellClient,
 ) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("Reconciling InProgress state")
@@ -341,11 +347,11 @@ func (r *FirmwareUpdateDELLReconciler) handleInProgressState(
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get job details for TaskId %d with error %w", jobId, err)
 	}
-	if slices.Contains(ome.JobStatusFailed, jobDetails.Status.JobStatusID) {
+	if slices.Contains(hwmgr.JobStatusFailed, jobDetails.Status.JobStatusID) {
 		log.V(1).Info("Firmware Update job has failed", "jobDetails", jobDetails, "Status", jobDetails.Status.JobStatus)
 		return ctrl.Result{}, r.updateStatus(ctx, firmwareDell, maintenancev1alpha1.FirmwareUpdateStateFailed, firmwareDell.Status.ServerCount, firmwareDell.Status.UpdateTask)
 	}
-	if ome.JobStatusSuccess != jobDetails.Status.JobStatusID {
+	if hwmgr.JobStatusSuccess != jobDetails.Status.JobStatusID {
 		log.V(1).Info("Firmware Update job not yet completed, will check again later", "jobDetails", jobDetails)
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
@@ -392,7 +398,7 @@ func (r *FirmwareUpdateDELLReconciler) handleCompletedState(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
 	servers []metalv1alpha1.Server,
-	consoleClient *ome.OME,
+	consoleClient *hwmgr.DellClient,
 ) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("Reconciling Completed state")
@@ -455,7 +461,7 @@ func (r *FirmwareUpdateDELLReconciler) handlePreUpdateTasks(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
 	servers []metalv1alpha1.Server,
-	consoleClient *ome.OME,
+	consoleClient *hwmgr.DellClient,
 ) (*catalogTaskStruct, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("Handling pre-update tasks: catalog and baseline creation/checks")
@@ -529,7 +535,7 @@ func (r *FirmwareUpdateDELLReconciler) verifyServersSelected(
 	servers := make([]metalv1alpha1.Server, 0)
 	var nonDellServer []string
 	for _, server := range serverList.Items {
-		if server.Status.Manufacturer != string(vendorconsole.ManufacturerDell) {
+		if server.Status.Manufacturer != string(hwmgr.ManufacturerDell) {
 			log.V(1).Info("Skipping server as it is not Dell", "Server", server.Name, "Manufacturer", server.Status.Manufacturer)
 			nonDellServer = append(nonDellServer, server.Name)
 			continue
@@ -703,7 +709,7 @@ func (r *FirmwareUpdateDELLReconciler) getMaintenanceState(
 
 func (r *FirmwareUpdateDELLReconciler) checkJobCompletion(
 	ctx context.Context,
-	console *ome.OME,
+	console *hwmgr.DellClient,
 	TaskId int,
 ) (bool, error) {
 	jobDetails, err := console.GetJobDetails(ctx, TaskId)
@@ -711,7 +717,7 @@ func (r *FirmwareUpdateDELLReconciler) checkJobCompletion(
 		return false, fmt.Errorf("failed to get job details for TaskId %d with error %w", TaskId, err)
 	}
 
-	if jobDetails.Status.JobStatusID == ome.JobStatusSuccess {
+	if jobDetails.Status.JobStatusID == hwmgr.JobStatusSuccess {
 		return true, nil
 	}
 
@@ -832,9 +838,9 @@ func (r *FirmwareUpdateDELLReconciler) patchMaintenanceRequestRef(
 func existingBaseline(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
-	console *ome.OME,
-	catalog *ome.DellCatalogDetails,
-	baseline ome.DellBaseline,
+	console *hwmgr.DellClient,
+	catalog *hwmgr.DellCatalogDetails,
+	baseline hwmgr.DellBaseline,
 	servers []metalv1alpha1.Server,
 ) (*baselineTaskStruct, error) {
 	log := ctrl.LoggerFrom(ctx)
@@ -848,7 +854,7 @@ func existingBaseline(
 		log.Error(err, "failed to get devices from OME for servers selected")
 		return result, err
 	}
-	equal := slices.EqualFunc(devices, baseline.Targets, func(a ome.DellDeviceData, b ome.DellTarget) bool {
+	equal := slices.EqualFunc(devices, baseline.Targets, func(a hwmgr.DellDeviceData, b hwmgr.DellTarget) bool {
 		return a.Id == b.Id
 	})
 
@@ -871,7 +877,7 @@ func existingBaseline(
 		}
 
 		// map of device ID to device obj (from servers provided in spec) for quick lookup
-		devicesIdMap := make(map[int]ome.DellDeviceData, len(baseline.Targets))
+		devicesIdMap := make(map[int]hwmgr.DellDeviceData, len(baseline.Targets))
 		for _, device := range devices {
 			devicesIdMap[device.Id] = device
 		}
@@ -925,13 +931,13 @@ func existingBaseline(
 func createBaselinePayload(
 	log logr.Logger,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
-	catalog *ome.DellCatalogDetails,
-	devices []ome.DellDeviceData,
-) *ome.DellBaseline {
+	catalog *hwmgr.DellCatalogDetails,
+	devices []hwmgr.DellDeviceData,
+) *hwmgr.DellBaseline {
 	if len(devices) == 0 {
 		return nil
 	}
-	payload := &ome.DellBaseline{
+	payload := &hwmgr.DellBaseline{
 		Name:             firmwareDell.Spec.BaselineConfig.Name,
 		Description:      firmwareDell.Spec.BaselineConfig.Description,
 		Is64Bit:          firmwareDell.Spec.BaselineConfig.BitType == maintenancev1alpha1.BitType64,
@@ -942,11 +948,11 @@ func createBaselinePayload(
 	}
 	for _, device := range devices {
 		log.V(1).Info("Creating baseline payload", "device", device, "payload", payload)
-		payload.Targets = append(payload.Targets, ome.DellTarget{
+		payload.Targets = append(payload.Targets, hwmgr.DellTarget{
 			Id: device.Id,
-			Type: &ome.DellTargetType{
+			Type: &hwmgr.DellTargetType{
 				Id:   device.Type,
-				Name: ome.DeviceTypeMap[device.Type],
+				Name: hwmgr.DeviceTypeMap[device.Type],
 			},
 			TargetType: nil,
 		})
@@ -958,9 +964,9 @@ func createBaselinePayload(
 // function to get devices (OME device list) from Server Resource
 func getDevicesFromServers(
 	ctx context.Context,
-	console *ome.OME,
+	console *hwmgr.DellClient,
 	servers []metalv1alpha1.Server,
-) ([]ome.DellDeviceData, error) {
+) ([]hwmgr.DellDeviceData, error) {
 	serverSKU := make([]string, 0, len(servers))
 	for _, server := range servers {
 		serverSKU = append(serverSKU, server.Status.SKU)
@@ -978,8 +984,8 @@ func getDevicesFromServers(
 func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
-	console *ome.OME,
-	catalog *ome.DellCatalogDetails,
+	console *hwmgr.DellClient,
+	catalog *hwmgr.DellCatalogDetails,
 	servers []metalv1alpha1.Server,
 ) (*baselineTaskStruct, error) {
 	log := ctrl.LoggerFrom(ctx)
@@ -990,7 +996,7 @@ func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 		log.Error(err, "failed to get baselines from OME")
 		return result, err
 	}
-	existingBaselineOme := &ome.DellBaseline{}
+	existingBaselineOme := &hwmgr.DellBaseline{}
 	// check for existing baseline to reuse
 	for _, baseline := range baselineList {
 		if firmwareDell.Status.Baseline != nil && baseline.Id == firmwareDell.Status.Baseline.Id {
@@ -1034,8 +1040,8 @@ func (r *FirmwareUpdateDELLReconciler) handleBaselineOperations(
 func (r *FirmwareUpdateDELLReconciler) createOrGetCatalog(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
-	console *ome.OME,
-) (*ome.DellCatalogDetails, error) {
+	console *hwmgr.DellClient,
+) (*hwmgr.DellCatalogDetails, error) {
 	log := ctrl.LoggerFrom(ctx)
 	catalogList, err := console.GetAllCatalogs(ctx)
 	if err != nil {
@@ -1044,7 +1050,7 @@ func (r *FirmwareUpdateDELLReconciler) createOrGetCatalog(
 	}
 
 	log.V(1).Info("Checking for existing catalogs on OME", "TotalCatalogs", catalogList)
-	existingCatalog := &ome.DellCatalogDetails{}
+	existingCatalog := &hwmgr.DellCatalogDetails{}
 	for _, catalog := range catalogList {
 		if firmwareDell.Status.Catalog != nil && catalog.Id == firmwareDell.Status.Catalog.Id {
 			// previously created catalog, return it
@@ -1103,10 +1109,10 @@ func (r *FirmwareUpdateDELLReconciler) createOrGetCatalog(
 		return nil, fmt.Errorf("createCatalog Spec Not Provided to create catalog on OME")
 	}
 
-	payload := &ome.DellCatalogDetails{
+	payload := &hwmgr.DellCatalogDetails{
 		Filename:   firmwareDell.Spec.CreateCatalog.FileName,
 		SourcePath: firmwareDell.Spec.CreateCatalog.SourcePath,
-		Repository: ome.DellCatalogRepository{
+		Repository: hwmgr.DellCatalogRepository{
 			Name:             firmwareDell.Spec.CreateCatalog.Repository.Name,
 			Description:      firmwareDell.Spec.CreateCatalog.Repository.Description,
 			Source:           firmwareDell.Spec.CreateCatalog.Repository.Source,
@@ -1128,20 +1134,20 @@ func (r *FirmwareUpdateDELLReconciler) createOrGetCatalog(
 
 func (r *FirmwareUpdateDELLReconciler) checkComplianceReport(
 	ctx context.Context,
-	console *ome.OME,
-	baseline *ome.DellBaseline,
-) ([]ome.DellTarget, error) {
+	console *hwmgr.DellClient,
+	baseline *hwmgr.DellBaseline,
+) ([]hwmgr.DellTarget, error) {
 	log := ctrl.LoggerFrom(ctx)
 	complianceReports, err := console.GetComplianceReportForBaseline(ctx, baseline.Id)
 	if err != nil {
 		log.Error(err, "failed to get compliance reports from OME")
 		return nil, err
 	}
-	devicesIdBaselineMap := make(map[int]*ome.DellTargetType, len(baseline.Targets))
+	devicesIdBaselineMap := make(map[int]*hwmgr.DellTargetType, len(baseline.Targets))
 	for _, target := range baseline.Targets {
 		devicesIdBaselineMap[target.Id] = target.Type
 	}
-	dellTarget := make([]ome.DellTarget, 0)
+	dellTarget := make([]hwmgr.DellTarget, 0)
 	for _, complianceReport := range complianceReports {
 		currentSources := ""
 		componentNames := []string{}
@@ -1161,9 +1167,9 @@ func (r *FirmwareUpdateDELLReconciler) checkComplianceReport(
 			continue
 		}
 		log.V(1).Info("Component needs update", "Components", componentNames, "DeviceId", complianceReport.DeviceId)
-		currentTarget := ome.DellTarget{
+		currentTarget := hwmgr.DellTarget{
 			Id: complianceReport.DeviceId,
-			TargetType: &ome.DellTargetType{
+			TargetType: &hwmgr.DellTargetType{
 				Id:   devicesIdBaselineMap[complianceReport.DeviceId].Id,
 				Name: devicesIdBaselineMap[complianceReport.DeviceId].Name,
 			},
@@ -1178,28 +1184,28 @@ func (r *FirmwareUpdateDELLReconciler) checkComplianceReport(
 func (r *FirmwareUpdateDELLReconciler) performFirmwareUpdate(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
-	console *ome.OME,
-	baseline *ome.DellBaseline,
-	catalog *ome.DellCatalogDetails,
-	target []ome.DellTarget,
-) (*ome.DellJob, error) {
+	console *hwmgr.DellClient,
+	baseline *hwmgr.DellBaseline,
+	catalog *hwmgr.DellCatalogDetails,
+	target []hwmgr.DellTarget,
+) (*hwmgr.DellJob, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if len(target) == 0 {
 		log.V(1).Info("No target devices need firmware update")
 		return nil, nil
 	}
 
-	payload := &ome.DellFirmwareUpdatePayload{
+	payload := &hwmgr.DellFirmwareUpdatePayload{
 		JobName:        firmwareDell.Name + "-firmware-update",
 		JobDescription: "Firmware update job created by FirmwareUpdateDELL " + firmwareDell.Name,
 		Targets:        target,
 		Schedule:       "StartNow",
 		State:          "Enabled",
-		JobType: ome.DellJobType{
-			JobTypeID: ome.JobTypeMap[firmwareDell.Spec.FirmwareUpgradeConfig.JobTypeName],
+		JobType: hwmgr.DellJobType{
+			JobTypeID: hwmgr.JobTypeMap[firmwareDell.Spec.FirmwareUpgradeConfig.JobTypeName],
 			JobType:   firmwareDell.Spec.FirmwareUpgradeConfig.JobTypeName,
 		},
-		Params: []ome.DellParams{
+		Params: []hwmgr.DellParams{
 			{
 				Key:   "rebootType",
 				Value: "3",
@@ -1355,14 +1361,14 @@ func (r *FirmwareUpdateDELLReconciler) enqueueByServerRefs(
 func (r *FirmwareUpdateDELLReconciler) getVendorConsoleClient(
 	ctx context.Context,
 	firmwareDell *maintenancev1alpha1.FirmwareUpdateDELL,
-) (*ome.OME, error) {
+) (*hwmgr.DellClient, error) {
 	log := ctrl.LoggerFrom(ctx)
 	omeURL, err := url.Parse(firmwareDell.Spec.OMEURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse OME URL: %v error %w", firmwareDell.Spec.OMEURL, err)
 	}
 	// Create session with Dell OME
-	config := &vendorClient.Config{
+	config := &hwmgr.MgrConfig{
 		URL:                 omeURL,
 		InsecureSkipVerify:  r.OMEConfig.InsecureSkipVerify,
 		TLSHandshakeTimeout: r.OMEConfig.TLSHandshakeTimeout,
@@ -1375,17 +1381,17 @@ func (r *FirmwareUpdateDELLReconciler) getVendorConsoleClient(
 	}
 	if len(omeSecret) == 0 {
 		log.V(1).Info("No secret found for accessing OME console", "Missing SecretRef", firmwareDell.Spec.SecretRef.Name)
-		return nil, errors.New("no secret data found for accessing OME console")
+		return nil, errNoSecretData
 	}
-	authTkn := &vendorClient.AuthToken{
+	authTkn := &hwmgr.AuthToken{
 		Username:  omeSecret[maintenancev1alpha1.SecretUsernameKeyName],
 		Password:  omeSecret[maintenancev1alpha1.SecretPasswordKeyName],
 		Token:     omeSecret[maintenancev1alpha1.SecretTokenKeyName],
 		Session:   omeSecret[maintenancev1alpha1.SecretSessionKeyName],
 		SessionId: omeSecret[maintenancev1alpha1.SecretSessionIDKeyName],
-		AuthType:  vendorClient.DellToken,
+		AuthType:  hwmgr.DellToken,
 	}
-	consoleClient, err := vendorconsole.GetDellConsole(ctx, config, authTkn)
+	consoleClient, err := hwmgr.GetDellConsole(ctx, config, authTkn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to DELL OME at: %v, error: %w", firmwareDell.Spec.OMEURL, err)
 	}

@@ -404,7 +404,8 @@ spec:
         x-kubernetes-validations:
         - message: CreateCatalog is immutable when status is InProgress
           rule: '!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state
-            != ''InProgress'' || self.spec.createCatalog == oldSelf.spec.createCatalog'
+            != ''InProgress'' || (has(self.spec.createCatalog) == has(oldSelf.spec.createCatalog))
+            && (!has(self.spec.createCatalog) || self.spec.createCatalog == oldSelf.spec.createCatalog)'
     served: true
     storage: true
     subresources:

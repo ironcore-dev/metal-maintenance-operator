@@ -290,7 +290,7 @@ type DellBaseline struct {
 // +kubebuilder:printcolumn:name="serverCount",type=integer,JSONPath=`.status.serverCount`
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state != 'InProgress' || self.spec.createCatalog == oldSelf.spec.createCatalog", message="CreateCatalog is immutable when status is InProgress"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.state) || oldSelf.status.state != 'InProgress' || (has(self.spec.createCatalog) == has(oldSelf.spec.createCatalog)) && (!has(self.spec.createCatalog) || self.spec.createCatalog == oldSelf.spec.createCatalog)", message="CreateCatalog is immutable when status is InProgress"
 
 // FirmwareUpdateDELL is the Schema for the FirmwareUpdateDELLs API.
 type FirmwareUpdateDELL struct {

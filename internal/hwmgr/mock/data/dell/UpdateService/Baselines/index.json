@@ -1,0 +1,19 @@
+{
+  "@odata.context": "/api/$metadata#Collection(UpdateService.Baseline)",
+  "@odata.count": 1,
+  "value": [
+    {
+      "Id": 20,
+      "Name": "test-baseline",
+      "Description": "Test Baseline",
+      "CatalogId": 10,
+      "RepositoryId": 1,
+      "TaskId": 100,
+      "DowngradeEnabled": true,
+      "Is64Bit": true,
+      "Targets": [
+        {"Id": 1, "Type": {"Id": 1000, "Name": "SERVER"}}
+      ]
+    }
+  ]
+}

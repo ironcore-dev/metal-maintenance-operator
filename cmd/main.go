@@ -34,7 +34,7 @@ import (
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
-	managerconsole "github.com/ironcore-dev/metal-maintenance-operator/vendor-console"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -280,7 +280,7 @@ func main() {
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		ManagerNamespace: vcManagedNamespace,
-		OMEConfig: &managerconsole.Config{
+		OMEConfig: &hwmgr.MgrConfig{
 			InsecureSkipVerify: true,
 			ReuseConnections:   false,
 		},

@@ -1,0 +1,14 @@
+{
+  "@odata.context": "/api/$metadata#Collection(JobService.JobStatus)",
+  "@odata.count": 8,
+  "value": [
+    {"Id": 2020, "Name": "Scheduled"},
+    {"Id": 2030, "Name": "Queued"},
+    {"Id": 2040, "Name": "Starting"},
+    {"Id": 2050, "Name": "Running"},
+    {"Id": 2060, "Name": "Completed"},
+    {"Id": 2070, "Name": "Failed"},
+    {"Id": 2090, "Name": "Warning"},
+    {"Id": 2100, "Name": "Aborted"}
+  ]
+}
