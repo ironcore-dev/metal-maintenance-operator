@@ -29,3 +29,6 @@ go.work
 
 # Helm chart dependencies
 dist/chart/charts/
+
+# Local telemetry collector binary for smoke tests; not part of the source tree.
+/telemetry-collector

@@ -66,9 +66,27 @@ spec:
           env:
             - name: FORCE_ENV_IN_CHART
               value: "true"
+            # POD_NAMESPACE is the fallback that --telemetry-config-namespace
+            # and --leader-election-namespace resolve to when their flags
+            # are unset. Without this fieldRef the telemetry pipeline
+            # would fail to locate its ConfigMap when in-cluster and the
+            # operator would exit 1 at startup (see cmd/main.go).
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           image: controller:latest
           name: manager
-          ports: []
+          ports:
+            # Redfish event receiver. Only reachable when the operator runs
+            # with --enable-telemetry; otherwise the listener never binds.
+            # Stays exposed unconditionally so a Service that targets it
+            # works the moment telemetry is enabled, without an extra
+            # rollout. The matching Service lives at
+            # config/default/telemetry_events_service.yaml.
+            - name: events
+              containerPort: 9092
+              protocol: TCP
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false

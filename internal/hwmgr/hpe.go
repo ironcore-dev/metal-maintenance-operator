@@ -11,6 +11,8 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
+const jobStatusCompleted = "completed"
+
 type HPEClient struct {
 	client *ov.OVClient
 }
@@ -106,7 +108,7 @@ func (c *HPEClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (str
 func (c *HPEClient) GetJobStatus(jobID string) (*JobInfo, error) {
 	return &JobInfo{
 		JobID:    "",
-		Status:   "completed",
+		Status:   jobStatusCompleted,
 		Progress: 100,
 		Message:  "Synchronous operation completed",
 	}, nil
