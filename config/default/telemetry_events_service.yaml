@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Telemetry event receiver Service.
+#
+# Routes Redfish event POSTs from BMCs to the operator Pod's :9092
+# listener. Stays installed unconditionally so subscriptions created when
+# --enable-telemetry is on can route the moment they're created — no
+# extra rollout to expose the port later.
+#
+# When --enable-telemetry is off, the manager never binds :9092 and any
+# stray POSTs hit a closed port. That's a deliberate trade: the surface
+# of one always-installed Service is cheaper than coupling Service
+# lifecycle to a CLI flag.
+#
+# Production tip: pass this Service's rendered DNS name as
+# --telemetry-receiver-url. The full hostname is
+#   <namePrefix><Service.metadata.name>.<namespace>.svc:<port>
+# where namePrefix and namespace come from config/default/kustomization.yaml.
+# With the default kustomization values (namePrefix
+# "metal-maintenance-operator-", namespace
+# "metal-maintenance-operator-system") this Service resolves to:
+#   http://metal-maintenance-operator-controller-manager-telemetry-events.metal-maintenance-operator-system.svc:9092
+# Derive the URL from your own kustomization values rather than copying
+# the example verbatim — a customized namePrefix/namespace will move
+# the Service.
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: controller-manager-telemetry-events
+  namespace: system
+spec:
+  ports:
+    - name: events
+      port: 9092
+      protocol: TCP
+      targetPort: events
+  selector:
+    control-plane: controller-manager
+    app.kubernetes.io/name: metal-maintenance-operator
