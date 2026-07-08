@@ -243,9 +243,7 @@ func (s *MockServer) handleConsolePUT(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	if cached, ok := s.overrides[urlPath]; ok {
 		if m, ok := cached.(map[string]any); ok {
-			for k, v := range m {
-				existing[k] = v
-			}
+			maps.Copy(existing, m)
 		}
 	}
 	s.mu.RUnlock()

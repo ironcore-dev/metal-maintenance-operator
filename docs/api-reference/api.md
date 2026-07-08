@@ -143,7 +143,94 @@ Package v1alpha1 contains API Schema definitions for the vendorconsole.metal.iro
 
 ### Resource Types
 - [Console](#console)
+- [FirmwareUpdateDELL](#firmwareupdatedell)
 
+
+
+#### BaselineBitType
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [BaselinesConfig](#baselinesconfig)
+
+| Field | Description |
+| --- | --- |
+| `64BitType` | BitType64 specifies baseline type is 64Bit<br /> |
+
+
+#### BaselineDowngradeType
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [BaselinesConfig](#baselinesconfig)
+
+| Field | Description |
+| --- | --- |
+| `DowngradableUpdate` | DowngradableUpdate specifies that downgrade is allowed for baseline update<br /> |
+| `NotDowngradableUpdate` | NotDowngradableUpdate specifies that downgrade is not allowed for baseline update<br /> |
+
+
+#### BaselinesConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLSpec](#firmwareupdatedellspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the baseline to be used for the firmware update. |  | Required: \{\} <br /> |
+| `description` _string_ | Description is a brief description of the baseline. |  |  |
+| `downgradeEnabled` _[BaselineDowngradeType](#baselinedowngradetype)_ | DowngradeEnabled specifies whether downgrade is enabled for the baseline update. | DowngradableUpdate |  |
+| `bitType` _[BaselineBitType](#baselinebittype)_ | Is64Bit specifies whether the baseline update is for 64-bit systems. | BitType64 |  |
+
+
+#### CheckCertificateCatalog
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [Repository](#repository)
+
+| Field | Description |
+| --- | --- |
+| `CheckCertificateHTTPS` | CheckCertificate specifies that certificate check must be done for HTTPS<br /> |
+| `NoCheckCertificateHTTPS` | NoCheckCertificate specifies that certificate check must not be done for HTTPS<br /> |
+
+
+#### ComplianceFirmwareUpdate
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpgradeConfig](#firmwareupgradeconfig)
+
+| Field | Description |
+| --- | --- |
+| `ComplianceUpdate` | ComplianceUpdate specifies that firmware update needs to match compliance<br /> |
+| `NoComplianceUpdate` | NoComplianceUpdate specifies that firmware update needs not match compliance<br /> |
 
 
 #### Console
@@ -201,6 +288,181 @@ _Appears in:_
 | `unmanagedServers` _integer_ | UnmanagedServers number of unmanaged servers. |  |  |
 | `totalServers` _integer_ | TotalServers total number of servers. |  |  |
 | `pendingOperations` _[PendingOperation](#pendingoperation) array_ | PendingOperations tracks in-flight vendor operations. |  |  |
+
+
+#### CreateCatalog
+
+
+
+note: Uniqueness constraints:
+CreateCatalog.FileName
+CreateCatalog.CatalogPath
+CreateCatalog.Repository.Name
+If all these are same as an existing catalog,
+then it is considered duplicate and will not be created again.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLSpec](#firmwareupdatedellspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `fileName` _string_ | FileName is the name of the catalog file to be created. |  | MaxLength: 253 <br />MinLength: 1 <br />Required: \{\} <br /> |
+| `sourcePath` _string_ | SourcePath is the path to the catalog file on the OME server.<br />This is the path where the catalog will be created. with IP or FQDN of the repo server. |  | MaxLength: 1024 <br />MinLength: 1 <br />Type: string <br /> |
+| `repository` _[Repository](#repository)_ | Repository contains the details of the repository from which the catalog will be created. |  | Required: \{\} <br /> |
+
+
+#### DellBaseline
+
+
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLStatus](#firmwareupdatedellstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _integer_ | Id is the unique identifier for the baseline created in OME. |  |  |
+
+
+#### DellCatalog
+
+
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLStatus](#firmwareupdatedellstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _integer_ | Id is the unique identifier for the catalog created in OME. |  |  |
+
+
+#### DellJob
+
+
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLStatus](#firmwareupdatedellstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `jobId` _integer_ | Id is the unique identifier for the job created in OME. |  |  |
+| `name` _string_ | Name is the name of the job. |  |  |
+
+
+#### FirmwareUpdateDELL
+
+
+
+FirmwareUpdateDELL is the Schema for the FirmwareUpdateDELLs API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `vendorconsole.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `FirmwareUpdateDELL` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[FirmwareUpdateDELLSpec](#firmwareupdatedellspec)_ |  |  |  |
+| `status` _[FirmwareUpdateDELLStatus](#firmwareupdatedellstatus)_ |  |  |  |
+
+
+#### FirmwareUpdateDELLSpec
+
+
+
+FirmwareUpdateDELLSpec defines the desired state of FirmwareUpdateDELL.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELL](#firmwareupdatedell)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `omeURL` _string_ | OMEURL is the URL of the Dell OpenManage Enterprise (OME) instance. |  | Pattern: `^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$` <br /> |
+| `secretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | secretRef is a reference to the Kubernetes Secret (of type SecretTypeBasicAuth) object that contains the credentials<br />to access the Dell OpenManage Enterprise (OME). This secret includes sensitive information such as usernames and passwords. |  |  |
+| `createCatalog` _[CreateCatalog](#createcatalog)_ | CreateCatalog is the fields required to create catalog through the Dell OpenManage Enterprise (OME). |  |  |
+| `catalogName` _string_ | CatalogRepositoryName is the name of the catalog to be used for the firmware update.<br />The operator will use the catalog name and ignore CreateCatalog field. |  |  |
+| `firmwareUpgradeConfig` _[FirmwareUpgradeConfig](#firmwareupgradeconfig)_ | FirmwareUpgradeConfig contains configuration options for the firmware upgrade process. |  |  |
+| `baselineConfig` _[BaselinesConfig](#baselinesconfig)_ | BaselineConfig contains configuration options for the baseline to be used for the firmware update. |  |  |
+| `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+| `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to a ServerMaintenance objects that Controller has requested for the each of the related server. |  |  |
+
+
+#### FirmwareUpdateDELLStatus
+
+
+
+FirmwareUpdateDELLStatus defines the observed state of FirmwareUpdateDELL.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELL](#firmwareupdatedell)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[FirmwareUpdateState](#firmwareupdatestate)_ | State represents the current state of the bios configuration task. |  |  |
+| `updateTask` _[DellJob](#delljob)_ | UpdateTask contains the state of the Update Task created by the OME for the firmware upgrade. |  |  |
+| `catalog` _[DellCatalog](#dellcatalog)_ | Catalog contains the details of the Catalog created by the OME for the firmware upgrade. |  |  |
+| `baseline` _[DellBaseline](#dellbaseline)_ | Baseline contains the details of the Baseline created by the OME for the firmware upgrade. |  |  |
+| `serverCount` _integer_ | ServerCount is the total number of servers selected by the ServerSelector. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest available observations of the Bios version upgrade state. |  |  |
+
+
+#### FirmwareUpdateState
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLStatus](#firmwareupdatedellstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | FirmwareUpdateStatePending specifies that the BMC upgrade maintenance is waiting<br /> |
+| `InProgress` | FirmwareUpdateStateInProgress specifies that upgrading BMC is in progress.<br /> |
+| `Completed` | FirmwareUpdateStateCompleted specifies that the BMC upgrade maintenance has been completed.<br /> |
+| `Failed` | FirmwareUpdateStateFailed specifies that the BMC upgrade maintenance has failed.<br /> |
+
+
+#### FirmwareUpgradeConfig
+
+
+
+FirmwareUpgradeConfig contains configuration options for the firmware upgrade process.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDELLSpec](#firmwareupdatedellspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `signVerify` _[SignVerifyFirmwareUpdate](#signverifyfirmwareupdate)_ | SignVerify specifies whether to verify the signature of the firmware before upgrade. | SignVerify |  |
+| `stagingValue` _[StageFirmwareUpdate](#stagefirmwareupdate)_ | StagingValue is the value used for staging the firmware before upgrade. | NoStagingFirmwareUpdate |  |
+| `complianceUpdate` _[ComplianceFirmwareUpdate](#compliancefirmwareupdate)_ | ComplianceUpdate specifies whether to perform a compliance update during the firmware upgrade. | ComplianceUpdate |  |
+| `operationName` _string_ | OperationName specifies the name of the operation to be performed for the firmware update.<br />refer to Dell OME API documentation for possible values. | INSTALL_FIRMWARE | MinLength: 1 <br /> |
+| `jobTypeName` _string_ | JobTypeName specifies the type of job to be created for the firmware update.<br />refer to Dell OME API documentation for possible values. | Update_Task |  |
 
 
 #### JobStatus
@@ -263,5 +525,62 @@ _Appears in:_
 | `lastChecked` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastChecked is when the job status was last polled. |  |  |
 | `retryCount` _integer_ | RetryCount tracks how many times the operation has been retried. |  |  |
 | `message` _string_ | Message provides human-readable status information. |  |  |
+
+
+#### Repository
+
+
+
+
+
+
+
+_Appears in:_
+- [CreateCatalog](#createcatalog)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the repository. |  | MaxLength: 253 <br />MinLength: 1 <br />Type: string <br /> |
+| `description` _string_ | Description is a brief description of the repository. |  | MaxLength: 1024 <br /> |
+| `repositoryType` _string_ | RepositoryType is the type of the repository (e.g., "CIFS", "NFS", "HTTPS", "DELL_ONLINE"). |  | Enum: [CIFS NFS HTTPS HTTP DELL_ONLINE] <br />MinLength: 1 <br />Required: \{\} <br /> |
+| `source` _string_ | Source is the source URL/IP of the repository. |  | MaxLength: 253 <br />MinLength: 1 <br />Required: \{\} <br />Type: string <br /> |
+| `domainName` _string_ | DomainName is the domain name for authentication, if required. |  |  |
+| `username` _string_ | Username is the username for authentication to the repository. |  |  |
+| `password` _string_ | Password is the password for authentication to the repository. |  |  |
+| `checkCertificate` _[CheckCertificateCatalog](#checkcertificatecatalog)_ | CheckCertificate indicates whether to check the SSL certificate of the repository. | NoCheckCertificateHTTPS |  |
+
+
+#### SignVerifyFirmwareUpdate
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpgradeConfig](#firmwareupgradeconfig)
+
+| Field | Description |
+| --- | --- |
+| `SignVerify` | SignVerify specifies that no staging will be performed.<br />DUP signature will be verified<br /> |
+| `SkipSignVerify` | SkipSignVerify specifies that the Firmware will be staged.<br />DUP signature will be verified skipped.<br /> |
+
+
+#### StageFirmwareUpdate
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [FirmwareUpgradeConfig](#firmwareupgradeconfig)
+
+| Field | Description |
+| --- | --- |
+| `StagedFirmwareUpdate` | StagingFirmwareStaged specifies that no staging will be performed.<br />Starts the Firmware update on Reboot.<br /> |
+| `NoStagingFirmwareUpdate` | NoStagingFirmwareUpdate specifies that the Firmware will be staged.<br />Starts the Firmware update immediately.<br /> |
 
 

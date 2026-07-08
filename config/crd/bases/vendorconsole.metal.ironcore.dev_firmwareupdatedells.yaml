@@ -296,9 +296,9 @@ spec:
             - serverSelector
             type: object
             x-kubernetes-validations:
-            - message: Either createCatalog or catalogName must be provided, but not
-                both.
-              rule: has(self.createCatalog) || has(self.catalogName)
+            - message: Exactly one of createCatalog or catalogName must be provided,
+                not both.
+              rule: has(self.createCatalog) != has(self.catalogName)
           status:
             description: FirmwareUpdateDELLStatus defines the observed state of FirmwareUpdateDELL.
             properties:

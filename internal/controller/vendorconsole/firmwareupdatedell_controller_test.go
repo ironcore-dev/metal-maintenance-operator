@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
+	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -61,7 +61,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 		ctx := context.Background()
 
 		var omeSecret *corev1.Secret
-		var fw *maintenancev1alpha1.FirmwareUpdateDELL
+		var fw *vendorconsolev1alpha1.FirmwareUpdateDELL
 		var dellServer *metalv1alpha1.Server
 
 		BeforeEach(func() {
@@ -72,9 +72,9 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					maintenancev1alpha1.SecretUsernameKeyName: []byte("admin"),
-					maintenancev1alpha1.SecretPasswordKeyName: []byte("password"),
-					maintenancev1alpha1.SecretTokenKeyName:    []byte(""),
+					vendorconsolev1alpha1.SecretUsernameKeyName: []byte("admin"),
+					vendorconsolev1alpha1.SecretPasswordKeyName: []byte("password"),
+					vendorconsolev1alpha1.SecretTokenKeyName:    []byte(""),
 				},
 			}
 			Expect(k8sClient.Create(ctx, omeSecret)).To(Succeed())
@@ -122,8 +122,8 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			// in rapid succession. Assert it reaches at least InProgress (or Completed).
 			Eventually(Object(fw), "15s").Should(
 				HaveField("Status.State", Or(
-					Equal(maintenancev1alpha1.FirmwareUpdateStateInProgress),
-					Equal(maintenancev1alpha1.FirmwareUpdateStateCompleted),
+					Equal(vendorconsolev1alpha1.FirmwareUpdateStateInProgress),
+					Equal(vendorconsolev1alpha1.FirmwareUpdateStateCompleted),
 				)),
 			)
 		})
@@ -133,7 +133,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			Expect(k8sClient.Create(ctx, fw)).To(Succeed())
 
 			Consistently(Object(fw), "2s").Should(
-				HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateState("")),
+				HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateState("")),
 			)
 		})
 
@@ -170,7 +170,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			Expect(k8sClient.Create(ctx, fw)).To(Succeed())
 
 			Eventually(Object(fw), "15s").Should(
-				HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateStateFailed),
+				HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateStateFailed),
 			)
 		})
 
@@ -179,7 +179,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			Expect(k8sClient.Create(ctx, fw)).To(Succeed())
 
 			Consistently(Object(fw), "2s").Should(
-				HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateState("")),
+				HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateState("")),
 			)
 		})
 
@@ -190,7 +190,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			// The baseline/20 compliance report mock already returns all devices compliant,
 			// so no firmware update job is needed — the controller should go straight to Completed.
 			Eventually(Object(fw), "30s").Should(
-				HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateStateCompleted),
+				HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateStateCompleted),
 			)
 		})
 
@@ -199,7 +199,7 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			Expect(k8sClient.Create(ctx, fw)).To(Succeed())
 
 			Eventually(Object(fw), "15s").Should(SatisfyAll(
-				HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateStateCompleted),
+				HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateStateCompleted),
 				HaveField("Status.Catalog", Not(BeNil())),
 				HaveField("Status.Baseline", Not(BeNil())),
 			))
@@ -222,12 +222,12 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 					return err
 				}
 				fwBase := fw.DeepCopy()
-				fw.Status.State = maintenancev1alpha1.FirmwareUpdateStateFailed
+				fw.Status.State = vendorconsolev1alpha1.FirmwareUpdateStateFailed
 				return k8sClient.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 			}).Should(Succeed())
 
 			Eventually(Object(fw), "5s").Should(
-				HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateStateFailed),
+				HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateStateFailed),
 			)
 
 			By("adding retry annotation")
@@ -248,27 +248,27 @@ var _ = Describe("FirmwareUpdateDELL Controller", func() {
 			// The controller may then immediately progress to Completed (all compliant mock),
 			// so assert it is no longer Failed rather than a specific intermediate state.
 			Eventually(Object(fw), "10s").Should(
-				Not(HaveField("Status.State", maintenancev1alpha1.FirmwareUpdateStateFailed)),
+				Not(HaveField("Status.State", vendorconsolev1alpha1.FirmwareUpdateStateFailed)),
 			)
 		})
 	})
 })
 
-func newFirmwareUpdateDELL(_, secretName string, selector map[string]string) *maintenancev1alpha1.FirmwareUpdateDELL {
-	return &maintenancev1alpha1.FirmwareUpdateDELL{
+func newFirmwareUpdateDELL(_, secretName string, selector map[string]string) *vendorconsolev1alpha1.FirmwareUpdateDELL {
+	return &vendorconsolev1alpha1.FirmwareUpdateDELL{
 		ObjectMeta: metav1.ObjectMeta{
 			// FirmwareUpdateDELL is cluster-scoped — no namespace.
 			GenerateName: "fw-dell-",
 		},
-		Spec: maintenancev1alpha1.FirmwareUpdateDELLSpec{
+		Spec: vendorconsolev1alpha1.FirmwareUpdateDELLSpec{
 			OMEURL:                "http://127.0.0.1:8000",
 			SecretRef:             &corev1.LocalObjectReference{Name: secretName},
 			CatalogRepositoryName: "test-repo",
-			FirmwareUpgradeConfig: &maintenancev1alpha1.FirmwareUpgradeConfig{
+			FirmwareUpgradeConfig: &vendorconsolev1alpha1.FirmwareUpgradeConfig{
 				OperationName: "INSTALL_FIRMWARE",
 				JobTypeName:   "Update_Task",
 			},
-			BaselineConfig: &maintenancev1alpha1.BaselinesConfig{
+			BaselineConfig: &vendorconsolev1alpha1.BaselinesConfig{
 				Name:        "test-baseline",
 				Description: "test baseline",
 			},

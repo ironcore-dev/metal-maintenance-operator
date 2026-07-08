@@ -22,7 +22,6 @@ spec:
       source: "firmware.repo.dell.com"
   firmwareUpgradeConfig:
     operationName: "INSTALL_FIRMWARE"
-    schedule: "StartNow"
     jobTypeName: "Update_Task"
   baselineConfig:
     name: "dell-metal-Baseline-1"

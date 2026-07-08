@@ -1074,7 +1074,7 @@ func (r *FirmwareUpdateDELLReconciler) createOrGetCatalog(
 			existingCatalog = &catalog
 			break
 		}
-		if catalog.Repository.Name == firmwareDell.Spec.CreateCatalog.Repository.Name {
+		if firmwareDell.Spec.CreateCatalog != nil && catalog.Repository.Name == firmwareDell.Spec.CreateCatalog.Repository.Name {
 			log.V(1).Info("Duplicate catalog repository Name. can not create new catalog with same name and different parameters", "Catalog", catalog.Id, "catalog", catalog)
 			return nil, fmt.Errorf("catalog RepositoryName %s already exists on OME with different parameters", firmwareDell.Spec.CreateCatalog.Repository.Name)
 		}
@@ -1286,7 +1286,7 @@ func (r *FirmwareUpdateDELLReconciler) updateStatus(
 	upgradeTask *maintenancev1alpha1.DellJob,
 ) error {
 	log := ctrl.LoggerFrom(ctx)
-	if firmwareDell.Status.State == state && upgradeTask == nil {
+	if firmwareDell.Status.State == state && upgradeTask == nil && firmwareDell.Status.ServerCount == serverCount {
 		return nil
 	}
 

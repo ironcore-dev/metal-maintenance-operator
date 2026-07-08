@@ -761,9 +761,10 @@ func (c *DellClient) GetAllData(ctx context.Context, url *neturl.URL, returnData
 		}
 		if err = json.Unmarshal(resBody, &pageData); err != nil {
 			log.V(1).Info("Failed to unmarshal page data, trying single object", "err", err, "resBody", string(resBody))
-			if errSingle := json.Unmarshal(resBody, &returnData); errSingle == nil {
+			concrete := reflect.New(targetType).Interface()
+			if errSingle := json.Unmarshal(resBody, concrete); errSingle == nil {
 				log.V(1).Info("Fetched single", "url", nextURL.String(), "resBody", string(resBody))
-				allValues = append(allValues, returnData)
+				allValues = append(allValues, reflect.ValueOf(concrete).Elem().Interface())
 				nextURL = nil
 				break
 			}
@@ -1034,7 +1035,7 @@ func GetDellConsole(ctx context.Context, config *MgrConfig, auth *AuthToken) (*D
 			if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusUnauthorized {
 				log.V(1).Info("existing token is invalid, need to re-authorize", "status code", reqErr.StatusCode)
 			} else {
-				return nil, fmt.Errorf("failed to validate existing token with error: %v, %w", auth, err)
+				return nil, fmt.Errorf("failed to validate existing token for user %q: %w", auth.Username, err)
 			}
 		} else {
 			return mfgConsole, nil

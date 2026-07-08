@@ -286,7 +286,7 @@ func main() {
 		},
 		ResyncInterval: 30 * time.Second,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "FirmwareUpdateDELL")
+		setupLog.Error(err, "Unable to create FirmwareUpdateDELL controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

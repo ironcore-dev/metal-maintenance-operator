@@ -81,7 +81,7 @@ const (
 )
 
 // FirmwareUpdateDELLSpec defines the desired state of FirmwareUpdateDELL.
-// +kubebuilder:validation:XValidation:rule="has(self.createCatalog) || has(self.catalogName)", message="Either createCatalog or catalogName must be provided, but not both."
+// +kubebuilder:validation:XValidation:rule="has(self.createCatalog) != has(self.catalogName)", message="Exactly one of createCatalog or catalogName must be provided, not both."
 type FirmwareUpdateDELLSpec struct {
 	// OMEURL is the URL of the Dell OpenManage Enterprise (OME) instance.
 	// +required
