@@ -91,16 +91,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              driftPolicy:
-                default: Disabled
-                description: |-
-                  DriftPolicy is copied from the parent MaintenancePlan at run creation time.
-                  Controls whether and how the controller monitors completed stages for regressions.
-                enum:
-                - Reconcile
-                - Observe
-                - Disabled
-                type: string
               planRef:
                 description: PlanRef is the MaintenancePlan that generated this run.
                 properties:
@@ -400,7 +390,6 @@ spec:
                 description: Trigger records why this run was created.
                 enum:
                 - Initial
-                - DriftRemediation
                 type: string
             required:
             - bmcRef
@@ -498,6 +487,12 @@ spec:
                   description: StageStatus captures the observed state of one stage
                     in a run.
                   properties:
+                    appliedSpec:
+                      description: |-
+                        AppliedSpec is a snapshot of the child CR's spec at the time it completed.
+                        Populated before intermediate-hop CRs are deleted so the run retains a full audit record.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                     childRef:
                       description: |-
                         ChildRef is the object reference to the child CR for BMC-scoped stages (BMCSettings/BMCVersion).
@@ -660,15 +655,6 @@ spec:
                         - serverRef
                         type: object
                       type: array
-                    stageDriftPolicy:
-                      description: |-
-                        StageDriftPolicy records the drift monitoring mode applied to this stage's
-                        child CR after completion. Empty while the stage is pending or running.
-                      enum:
-                      - Observe
-                      - Suspend
-                      - ""
-                      type: string
                     startTime:
                       description: StartTime is when this stage began executing.
                       format: date-time

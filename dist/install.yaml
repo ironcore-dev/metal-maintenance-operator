@@ -12,150 +12,6 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: serverwirings.readiness.metal.ironcore.dev
-spec:
-  group: readiness.metal.ironcore.dev
-  names:
-    kind: ServerWiring
-    listKind: ServerWiringList
-    plural: serverwirings
-    singular: serverwiring
-  scope: Namespaced
-  versions:
-  - name: v1alpha1
-    schema:
-      openAPIV3Schema:
-        description: ServerWiring is the Schema for the serverwirings API.
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: ServerWiringSpec defines the desired state of ServerWiring.
-            properties:
-              network:
-                description: Network defines the expected network wiring for the server.
-                properties:
-                  interfaces:
-                    description: Interfaces is the list of expected network interfaces,
-                      keyed by MAC address.
-                    items:
-                      description: ExpectedInterface defines the expected state of
-                        a server network interface.
-                      properties:
-                        carrierStatus:
-                          description: |-
-                            CarrierStatus is the expected operational carrier status (e.g. "up").
-                            If omitted, carrier status is not checked.
-                          type: string
-                        macAddress:
-                          description: MACAddress is the MAC address of the interface
-                            and acts as the primary key.
-                          type: string
-                        neighbors:
-                          description: |-
-                            Neighbors lists the LLDP neighbors that must all be present on this interface.
-                            If omitted or empty, neighbor presence is not checked.
-                          items:
-                            description: ExpectedNeighbor defines an expected LLDP
-                              neighbor on a network interface.
-                            properties:
-                              portID:
-                                description: PortID is the LLDP port identifier of
-                                  the expected neighbor.
-                                type: string
-                              systemName:
-                                description: SystemName is the LLDP system name of
-                                  the expected neighbor (e.g. switch hostname).
-                                type: string
-                            required:
-                            - portID
-                            - systemName
-                            type: object
-                          type: array
-                      required:
-                      - macAddress
-                      type: object
-                    type: array
-                type: object
-              serverRef:
-                description: ServerRef references the cluster-scoped Server to validate.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-                x-kubernetes-validations:
-                - message: serverRef.name must not be empty
-                  rule: self.name != ''
-            required:
-            - serverRef
-            type: object
-          status:
-            description: ServerWiringStatus defines the observed state of ServerWiring.
-            properties:
-              mismatches:
-                description: Mismatches lists validation failures for the server.
-                items:
-                  description: InterfaceMismatch describes a single wiring validation
-                    failure on a network interface.
-                  properties:
-                    macAddress:
-                      description: MACAddress is the MAC address of the interface
-                        that failed validation.
-                      type: string
-                    message:
-                      description: Message describes the mismatch.
-                      type: string
-                    reason:
-                      description: Reason is a machine-readable token identifying
-                        the failure type.
-                      type: string
-                  required:
-                  - macAddress
-                  - message
-                  type: object
-                type: array
-              ready:
-                default: false
-                description: Ready is true when all expected interfaces and neighbors
-                  were found.
-                type: boolean
-            required:
-            - ready
-            type: object
-        type: object
-    served: true
-    storage: true
-    subresources:
-      status: {}
----
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
   name: consoles.vendorconsole.metal.ironcore.dev
 spec:
   group: vendorconsole.metal.ironcore.dev
@@ -427,16 +283,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              driftPolicy:
-                default: Disabled
-                description: |-
-                  DriftPolicy is copied from the parent MaintenancePlan at run creation time.
-                  Controls whether and how the controller monitors completed stages for regressions.
-                enum:
-                - Reconcile
-                - Observe
-                - Disabled
-                type: string
               planRef:
                 description: PlanRef is the MaintenancePlan that generated this run.
                 properties:
@@ -736,7 +582,6 @@ spec:
                 description: Trigger records why this run was created.
                 enum:
                 - Initial
-                - DriftRemediation
                 type: string
             required:
             - bmcRef
@@ -834,6 +679,12 @@ spec:
                   description: StageStatus captures the observed state of one stage
                     in a run.
                   properties:
+                    appliedSpec:
+                      description: |-
+                        AppliedSpec is a snapshot of the child CR's spec at the time it completed.
+                        Populated before intermediate-hop CRs are deleted so the run retains a full audit record.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                     childRef:
                       description: |-
                         ChildRef is the object reference to the child CR for BMC-scoped stages (BMCSettings/BMCVersion).
@@ -996,15 +847,6 @@ spec:
                         - serverRef
                         type: object
                       type: array
-                    stageDriftPolicy:
-                      description: |-
-                        StageDriftPolicy records the drift monitoring mode applied to this stage's
-                        child CR after completion. Empty while the stage is pending or running.
-                      enum:
-                      - Observe
-                      - Suspend
-                      - ""
-                      type: string
                     startTime:
                       description: StartTime is when this stage began executing.
                       format: date-time
@@ -1088,17 +930,6 @@ spec:
             description: MaintenancePlanSpec defines the desired maintenance pipeline
               for a fleet of servers.
             properties:
-              driftPolicy:
-                default: Disabled
-                description: |-
-                  DriftPolicy controls how the run controller responds when a completed child CR
-                  regresses back to Pending after the run has succeeded.
-                  Defaults to Disabled so drift monitoring must be explicitly opted in to.
-                enum:
-                - Reconcile
-                - Observe
-                - Disabled
-                type: string
               maxConcurrent:
                 default: 1
                 description: |-
@@ -1512,6 +1343,150 @@ spec:
     subresources:
       status: {}
 ---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: serverwirings.readiness.metal.ironcore.dev
+spec:
+  group: readiness.metal.ironcore.dev
+  names:
+    kind: ServerWiring
+    listKind: ServerWiringList
+    plural: serverwirings
+    singular: serverwiring
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ServerWiring is the Schema for the serverwirings API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ServerWiringSpec defines the desired state of ServerWiring.
+            properties:
+              network:
+                description: Network defines the expected network wiring for the server.
+                properties:
+                  interfaces:
+                    description: Interfaces is the list of expected network interfaces,
+                      keyed by MAC address.
+                    items:
+                      description: ExpectedInterface defines the expected state of
+                        a server network interface.
+                      properties:
+                        carrierStatus:
+                          description: |-
+                            CarrierStatus is the expected operational carrier status (e.g. "up").
+                            If omitted, carrier status is not checked.
+                          type: string
+                        macAddress:
+                          description: MACAddress is the MAC address of the interface
+                            and acts as the primary key.
+                          type: string
+                        neighbors:
+                          description: |-
+                            Neighbors lists the LLDP neighbors that must all be present on this interface.
+                            If omitted or empty, neighbor presence is not checked.
+                          items:
+                            description: ExpectedNeighbor defines an expected LLDP
+                              neighbor on a network interface.
+                            properties:
+                              portID:
+                                description: PortID is the LLDP port identifier of
+                                  the expected neighbor.
+                                type: string
+                              systemName:
+                                description: SystemName is the LLDP system name of
+                                  the expected neighbor (e.g. switch hostname).
+                                type: string
+                            required:
+                            - portID
+                            - systemName
+                            type: object
+                          type: array
+                      required:
+                      - macAddress
+                      type: object
+                    type: array
+                type: object
+              serverRef:
+                description: ServerRef references the cluster-scoped Server to validate.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverRef.name must not be empty
+                  rule: self.name != ''
+            required:
+            - serverRef
+            type: object
+          status:
+            description: ServerWiringStatus defines the observed state of ServerWiring.
+            properties:
+              mismatches:
+                description: Mismatches lists validation failures for the server.
+                items:
+                  description: InterfaceMismatch describes a single wiring validation
+                    failure on a network interface.
+                  properties:
+                    macAddress:
+                      description: MACAddress is the MAC address of the interface
+                        that failed validation.
+                      type: string
+                    message:
+                      description: Message describes the mismatch.
+                      type: string
+                    reason:
+                      description: Reason is a machine-readable token identifying
+                        the failure type.
+                      type: string
+                  required:
+                  - macAddress
+                  - message
+                  type: object
+                type: array
+              ready:
+                default: false
+                description: Ready is true when all expected interfaces and neighbors
+                  were found.
+                type: boolean
+            required:
+            - ready
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -1650,14 +1625,16 @@ rules:
   resources:
   - secrets
   verbs:
+  - create
+  - delete
   - get
   - list
   - patch
+  - update
   - watch
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - consoles
   - maintenanceplanruns
   - maintenanceplans
   verbs:
@@ -1669,17 +1646,15 @@ rules:
   - update
   - watch
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - consoles/finalizers
   - maintenanceplanruns/finalizers
   - maintenanceplans/finalizers
   verbs:
   - update
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - consoles/status
   - maintenanceplanruns/status
   - maintenanceplans/status
   verbs:
@@ -1693,6 +1668,7 @@ rules:
   - biosversions
   - bmcsettings
   - bmcversions
+  - serverclaims
   verbs:
   - create
   - delete
@@ -1706,10 +1682,19 @@ rules:
   resources:
   - bmcs
   - bmcsecrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - servers
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - metal.ironcore.dev
@@ -1741,6 +1726,32 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles/status
   verbs:
   - get
   - patch

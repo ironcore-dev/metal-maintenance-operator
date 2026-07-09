@@ -64,17 +64,6 @@ spec:
             description: MaintenancePlanSpec defines the desired maintenance pipeline
               for a fleet of servers.
             properties:
-              driftPolicy:
-                default: Disabled
-                description: |-
-                  DriftPolicy controls how the run controller responds when a completed child CR
-                  regresses back to Pending after the run has succeeded.
-                  Defaults to Disabled so drift monitoring must be explicitly opted in to.
-                enum:
-                - Reconcile
-                - Observe
-                - Disabled
-                type: string
               maxConcurrent:
                 default: 1
                 description: |-

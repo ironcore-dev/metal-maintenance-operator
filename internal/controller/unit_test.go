@@ -97,7 +97,7 @@ var _ = Describe("buildBMCObject (unit)", func() {
 		run := minimalRunForUnit("bmc", "srv")
 		_, err := r.buildBMCObject(run, &maintenancev1alpha1.PlanStage{
 			Name: "s", Kind: maintenancev1alpha1.StageKindBIOSVersion,
-		}, 0)
+		})
 		Expect(err).To(MatchError(ContainSubstring("not BMC-scoped")))
 	})
 
@@ -112,7 +112,7 @@ var _ = Describe("buildBMCObject (unit)", func() {
 				},
 			},
 		}
-		obj, err := r.buildBMCObject(run, stage, 0)
+		obj, err := r.buildBMCObject(run, stage)
 		Expect(err).NotTo(HaveOccurred())
 		bmcSettings, ok := obj.(*metalv1alpha1.BMCSettings)
 		Expect(ok).To(BeTrue())
@@ -134,7 +134,7 @@ var _ = Describe("buildBMCObject (unit)", func() {
 				},
 			},
 		}
-		obj, err := r.buildBMCObject(run, stage, 0)
+		obj, err := r.buildBMCObject(run, stage)
 		Expect(err).NotTo(HaveOccurred())
 		bmcVersion, ok := obj.(*metalv1alpha1.BMCVersion)
 		Expect(ok).To(BeTrue())
@@ -148,7 +148,7 @@ var _ = Describe("buildBMCObject (unit)", func() {
 			Name:     "s",
 			Kind:     maintenancev1alpha1.StageKindBMCSettings,
 			Template: maintenancev1alpha1.StageTemplate{BMCSettings: nil},
-		}, 0)
+		})
 		Expect(err).To(MatchError(ContainSubstring("missing bmcSettings template")))
 	})
 
@@ -158,7 +158,7 @@ var _ = Describe("buildBMCObject (unit)", func() {
 			Name:     "s",
 			Kind:     maintenancev1alpha1.StageKindBMCVersion,
 			Template: maintenancev1alpha1.StageTemplate{BMCVersion: nil},
-		}, 0)
+		})
 		Expect(err).To(MatchError(ContainSubstring("missing bmcVersion template")))
 	})
 })
@@ -170,7 +170,7 @@ var _ = Describe("buildServerObject (unit)", func() {
 		run := minimalRunForUnit("bmc", "srv")
 		_, err := r.buildServerObject(run, &maintenancev1alpha1.PlanStage{
 			Name: "s", Kind: maintenancev1alpha1.StageKindBMCVersion,
-		}, "my-server", 0)
+		}, "my-server")
 		Expect(err).To(MatchError(ContainSubstring("not Server-scoped")))
 	})
 
@@ -186,7 +186,7 @@ var _ = Describe("buildServerObject (unit)", func() {
 				},
 			},
 		}
-		obj, err := r.buildServerObject(run, stage, "my-srv", 0)
+		obj, err := r.buildServerObject(run, stage, "my-srv")
 		Expect(err).NotTo(HaveOccurred())
 		biosSettings, ok := obj.(*metalv1alpha1.BIOSSettings)
 		Expect(ok).To(BeTrue())
@@ -207,7 +207,7 @@ var _ = Describe("buildServerObject (unit)", func() {
 				},
 			},
 		}
-		obj, err := r.buildServerObject(run, stage, "my-srv", 0)
+		obj, err := r.buildServerObject(run, stage, "my-srv")
 		Expect(err).NotTo(HaveOccurred())
 		biosVersion, ok := obj.(*metalv1alpha1.BIOSVersion)
 		Expect(ok).To(BeTrue())
@@ -221,7 +221,7 @@ var _ = Describe("buildServerObject (unit)", func() {
 			Name:     "s",
 			Kind:     maintenancev1alpha1.StageKindBIOSSettings,
 			Template: maintenancev1alpha1.StageTemplate{BIOSSettings: nil},
-		}, "srv", 0)
+		}, "srv")
 		Expect(err).To(MatchError(ContainSubstring("missing biosSettings template")))
 	})
 
@@ -231,7 +231,7 @@ var _ = Describe("buildServerObject (unit)", func() {
 			Name:     "s",
 			Kind:     maintenancev1alpha1.StageKindBIOSVersion,
 			Template: maintenancev1alpha1.StageTemplate{BIOSVersion: nil},
-		}, "srv", 0)
+		}, "srv")
 		Expect(err).To(MatchError(ContainSubstring("missing biosVersion template")))
 	})
 })

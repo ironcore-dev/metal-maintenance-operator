@@ -24,17 +24,41 @@ rules:
   - update
   - watch
 - apiGroups:
-  - metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - bmcs
-  - bmcsecrets
+  - maintenanceplanruns
+  - maintenanceplans
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - maintenanceplanruns/finalizers
+  - maintenanceplans/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - maintenanceplanruns/status
+  - maintenanceplans/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - biossettings
+  - biosversions
+  - bmcsettings
+  - bmcversions
   - serverclaims
   verbs:
   - create
@@ -43,6 +67,15 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - bmcs
+  - bmcsecrets
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - metal.ironcore.dev
@@ -92,8 +125,6 @@ rules:
   - vendorconsole.metal.ironcore.dev
   resources:
   - consoles
-  - maintenanceplanruns
-  - maintenanceplans
   verbs:
   - create
   - delete
@@ -106,16 +137,12 @@ rules:
   - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/finalizers
-  - maintenanceplanruns/finalizers
-  - maintenanceplans/finalizers
   verbs:
   - update
 - apiGroups:
   - vendorconsole.metal.ironcore.dev
   resources:
   - consoles/status
-  - maintenanceplanruns/status
-  - maintenanceplans/status
   verbs:
   - get
   - patch
