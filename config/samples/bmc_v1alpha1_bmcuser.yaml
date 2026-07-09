@@ -1,0 +1,17 @@
+apiVersion: bmc.metal.ironcore.dev/v1alpha1
+kind: BMCUser
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bmcuser-sample
+spec:
+  userName: admin
+  roleID: "Administrator"
+  description: "Administrator user"
+  rotationPeriod: 720h0m0s
+  bmcSecretRef:
+    name: bmc-secret-sample
+  bmcRef:
+    name: bmc-sample
+---
