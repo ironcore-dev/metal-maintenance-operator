@@ -1,0 +1,33 @@
+apiVersion: vendorconsole.metal.ironcore.dev/v1alpha1
+kind: FirmwareUpdateLenovo
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firmwareupdatelenovo-sample
+spec:
+  # LXCA appliance the controller talks to.
+  lxcaURL: https://lxca.example.com
+  # Secret in the same namespace holding {username,password}. The controller
+  # writes back {token,sessionID} after login.
+  secretRef:
+    name: lenovo-lxca-credentials
+  # Pick metal.ironcore.dev/v1alpha1 Servers labelled as Lenovo. Any server
+  # whose Status.Manufacturer is not "Lenovo" causes the update to fail.
+  serverSelector:
+    matchLabels:
+      manufacturer: lenovo
+  # Firmware bundle LXCA should download and stage in its repository before
+  # applying updates.
+  firmwarePayload:
+    sourceType: URL
+    url: https://firmware.example.com/lenovo/uxsp/lnvgy_utl_uxsp_ax13a_platform.zip
+  # LXCA compliance policy created (or reused) for this update.
+  compliancePolicy:
+    name: metal-lenovo-baseline-1
+    description: Firmware baseline managed by metal-maintenance-operator.
+  # Immediate is the default; declared explicitly here to make the sample
+  # self-describing.
+  updateAction: Immediate
+  # Force maintenance to be applied regardless of the server owner.
+  serverMaintenancePolicy: Enforced
