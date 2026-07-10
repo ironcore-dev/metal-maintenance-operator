@@ -20,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
@@ -92,7 +91,7 @@ func SetupMaintenanceTest() {
 		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Controller: config.Controller{
-				SkipNameValidation: ptr.To(true),
+				SkipNameValidation: new(true),
 			},
 			Metrics: metricsserver.Options{
 				BindAddress: "0",
@@ -138,7 +137,7 @@ func SetupTest() *corev1.Namespace {
 		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme.Scheme,
 			Controller: config.Controller{
-				SkipNameValidation: ptr.To(true),
+				SkipNameValidation: new(true),
 			},
 			Metrics: metricsserver.Options{
 				BindAddress: "0",

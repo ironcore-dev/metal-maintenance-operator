@@ -37,7 +37,7 @@ func makeRun(name, bmcName, serverName, baselineBMC, baselineBIOS string, stages
 }
 
 // makeMultiServerRun builds a run with multiple servers sharing one BMC.
-func makeMultiServerRun(name, bmcName string, servers []string, baselineBMC string, biosVersions map[string]string, stages []maintenancev1alpha1.PlanStage) *maintenancev1alpha1.MaintenancePlanRun {
+func makeMultiServerRun(name, bmcName string, servers []string, biosVersions map[string]string, stages []maintenancev1alpha1.PlanStage) *maintenancev1alpha1.MaintenancePlanRun {
 	refs := make([]corev1.LocalObjectReference, len(servers))
 	for i, s := range servers {
 		refs[i] = corev1.LocalObjectReference{Name: s}
@@ -48,7 +48,7 @@ func makeMultiServerRun(name, bmcName string, servers []string, baselineBMC stri
 			PlanRef:              corev1.LocalObjectReference{Name: "test-plan"},
 			BMCRef:               corev1.LocalObjectReference{Name: bmcName},
 			ServerRefs:           refs,
-			BaselineBMCVersion:   baselineBMC,
+			BaselineBMCVersion:   "",
 			BaselineBIOSVersions: biosVersions,
 			Stages:               stages,
 		},
@@ -241,7 +241,7 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 	Describe("Server-scoped stage — single server", func() {
 		It("creates a BIOSVersion leaf CR keyed by run+stage+server", func() {
 			run := makeRun("run-leaf-bios", "bmc-biosleaf", "srv-biosleaf", "", "1.0.0",
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")})
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")})
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
 
@@ -258,7 +258,7 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 
 		It("skips BIOSVersion when target <= baseline for that server", func() {
 			run := makeRun("run-bios-skip", "bmc-x", "srv-x", "", "2.0.0",
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "1.0.0")})
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("1.0.0")})
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
 
@@ -271,7 +271,7 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 
 		It("marks stage Succeeded when BIOSVersion reaches Completed", func() {
 			run := makeRun("run-poll-bios-ok", "bmc-bpoll", "srv-bpoll", "", "1.0.0",
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")})
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")})
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
 
@@ -292,7 +292,7 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 
 		It("marks stage Failed and run Failed when BIOSVersion reaches Failed", func() {
 			run := makeRun("run-poll-bios-fail", "bmc-bpfail", "srv-bpfail", "", "1.0.0",
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")})
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")})
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
 
@@ -366,8 +366,8 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 	Describe("Server-scoped stage — multi-server fan-out", func() {
 		It("creates one leaf CR per server", func() {
 			run := makeMultiServerRun("run-multi-bios", "bmc-multi", []string{"srv-a", "srv-b"},
-				"", map[string]string{"srv-a": "1.0.0", "srv-b": "1.0.0"},
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")},
+				map[string]string{"srv-a": "1.0.0", "srv-b": "1.0.0"},
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")},
 			)
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
@@ -386,8 +386,8 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 		It("skips per-server independently based on that server's baseline", func() {
 			// srv-a has old BIOS → will execute; srv-b has new BIOS → will skip
 			run := makeMultiServerRun("run-per-server-skip", "bmc-pss", []string{"srv-pss-a", "srv-pss-b"},
-				"", map[string]string{"srv-pss-a": "1.0.0", "srv-pss-b": "9.9.9"},
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")},
+				map[string]string{"srv-pss-a": "1.0.0", "srv-pss-b": "9.9.9"},
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")},
 			)
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
@@ -421,8 +421,8 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 
 		It("stage succeeds only after all servers complete", func() {
 			run := makeMultiServerRun("run-multi-complete", "bmc-mc", []string{"srv-mc-1", "srv-mc-2"},
-				"", map[string]string{"srv-mc-1": "1.0.0", "srv-mc-2": "1.0.0"},
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")},
+				map[string]string{"srv-mc-1": "1.0.0", "srv-mc-2": "1.0.0"},
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")},
 			)
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
@@ -463,8 +463,8 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 
 		It("stage fails if any server's leaf CR fails", func() {
 			run := makeMultiServerRun("run-multi-fail", "bmc-mf", []string{"srv-mf-1", "srv-mf-2"},
-				"", map[string]string{"srv-mf-1": "1.0.0", "srv-mf-2": "1.0.0"},
-				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("bios-fw", "2.5.0")},
+				map[string]string{"srv-mf-1": "1.0.0", "srv-mf-2": "1.0.0"},
+				[]maintenancev1alpha1.PlanStage{minimalBIOSVersionStage("2.5.0")},
 			)
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, run)
@@ -489,7 +489,7 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 				"1.0.0",   // BIOS below target
 				[]maintenancev1alpha1.PlanStage{
 					minimalBMCVersionStage("bmc-fw", "7.10.00"),
-					minimalBIOSVersionStage("bios-fw", "2.5.0"),
+					minimalBIOSVersionStage("2.5.0"),
 				},
 			)
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())

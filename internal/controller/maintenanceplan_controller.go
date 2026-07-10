@@ -52,13 +52,13 @@ func (r *MaintenancePlanReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	original := plan.DeepCopy()
 
-	result, err := r.reconcilePlan(ctx, plan)
+	err := r.reconcilePlan(ctx, plan)
 
 	if patchErr := r.Status().Patch(ctx, plan, client.MergeFrom(original)); patchErr != nil {
 		return ctrl.Result{}, patchErr
 	}
 
-	return result, err
+	return ctrl.Result{}, err
 }
 
 // bmcGroup holds the BMC and all servers that share it.
@@ -67,29 +67,26 @@ type bmcGroup struct {
 	servers []*metalv1alpha1.Server
 }
 
-func (r *MaintenancePlanReconciler) reconcilePlan(ctx context.Context, plan *maintenancev1alpha1.MaintenancePlan) (ctrl.Result, error) {
+func (r *MaintenancePlanReconciler) reconcilePlan(ctx context.Context, plan *maintenancev1alpha1.MaintenancePlan) error {
 	logger := log.FromContext(ctx).WithValues("plan", plan.Name)
 
 	selector, err := metav1.LabelSelectorAsSelector(&plan.Spec.ServerSelector)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("invalid serverSelector: %w", err)
+		return fmt.Errorf("invalid serverSelector: %w", err)
 	}
 
 	serverList := &metalv1alpha1.ServerList{}
 	if err := r.List(ctx, serverList, &client.ListOptions{LabelSelector: selector}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("list servers: %w", err)
+		return fmt.Errorf("list servers: %w", err)
 	}
 
 	// Group servers by their BMC name. Servers without a BMCRef are skipped.
-	groups, err := r.groupByBMC(ctx, serverList.Items)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
+	groups := r.groupByBMC(ctx, serverList.Items)
 
 	// List existing runs for this plan, keyed by BMC name.
 	existingRuns := &maintenancev1alpha1.MaintenancePlanRunList{}
 	if err := r.List(ctx, existingRuns, client.MatchingLabels{planOwnerLabel: plan.Name}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("list runs: %w", err)
+		return fmt.Errorf("list runs: %w", err)
 	}
 	existingByBMC := make(map[string]*maintenancev1alpha1.MaintenancePlanRun, len(existingRuns.Items))
 	for i := range existingRuns.Items {
@@ -137,12 +134,13 @@ func (r *MaintenancePlanReconciler) reconcilePlan(ctx context.Context, plan *mai
 		}
 	}
 
-	return ctrl.Result{}, r.updatePlanStatus(ctx, plan, existingRuns)
+	r.updatePlanStatus(plan, existingRuns)
+	return nil
 }
 
 // groupByBMC resolves each server's BMCRef and groups servers by BMC name.
 // Servers without a BMCRef are silently skipped; BMC lookup failures are logged and skipped.
-func (r *MaintenancePlanReconciler) groupByBMC(ctx context.Context, servers []metalv1alpha1.Server) (map[string]*bmcGroup, error) {
+func (r *MaintenancePlanReconciler) groupByBMC(ctx context.Context, servers []metalv1alpha1.Server) map[string]*bmcGroup {
 	logger := log.FromContext(ctx)
 	groups := make(map[string]*bmcGroup)
 
@@ -165,7 +163,7 @@ func (r *MaintenancePlanReconciler) groupByBMC(ctx context.Context, servers []me
 		groups[bmcName].servers = append(groups[bmcName].servers, server)
 	}
 
-	return groups, nil
+	return groups
 }
 
 // buildRun constructs a MaintenancePlanRun for a BMC group.
@@ -216,10 +214,9 @@ func (r *MaintenancePlanReconciler) buildRun(
 
 // updatePlanStatus aggregates run outcomes into the plan's status.
 func (r *MaintenancePlanReconciler) updatePlanStatus(
-	ctx context.Context,
 	plan *maintenancev1alpha1.MaintenancePlan,
 	runs *maintenancev1alpha1.MaintenancePlanRunList,
-) error {
+) {
 	var active, succeeded, failed int32
 	for i := range runs.Items {
 		switch runs.Items[i].Status.Phase {
@@ -248,8 +245,6 @@ func (r *MaintenancePlanReconciler) updatePlanStatus(
 	default:
 		plan.Status.Phase = maintenancev1alpha1.MaintenancePlanPhasePending
 	}
-
-	return nil
 }
 
 func (r *MaintenancePlanReconciler) SetupWithManager(mgr ctrl.Manager) error {

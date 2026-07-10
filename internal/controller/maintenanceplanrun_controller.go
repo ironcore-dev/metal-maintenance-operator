@@ -134,9 +134,9 @@ func (r *MaintenancePlanRunReconciler) reconcileRun(ctx context.Context, run *ma
 
 		case maintenancev1alpha1.StagePhasePending:
 			if isBMCScoped(stage.Kind) {
-				return r.startBMCStage(ctx, run, stage, status, i)
+				return r.startBMCStage(ctx, run, stage, status)
 			}
-			return r.startServerStage(ctx, run, stage, status, i)
+			return r.startServerStage(ctx, run, stage, status)
 
 		case maintenancev1alpha1.StagePhaseRunning:
 			if isBMCScoped(stage.Kind) {
@@ -224,7 +224,7 @@ func (r *MaintenancePlanRunReconciler) snapshotAndDeleteIntermediateCR(
 // Returns nil, nil when the CR no longer exists.
 func (r *MaintenancePlanRunReconciler) fetchCRSpec(ctx context.Context, kind maintenancev1alpha1.StageKind, name string) (*runtime.RawExtension, error) {
 	key := types.NamespacedName{Name: name}
-	var specObj interface{}
+	var specObj any
 
 	switch kind {
 	case maintenancev1alpha1.StageKindBMCSettings:
@@ -304,7 +304,6 @@ func (r *MaintenancePlanRunReconciler) startBMCStage(
 	run *maintenancev1alpha1.MaintenancePlanRun,
 	stage *maintenancev1alpha1.PlanStage,
 	status *maintenancev1alpha1.StageStatus,
-	stageIdx int,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("run", run.Name, "stage", stage.Name)
 
@@ -386,7 +385,6 @@ func (r *MaintenancePlanRunReconciler) startServerStage(
 	run *maintenancev1alpha1.MaintenancePlanRun,
 	stage *maintenancev1alpha1.PlanStage,
 	status *maintenancev1alpha1.StageStatus,
-	stageIdx int,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("run", run.Name, "stage", stage.Name)
 

@@ -92,9 +92,9 @@ func minimalBMCVersionStage(name, version string) maintenancev1alpha1.PlanStage 
 }
 
 // minimalBIOSVersionStage returns a BIOSVersion stage for plan specs.
-func minimalBIOSVersionStage(name, version string) maintenancev1alpha1.PlanStage {
+func minimalBIOSVersionStage(version string) maintenancev1alpha1.PlanStage {
 	return maintenancev1alpha1.PlanStage{
-		Name: name,
+		Name: "bios-fw",
 		Kind: maintenancev1alpha1.StageKindBIOSVersion,
 		Template: maintenancev1alpha1.StageTemplate{
 			BIOSVersion: &metalv1alpha1.BIOSVersionTemplate{
