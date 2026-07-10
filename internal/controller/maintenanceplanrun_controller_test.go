@@ -526,7 +526,7 @@ var _ = Describe("MaintenancePlanRun Controller", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bmcCRName(run.Name, "stage-1")}, leaf1)).To(Succeed())
 			}).Should(Succeed())
-			DeferCleanup(k8sClient.Delete, leaf1)
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, leaf1) })
 
 			Consistently(func(g Gomega) {
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: bmcCRName(run.Name, "stage-2")}, &metalv1alpha1.BMCVersion{})

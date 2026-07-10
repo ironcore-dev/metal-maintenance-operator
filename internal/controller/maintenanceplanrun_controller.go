@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	semver "github.com/Masterminds/semver/v3"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -597,13 +598,23 @@ func (r *MaintenancePlanRunReconciler) shouldSkipBMC(
 	if target == "" || current == "" {
 		return false, ""
 	}
+	targetV, err := semver.NewVersion(target)
+	if err != nil {
+		return false, ""
+	}
+	currentV, err := semver.NewVersion(current)
+	if err != nil {
+		return false, ""
+	}
 	if stage.Kind == maintenancev1alpha1.StageKindBMCSettings {
-		if target != current {
-			return true, fmt.Sprintf("settings version %s != current %s, skipping", target, current)
+		// Reapply if target == current; skip only if current is already newer.
+		if currentV.GreaterThan(targetV) {
+			return true, fmt.Sprintf("settings version %s < current %s, skipping", target, current)
 		}
 	} else {
-		if target == current {
-			return true, fmt.Sprintf("already at target %s, skipping", target)
+		// Skip upgrade if current is already at or beyond the target.
+		if !currentV.LessThan(targetV) {
+			return true, fmt.Sprintf("already at or beyond target %s (current %s), skipping", target, current)
 		}
 	}
 	return false, ""
@@ -619,13 +630,23 @@ func (r *MaintenancePlanRunReconciler) shouldSkipServer(
 	if target == "" || current == "" {
 		return false, ""
 	}
+	targetV, err := semver.NewVersion(target)
+	if err != nil {
+		return false, ""
+	}
+	currentV, err := semver.NewVersion(current)
+	if err != nil {
+		return false, ""
+	}
 	if stage.Kind == maintenancev1alpha1.StageKindBIOSSettings {
-		if target != current {
-			return true, fmt.Sprintf("settings version %s != current %s for server %s, skipping", target, current, serverName)
+		// Reapply if target == current; skip only if current is already newer.
+		if currentV.GreaterThan(targetV) {
+			return true, fmt.Sprintf("settings version %s < current %s for server %s, skipping", target, current, serverName)
 		}
 	} else {
-		if target == current {
-			return true, fmt.Sprintf("already at target %s for server %s, skipping", target, serverName)
+		// Skip upgrade if current is already at or beyond the target.
+		if !currentV.LessThan(targetV) {
+			return true, fmt.Sprintf("already at or beyond target %s for server %s (current %s), skipping", target, serverName, current)
 		}
 	}
 	return false, ""
