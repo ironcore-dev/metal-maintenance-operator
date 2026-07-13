@@ -2,6 +2,7 @@
 
 ## Packages
 - [readiness.metal.ironcore.dev/v1alpha1](#readinessmetalironcoredevv1alpha1)
+- [servermaintenance.metal.ironcore.dev/v1alpha1](#servermaintenancemetalironcoredevv1alpha1)
 - [vendorconsole.metal.ironcore.dev/v1alpha1](#vendorconsolemetalironcoredevv1alpha1)
 
 
@@ -134,6 +135,124 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `ready` _boolean_ | Ready is true when all expected interfaces and neighbors were found. | false |  |
 | `mismatches` _[InterfaceMismatch](#interfacemismatch) array_ | Mismatches lists validation failures for the server. |  |  |
+
+
+
+## servermaintenance.metal.ironcore.dev/v1alpha1
+
+Package v1alpha1 contains API Schema definitions for the servermaintenance.metal.ironcore.dev v1alpha1 API group.
+
+### Resource Types
+- [ServerMaintenance](#servermaintenance)
+
+
+
+#### ServerBootConfigurationTemplate
+
+
+
+ServerBootConfigurationTemplate defines the parameters to be used for rendering a boot configuration.
+
+
+
+_Appears in:_
+- [ServerMaintenanceSpec](#servermaintenancespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name specifies the name of the boot configuration. |  |  |
+| `spec` _[ServerBootConfigurationSpec](#serverbootconfigurationspec)_ | Spec specifies the boot configuration to be rendered. |  |  |
+
+
+#### ServerMaintenance
+
+
+
+ServerMaintenance is the Schema for the ServerMaintenance API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `servermaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `ServerMaintenance` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[ServerMaintenanceSpec](#servermaintenancespec)_ |  |  |  |
+| `status` _[ServerMaintenanceStatus](#servermaintenancestatus)_ |  |  |  |
+
+
+#### ServerMaintenancePolicy
+
+_Underlying type:_ _string_
+
+ServerMaintenancePolicy specifies the maintenance policy to be enforced on the server.
+
+
+
+_Appears in:_
+- [ServerMaintenanceSpec](#servermaintenancespec)
+
+| Field | Description |
+| --- | --- |
+| `OwnerApproval` | ServerMaintenancePolicyOwnerApproval specifies that the maintenance policy requires owner approval.<br /> |
+| `Enforced` | ServerMaintenancePolicyEnforced specifies that the maintenance policy is enforced.<br /> |
+
+
+#### ServerMaintenanceSpec
+
+
+
+ServerMaintenanceSpec defines the desired state of a ServerMaintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenance](#servermaintenance)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `policy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | Policy specifies the maintenance policy to be enforced on the server. |  |  |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to the server that is to be maintained. |  |  |
+| `serverPower` _[Power](#power)_ | ServerPower specifies the power state of the server during maintenance. |  |  |
+| `locatorLED` _[IndicatorLED](#indicatorled)_ | LocatorLED specifies the desired state of the server's locator LED during maintenance.<br />When maintenance ends, the locator LED is turned off. |  |  |
+| `priority` _integer_ | Priority determines ordering when multiple ServerMaintenance resources target the same server.<br />Higher values are processed first. If priorities are equal, older resources are processed first.<br />If omitted, priority is treated as 0. | 0 |  |
+| `serverBootConfigurationTemplate` _[ServerBootConfigurationTemplate](#serverbootconfigurationtemplate)_ | ServerBootConfigurationTemplate specifies the boot configuration to be applied to the server during maintenance. |  |  |
+
+
+#### ServerMaintenanceState
+
+_Underlying type:_ _string_
+
+ServerMaintenanceState specifies the current state of the server maintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenanceStatus](#servermaintenancestatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | ServerMaintenanceStatePending specifies that the server maintenance is pending.<br /> |
+| `InMaintenance` | ServerMaintenanceStateInMaintenance specifies that the server is in maintenance.<br /> |
+| `Failed` | ServerMaintenanceStateFailed specifies that the server maintenance has failed.<br /> |
+
+
+#### ServerMaintenanceStatus
+
+
+
+ServerMaintenanceStatus defines the observed state of a ServerMaintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenance](#servermaintenance)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[ServerMaintenanceState](#servermaintenancestate)_ | State specifies the current state of the server maintenance. |  |  |
 
 
 
