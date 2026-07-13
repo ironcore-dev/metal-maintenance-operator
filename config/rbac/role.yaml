@@ -28,6 +28,7 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - serverbootconfigurations
   - serverclaims
   verbs:
   - create
@@ -77,6 +78,32 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - servermaintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - servermaintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - servermaintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances/status
   verbs:
   - get
   - patch
