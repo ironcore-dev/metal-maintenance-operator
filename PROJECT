@@ -33,11 +33,89 @@ resources:
   version: v1alpha1
 - api:
     crdVersion: v1
+- api:
+    crdVersion: v1
     namespaced: true
   controller: true
   domain: metal.ironcore.dev
   group: maintenance
   kind: ServerMaintenance
   path: github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: bmcmaintenance
+  kind: BMCSettings
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: bmcmaintenance
+  kind: BMCSettingsSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: bmcmaintenance
+  kind: BMCVersion
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: bmcmaintenance
+  kind: BMCVersionSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: servermaintenance
+  kind: BIOSSettings
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: servermaintenance
+  kind: BIOSSettingsSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: servermaintenance
+  kind: BIOSVersion
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: servermaintenance
+  kind: BIOSVersionSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1
   version: v1alpha1
 version: "3"
