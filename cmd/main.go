@@ -276,16 +276,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &servermaintenancev1alpha1.ServerMaintenance{}, "spec.serverRef.name", func(rawObj client.Object) []string {
-		m, ok := rawObj.(*servermaintenancev1alpha1.ServerMaintenance)
-		if !ok {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&servermaintenancev1alpha1.ServerMaintenance{},
+		"spec.serverRef.name",
+		func(rawObj client.Object) []string {
+			m, ok := rawObj.(*servermaintenancev1alpha1.ServerMaintenance)
+			if !ok {
+				return nil
+			}
+			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
+				return []string{m.Spec.ServerRef.Name}
+			}
 			return nil
-		}
-		if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
-			return []string{m.Spec.ServerRef.Name}
-		}
-		return nil
-	}); err != nil {
+		}); err != nil {
 		setupLog.Error(err, "Unable to set up ServerMaintenance field indexer")
 		os.Exit(1)
 	}
