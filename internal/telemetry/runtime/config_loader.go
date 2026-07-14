@@ -69,7 +69,7 @@ func (l *ConfigLoader) Start(ctx context.Context) error {
 	defer func() { _ = inf.RemoveEventHandler(reg) }()
 
 	<-ctx.Done()
-	l.Log.Info("Config loader stopping")
+	l.Log.Info("Config loader stopped")
 	return nil
 }
 

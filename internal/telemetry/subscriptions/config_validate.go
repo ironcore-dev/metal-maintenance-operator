@@ -101,8 +101,11 @@ func Validate(cfg *Config) field.ErrorList {
 		switch {
 		case vendor == "":
 			errs = append(errs, field.Required(hwPath.Child("vendor"), ""))
-		case !isKnownVendor(vendor):
-			// Reject non-canonical values up front.
+		case hw.Vendor != vendor || !isKnownVendor(vendor):
+			// Reject non-canonical values up front. hw.Vendor != vendor
+			// catches whitespace-padded forms (e.g. " Dell Inc. ") that
+			// would pass validation but never match the exact-compare
+			// runtime path in vendorMatches.
 			errs = append(errs, field.NotSupported(hwPath.Child("vendor"), hw.Vendor, supportedVendorList))
 		case vendorsSeen[vendor]:
 			errs = append(errs, field.Duplicate(hwPath.Child("vendor"), hw.Vendor))

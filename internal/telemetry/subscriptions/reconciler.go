@@ -257,7 +257,7 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 	if len(stale) > 0 {
 		r.Log.V(1).Info("Deleting stale subscriptions (own pattern, different host)",
 			"bmc", ref.Name, "count", len(stale))
-		r.deleteSubscriptions(ctx, c, ref.Name, stale)
+		_ = r.deleteSubscriptions(ctx, c, ref.Name, stale)
 	}
 
 	if wantSubscribed {
@@ -277,7 +277,11 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 		// release the finalizer if we still hold one — otherwise a
 		// future BMC delete would block on us for a BMC we no longer
 		// manage.
-		r.deleteSubscriptions(ctx, c, ref.Name, current)
+		if err := r.deleteSubscriptions(ctx, c, ref.Name, current); err != nil {
+			r.Log.V(1).Info("Failed to remove all subscriptions; keeping finalizer",
+				"bmc", ref.Name, "err", err.Error())
+			return
+		}
 		if _, err := clientutils.PatchEnsureNoFinalizer(ctx, r.Client, bmc, bmcSubscriptionFinalizer); err != nil {
 			r.Log.V(1).Info("Cannot remove stale finalizer",
 				"bmc", ref.Name, "err", err.Error())
@@ -312,7 +316,7 @@ func (r *BMCReconciler) tearDownOne(ctx context.Context, bmcName string) {
 	current, stale := r.classify(existing, bmcName)
 	// Wipe both — anything matching our pattern is ours in some form,
 	// regardless of host.
-	r.deleteSubscriptions(ctx, c, bmcName, append(current, stale...))
+	_ = r.deleteSubscriptions(ctx, c, bmcName, append(current, stale...))
 }
 
 // ensureSubscriptions converges `current` to exactly one MetricReport
@@ -323,12 +327,12 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 	if keep, extras := pickAndExtras(metrics); len(extras) > 0 {
 		r.Log.V(1).Info("Deduplicating metric subscriptions",
 			"bmc", bmcName, "keep", keep.URI, "removed", len(extras))
-		r.deleteSubscriptions(ctx, c, bmcName, extras)
+		_ = r.deleteSubscriptions(ctx, c, bmcName, extras)
 	}
 	if keep, extras := pickAndExtras(alerts); len(extras) > 0 {
 		r.Log.V(1).Info("Deduplicating alert subscriptions",
 			"bmc", bmcName, "keep", keep.URI, "removed", len(extras))
-		r.deleteSubscriptions(ctx, c, bmcName, extras)
+		_ = r.deleteSubscriptions(ctx, c, bmcName, extras)
 	}
 
 	if len(metrics) == 0 {
@@ -392,16 +396,19 @@ func pickAndExtras(subs []Subscription) (keep Subscription, extras []Subscriptio
 	return keep, extras
 }
 
-func (r *BMCReconciler) deleteSubscriptions(ctx context.Context, c Client, bmcName string, subs []Subscription) {
+func (r *BMCReconciler) deleteSubscriptions(ctx context.Context, c Client, bmcName string, subs []Subscription) error {
+	var errs []error
 	for _, sub := range subs {
 		if err := c.DeleteEventSubscription(ctx, sub.URI); err != nil {
 			r.Log.V(1).Info("Failed to delete subscription",
 				"bmc", bmcName, "uri", sub.URI, "err", err.Error())
+			errs = append(errs, err)
 		} else {
 			r.Log.V(1).Info("Deleted subscription",
 				"bmc", bmcName, "uri", sub.URI)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // classify partitions the BMC's existing subscriptions into:

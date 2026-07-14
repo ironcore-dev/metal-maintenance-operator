@@ -188,6 +188,9 @@ func validateReceiverURL(raw string) error {
 	if u.Scheme == "" || u.Host == "" {
 		return fmt.Errorf("invalid ReceiverURL %q: must be absolute (scheme://host[:port][/path])", raw)
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid ReceiverURL %q: scheme must be http or https", raw)
+	}
 	return nil
 }
 
