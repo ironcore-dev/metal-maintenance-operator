@@ -90,7 +90,7 @@ func TestValidate_EventBasedHardware_MissingVendor(t *testing.T) {
 // "Supermicro") to BMC.Status.Manufacturer. Accepting other variants
 // here would silently leave those rows un-matchable at runtime.
 func TestValidate_EventBasedHardware_NonCanonicalVendor(t *testing.T) {
-	for _, vendor := range []string{"Dell", "dell", "DELL", "Hewlett Packard Enterprise", "lenovo"} {
+	for _, vendor := range []string{"Dell", "dell", "DELL", "Hewlett Packard Enterprise", "lenovo", " Dell Inc. ", "HPE "} {
 		t.Run(vendor, func(t *testing.T) {
 			cfg := minimalValid()
 			cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendor, Models: []string{"*"}}}

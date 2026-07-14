@@ -7,6 +7,7 @@ package criticalevent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -60,15 +61,20 @@ func (h *ConditionHandler) HandleCritical(ctx context.Context, bmcName string, e
 		Message: fmt.Sprintf("Critical Redfish event: %s (component: %s)", event.Message, event.OriginOfCondition),
 	}
 
+	var failed []error
 	for i := range serverList.Items {
 		server := &serverList.Items[i]
 		if err := h.patchCondition(ctx, server, condition); err != nil {
 			h.Log.Error(err, "Failed to patch Server condition",
 				"server", server.Name, "bmc", bmcName, "eventID", event.EventID)
+			failed = append(failed, err)
 			continue
 		}
 		h.Log.V(1).Info("Critical event condition applied",
 			"server", server.Name, "bmc", bmcName, "eventID", event.EventID)
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to patch %d/%d servers: %w", len(failed), len(serverList.Items), errors.Join(failed...))
 	}
 	return nil
 }

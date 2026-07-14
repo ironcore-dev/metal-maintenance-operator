@@ -323,7 +323,7 @@ func main() {
 		}
 		if ns == "" {
 			setupLog.Error(nil,
-				"telemetry enabled but --telemetry-config-namespace and POD_NAMESPACE are both empty")
+				"Telemetry enabled but --telemetry-config-namespace and POD_NAMESPACE are both empty")
 			os.Exit(1)
 		}
 		if err := telemetryruntime.AddTo(mgr, telemetryruntime.Options{
@@ -335,7 +335,7 @@ func main() {
 			SubscriberID:               telemetrySubscriberID,
 			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
 		}); err != nil {
-			setupLog.Error(err, "unable to add telemetry pipeline")
+			setupLog.Error(err, "Unable to add telemetry pipeline")
 			os.Exit(1)
 		}
 		setupLog.Info("Telemetry pipeline enabled",
@@ -349,7 +349,7 @@ func main() {
 		Log:    ctrl.Log.WithName("discovery"),
 	}
 	if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
-		setupLog.Error(err, "unable to register SD handler", "path", discovery.Path)
+		setupLog.Error(err, "Unable to register SD handler", "path", discovery.Path)
 		os.Exit(1)
 	}
 	if metricsAddr == "0" || metricsAddr == "" {

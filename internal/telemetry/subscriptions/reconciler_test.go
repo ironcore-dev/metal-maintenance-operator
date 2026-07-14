@@ -14,6 +14,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/subscriptions"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/stmcginnis/gofish/schemas"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -398,14 +399,16 @@ func TestReconcile_BMCBeingDeleted_TearsDownAndRemovesFinalizer(t *testing.T) {
 	// client honours DeletionTimestamp + empty finalizers → deletion.
 	got := &metalv1alpha1.BMC{}
 	err := c.Get(context.Background(), types.NamespacedName{Name: testBMCName}, got)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		if slices.Contains(got.Finalizers, subsFinalizer) {
 			t.Errorf("finalizer still present after teardown: %v", got.Finalizers)
 		}
-	default:
+	case apierrors.IsNotFound(err):
 		// NotFound is also fine — the fake client may have completed the
-		// delete already. Anything else is a bug.
+		// delete already.
+	default:
+		t.Fatalf("unexpected Get error: %v", err)
 	}
 }
 
