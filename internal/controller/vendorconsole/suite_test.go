@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
-	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr/mock"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,6 +28,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr/mock"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -128,6 +129,12 @@ func SetupNamespace() *corev1.Namespace {
 		Expect((&ConsoleReconciler{
 			Client: k8sManager.GetClient(),
 			Scheme: k8sManager.GetScheme(),
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		Expect((&FirmwareUpdateLenovoReconciler{
+			Client:         k8sManager.GetClient(),
+			Scheme:         k8sManager.GetScheme(),
+			ResyncInterval: 200 * time.Millisecond,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		go func() {
