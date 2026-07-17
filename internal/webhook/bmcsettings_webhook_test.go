@@ -11,7 +11,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -33,7 +35,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "P70 v1.45 (12/06/2017)",
 					SettingsMap:             map[string]string{},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		By("Creating a BMCSettings")
@@ -47,7 +49,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 		By("Deleting BMCSettings resources")
 		Expect(k8sClient.DeleteAllOf(ctx, &bmcmaintenancev1alpha1.BMCSettings{})).To(Succeed())
 		By("Deleting ServerMaintenance resources if created")
-		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &metalv1alpha1.ServerMaintenance{}))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &servermaintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
 	})
 
 	Context("When creating or updating BMCSettings under Validating Webhook", func() {
@@ -63,7 +65,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 					BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 						Version:                 "1.45.455b66-rev4",
 						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					}},
 			}
 			Expect(validator.ValidateCreate(ctx, BMCSettingsV2)).Error().To(HaveOccurred())
@@ -80,7 +82,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 					BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 						Version:                 "P70 v1.45 (12/06/2017)",
 						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					}},
 			}
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
@@ -97,7 +99,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 					BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 						Version:                 "P70 v1.45 (12/06/2017)",
 						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					}},
 			}
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
@@ -119,7 +121,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 					BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 						Version:                 "P70 v1.45 (12/06/2017)",
 						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					}},
 			}
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
@@ -132,19 +134,19 @@ var _ = Describe("BMCSettings Webhook", func() {
 
 		It("should not allow update when settings are in progress, but should allow forcing it", func() {
 			By("Creating a ServerMaintenance in InMaintenance state")
-			sm := &metalv1alpha1.ServerMaintenance{
+			sm := &servermaintenancev1alpha1.ServerMaintenance{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-sm-",
 					Namespace:    metav1.NamespaceDefault,
 				},
-				Spec: metalv1alpha1.ServerMaintenanceSpec{
-					Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+				Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+					Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
+				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
 			})).Should(Succeed())
 
 			By("Patching the BMCSettings V1 to InProgress state")
@@ -154,7 +156,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 
 			By("Setting ServerMaintenance reference on BMCSettings V1")
 			Eventually(Update(BMCSettingsV1, func() {
-				BMCSettingsV1.Spec.ServerMaintenanceRefs = []metalv1alpha1.ServerMaintenanceRefItem{
+				BMCSettingsV1.Spec.ServerMaintenanceRefs = []api.ServerMaintenanceRefItem{
 					{ServerMaintenanceRef: &metalv1alpha1.ObjectReference{Name: sm.Name, Namespace: sm.Namespace}},
 				}
 			})).Should(Succeed())
@@ -172,30 +174,30 @@ var _ = Describe("BMCSettings Webhook", func() {
 				BMCSettingsV1.Status.State = bmcmaintenancev1alpha1.BMCSettingsStateApplied
 			})).Should(Succeed())
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = metalv1alpha1.ServerMaintenanceStatePending
+				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
 			})).Should(Succeed())
 		})
 
 		It("should refuse to delete while ServerMaintenance is active", func() {
 			By("Creating a ServerMaintenance in InMaintenance state")
-			sm := &metalv1alpha1.ServerMaintenance{
+			sm := &servermaintenancev1alpha1.ServerMaintenance{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-sm-",
 					Namespace:    metav1.NamespaceDefault,
 				},
-				Spec: metalv1alpha1.ServerMaintenanceSpec{
-					Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+				Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+					Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
+				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
 			})).Should(Succeed())
 
 			By("Setting ServerMaintenance reference on BMCSettings V1")
 			Eventually(Update(BMCSettingsV1, func() {
-				BMCSettingsV1.Spec.ServerMaintenanceRefs = []metalv1alpha1.ServerMaintenanceRefItem{
+				BMCSettingsV1.Spec.ServerMaintenanceRefs = []api.ServerMaintenanceRefItem{
 					{ServerMaintenanceRef: &metalv1alpha1.ObjectReference{Name: sm.Name, Namespace: sm.Namespace}},
 				}
 			})).Should(Succeed())
@@ -208,7 +210,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 			})).Should(Succeed())
 
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = metalv1alpha1.ServerMaintenanceStatePending
+				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
 			})).Should(Succeed())
 		})
 	})

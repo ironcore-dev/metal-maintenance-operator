@@ -11,12 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/third_party/expansion"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -56,47 +57,12 @@ func (e MultiErrorTracker) Error() string {
 	return e.Err.Error()
 }
 
-// BMCUnAvailableError is returned when the BMC is not in an available state.
-type BMCUnAvailableError struct {
-	Message string
-}
-
-func (e BMCUnAvailableError) Error() string {
-	return e.Message
-}
-
-// BMCClientOptions controls optional behaviour of BMC client creation.
-type BMCClientOptions int
-
-const (
-	BMCConnectivityCheckOption BMCClientOptions = 1
-)
-
-// CreateBMCClientOption is a functional option for BMC client creation.
-type CreateBMCClientOption func(*createBMCClientConfig)
-
-type createBMCClientConfig struct {
-	registryURL string
-}
-
-// WithRegistryURL configures the BMC client to use a registry URL after SetBootOverride.
-func WithRegistryURL(url string) CreateBMCClientOption {
-	return func(c *createBMCClientConfig) {
-		c.registryURL = url
-	}
-}
-
-const (
-	bmcSecretUsernameKey = "username"
-	bmcSecretPasswordKey = "password"
-)
-
 // --- ServerMaintenance helpers ---
 
 // IsAnyServerMaintenanceActive returns true if any referenced ServerMaintenance is in InMaintenance state.
 func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []metalv1alpha1.ObjectReference) (bool, error) {
 	for _, ref := range refs {
-		sm := &metalv1alpha1.ServerMaintenance{}
+		sm := &servermaintenancev1alpha1.ServerMaintenance{}
 		if err := c.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: ref.Namespace}, sm); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
@@ -106,7 +72,7 @@ func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []m
 		if !sm.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if sm.Status.State == metalv1alpha1.ServerMaintenanceStateInMaintenance {
+		if sm.Status.State == servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 			return true, nil
 		}
 	}
@@ -114,11 +80,11 @@ func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []m
 }
 
 // GetServerMaintenanceForObjectReference fetches a ServerMaintenance by ObjectReference.
-func GetServerMaintenanceForObjectReference(ctx context.Context, c client.Client, ref *metalv1alpha1.ObjectReference) (*metalv1alpha1.ServerMaintenance, error) {
+func GetServerMaintenanceForObjectReference(ctx context.Context, c client.Client, ref *metalv1alpha1.ObjectReference) (*servermaintenancev1alpha1.ServerMaintenance, error) {
 	if ref == nil {
 		return nil, fmt.Errorf("got nil reference")
 	}
-	maintenance := &metalv1alpha1.ServerMaintenance{}
+	maintenance := &servermaintenancev1alpha1.ServerMaintenance{}
 	if err := c.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: ref.Namespace}, maintenance); err != nil {
 		return nil, fmt.Errorf("failed to get ServerMaintenance: %w", err)
 	}
@@ -408,178 +374,6 @@ func LabelChangeOrAnyFieldChangeInObject(e event.UpdateEvent, oldFields, newFiel
 	return false
 }
 
-// --- BMC client helpers (replaces metal-operator/internal/bmcutils) ---
-
-// GetProtocolScheme returns scheme if set, otherwise defaultScheme.
-func GetProtocolScheme(scheme metalv1alpha1.ProtocolScheme, defaultScheme metalv1alpha1.ProtocolScheme) metalv1alpha1.ProtocolScheme {
-	if scheme != "" {
-		return scheme
-	}
-	return defaultScheme
-}
-
-// GetBMCCredentialsFromSecret extracts username and password from a BMCSecret.
-func GetBMCCredentialsFromSecret(secret *metalv1alpha1.BMCSecret) (string, string, error) {
-	username, err := getValueFromSecret(secret, bmcSecretUsernameKey)
-	if err != nil {
-		return "", "", err
-	}
-	password, err := getValueFromSecret(secret, bmcSecretPasswordKey)
-	if err != nil {
-		return "", "", err
-	}
-	return username, password, nil
-}
-
-func getValueFromSecret(secret *metalv1alpha1.BMCSecret, key string) (string, error) {
-	if secret == nil {
-		return "", errors.New("secret cannot be nil")
-	}
-	if value, ok := secret.Data[key]; ok {
-		return string(value), nil
-	}
-	if valueStr, ok := secret.StringData[key]; ok {
-		return valueStr, nil
-	}
-	return "", fmt.Errorf("cannot find value in BMCSecret '%s' for key '%s' in data nor in stringData", secret.Name, key)
-}
-
-// GetBMCFromBMCName fetches a BMC by name.
-func GetBMCFromBMCName(ctx context.Context, c client.Client, bmcName string) (*metalv1alpha1.BMC, error) {
-	bmcObj := &metalv1alpha1.BMC{}
-	if err := c.Get(ctx, client.ObjectKey{Name: bmcName}, bmcObj); err != nil {
-		return nil, fmt.Errorf("failed to get bmc %q: %w", bmcName, err)
-	}
-	return bmcObj, nil
-}
-
-// GetBMCCredentialsForBMCSecretName fetches credentials from a named BMCSecret.
-func GetBMCCredentialsForBMCSecretName(ctx context.Context, c client.Client, bmcSecretName string) (string, string, error) {
-	bmcSecret := &metalv1alpha1.BMCSecret{}
-	if err := c.Get(ctx, client.ObjectKey{Name: bmcSecretName}, bmcSecret); err != nil {
-		return "", "", fmt.Errorf("failed to get bmc secret: %w", err)
-	}
-	return GetBMCCredentialsFromSecret(bmcSecret)
-}
-
-// GetBMCAddressForBMC returns the IP address of the given BMC.
-func GetBMCAddressForBMC(ctx context.Context, c client.Client, bmcObj *metalv1alpha1.BMC) (string, error) {
-	if bmcObj.Spec.EndpointRef != nil {
-		endpoint := &metalv1alpha1.Endpoint{}
-		if err := c.Get(ctx, client.ObjectKey{Name: bmcObj.Spec.EndpointRef.Name}, endpoint); err != nil {
-			return "", fmt.Errorf("failed to get Endpoints for BMC: %w", err)
-		}
-		return endpoint.Spec.IP.String(), nil
-	}
-	if bmcObj.Spec.Endpoint != nil {
-		return bmcObj.Spec.Endpoint.IP.String(), nil
-	}
-	return "", nil
-}
-
-// GetBMCClientForServer creates a BMC client for the server's underlying BMC.
-func GetBMCClientForServer(ctx context.Context, c client.Client, server *metalv1alpha1.Server, defaultProtocol metalv1alpha1.ProtocolScheme, skipCertValidation bool, options bmc.Options, opts ...CreateBMCClientOption) (bmc.BMC, error) {
-	if server.Spec.BMCRef != nil {
-		b := &metalv1alpha1.BMC{}
-		if err := c.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name}, b); err != nil {
-			return nil, err
-		}
-		anyOpts := make([]any, len(opts))
-		for i, o := range opts {
-			anyOpts[i] = o
-		}
-		return GetBMCClientFromBMC(ctx, c, b, defaultProtocol, skipCertValidation, options, anyOpts...)
-	}
-	if server.Spec.BMC != nil {
-		bmcSecret := &metalv1alpha1.BMCSecret{}
-		if err := c.Get(ctx, client.ObjectKey{Name: server.Spec.BMC.BMCSecretRef.Name}, bmcSecret); err != nil {
-			return nil, err
-		}
-		protocolScheme := GetProtocolScheme(server.Spec.BMC.Protocol.Scheme, defaultProtocol)
-		return CreateBMCClient(ctx, c, protocolScheme, server.Spec.BMC.Protocol.Name, server.Spec.BMC.Address, server.Spec.BMC.Protocol.Port, bmcSecret, options, skipCertValidation, opts...)
-	}
-	return nil, fmt.Errorf("server %s has neither a BMCRef nor a BMC configured", server.Name)
-}
-
-// GetBMCClientFromBMC creates a BMC client from a BMC object.
-func GetBMCClientFromBMC(ctx context.Context, c client.Client, bmcObj *metalv1alpha1.BMC, defaultProtocol metalv1alpha1.ProtocolScheme, skipCertValidation bool, options bmc.Options, opts ...any) (bmc.BMC, error) {
-	var address string
-	var bmcClientOpts []BMCClientOptions
-	var createOpts []CreateBMCClientOption
-	for _, o := range opts {
-		switch v := o.(type) {
-		case BMCClientOptions:
-			bmcClientOpts = append(bmcClientOpts, v)
-		case CreateBMCClientOption:
-			createOpts = append(createOpts, v)
-		}
-	}
-	if !slices.Contains(bmcClientOpts, BMCConnectivityCheckOption) {
-		if bmcObj.Status.State != metalv1alpha1.BMCStateEnabled && bmcObj.Status.State != "" {
-			return nil, BMCUnAvailableError{Message: fmt.Sprintf("BMC %s is not in enabled state: current state: %s", bmcObj.Name, bmcObj.Status.State)}
-		}
-	}
-	if bmcObj.Spec.EndpointRef != nil {
-		endpoint := &metalv1alpha1.Endpoint{}
-		if err := c.Get(ctx, client.ObjectKey{Name: bmcObj.Spec.EndpointRef.Name}, endpoint); err != nil {
-			return nil, fmt.Errorf("failed to get Endpoints for BMC: %w", err)
-		}
-		address = endpoint.Spec.IP.String()
-	}
-	if bmcObj.Spec.Endpoint != nil {
-		address = bmcObj.Spec.Endpoint.IP.String()
-	}
-	bmcSecret := &metalv1alpha1.BMCSecret{}
-	if err := c.Get(ctx, client.ObjectKey{Name: bmcObj.Spec.BMCSecretRef.Name}, bmcSecret); err != nil {
-		return nil, fmt.Errorf("failed to get BMC secret: %w", err)
-	}
-	protocolScheme := GetProtocolScheme(bmcObj.Spec.Protocol.Scheme, defaultProtocol)
-	return CreateBMCClient(ctx, c, protocolScheme, bmcObj.Spec.Protocol.Name, address, bmcObj.Spec.Protocol.Port, bmcSecret, options, skipCertValidation, createOpts...)
-}
-
-// CreateBMCClient creates a BMC client from explicit connection parameters.
-func CreateBMCClient(
-	ctx context.Context,
-	_ client.Client,
-	protocolScheme metalv1alpha1.ProtocolScheme,
-	bmcProtocol metalv1alpha1.ProtocolName,
-	address string,
-	port int32,
-	bmcSecret *metalv1alpha1.BMCSecret,
-	bmcOptions bmc.Options,
-	skipCertValidation bool,
-	opts ...CreateBMCClientOption,
-) (bmc.BMC, error) {
-	cfg := &createBMCClientConfig{}
-	for _, o := range opts {
-		o(cfg)
-	}
-	bmcOptions.Endpoint = fmt.Sprintf("%s://%s", protocolScheme, net.JoinHostPort(address, fmt.Sprintf("%d", port)))
-	var err error
-	bmcOptions.Username, bmcOptions.Password, err = GetBMCCredentialsFromSecret(bmcSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get credentials from BMC secret: %w", err)
-	}
-	bmcOptions.InsecureTLS = skipCertValidation
-	log := ctrl.LoggerFrom(ctx)
-	log.V(1).Info("Creating BMC client", "Protocol", bmcProtocol, "Address", bmcOptions.Endpoint, "Username", bmcOptions.Username)
-	switch bmcProtocol {
-	case metalv1alpha1.ProtocolRedfish:
-		return bmc.NewRedfishBMCClient(ctx, bmcOptions)
-	case metalv1alpha1.ProtocolRedfishLocal:
-		return bmc.NewRedfishLocalBMCClient(ctx, bmcOptions)
-	case metalv1alpha1.ProtocolRedfishWithRegistryPatch:
-		return bmc.NewRedfishLocalBMCClientWithRegistry(ctx, bmcOptions, cfg.registryURL)
-	default:
-		return nil, fmt.Errorf("unsupported BMC protocol %s", bmcProtocol)
-	}
-}
-
-// GetServerNameFromBMCandIndex derives the server name for a given BMC and index.
-func GetServerNameFromBMCandIndex(index int, bmcObj *metalv1alpha1.BMC) string {
-	return fmt.Sprintf("%s-%s-%d", bmcObj.Name, "system", index)
-}
-
 // ResetBMCOfServer triggers a graceful BMC reset for the server.
 func ResetBMCOfServer(ctx context.Context, kClient client.Client, server *metalv1alpha1.Server, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
@@ -651,7 +445,7 @@ func ResolveVariables(
 	ctx context.Context,
 	c client.Client,
 	owner client.Object,
-	variables []metalv1alpha1.Variable,
+	variables []api.Variable,
 ) (map[string]string, error) {
 	resolved := make(map[string]string, len(variables))
 	for _, v := range variables {
@@ -684,7 +478,7 @@ func resolveVariable(
 	ctx context.Context,
 	c client.Client,
 	owner client.Object,
-	v metalv1alpha1.Variable,
+	v api.Variable,
 	resolved map[string]string,
 ) (string, error) {
 	if v.ValueFrom == nil {

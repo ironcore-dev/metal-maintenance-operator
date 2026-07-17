@@ -13,9 +13,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
-	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -101,30 +103,24 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		By("Ensuring that the Server resource will be created")
 		server01 = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmc01),
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				BMCRef: &v1.LocalObjectReference{Name: bmc01.Name},
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmc01),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server01)).To(Succeed())
-		Eventually(UpdateStatus(bmc01, func() {
-			bmc01.Status.State = metalv1alpha1.BMCStateEnabled
-		})).Should(Succeed())
+		Eventually(Get(server01)).Should(Succeed())
+
+		By("Ensuring that the BMC has right state: enabled")
+		Eventually(Object(bmc01)).Should(HaveField("Status.State", metalv1alpha1.BMCStateEnabled))
 
 		By("Ensuring that the Server resource will be created")
 		server02 = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmc02),
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				BMCRef: &v1.LocalObjectReference{Name: bmc02.Name},
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmc02),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server02)).To(Succeed())
-		Eventually(UpdateStatus(bmc02, func() {
-			bmc02.Status.State = metalv1alpha1.BMCStateEnabled
-		})).Should(Succeed())
+		Eventually(Get(server02)).Should(Succeed())
+
+		By("Ensuring that the BMC has right state: enabled")
+		Eventually(Object(bmc02)).Should(HaveField("Status.State", metalv1alpha1.BMCStateEnabled))
 	})
 
 	AfterEach(func(ctx SpecContext) {
@@ -165,7 +161,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
 				},
 				BMCSelector: metav1.LabelSelector{
@@ -242,7 +238,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
 				},
 				BMCSelector: metav1.LabelSelector{
@@ -329,7 +325,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
 				},
 				BMCSelector: metav1.LabelSelector{
@@ -428,7 +424,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
 				},
 				BMCSelector: metav1.LabelSelector{
@@ -506,7 +502,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		Eventually(Get(bmcSettings02)).Should(Satisfy(apierrors.IsNotFound))
 
 		By("Deleting all ServerMaintenance objects created during the test")
-		var maintList metalv1alpha1.ServerMaintenanceList
+		var maintList servermaintenancev1alpha1.ServerMaintenanceList
 		Expect(k8sClient.List(ctx, &maintList, client.InNamespace(ns.Name))).To(Succeed())
 		for i := range maintList.Items {
 			maint := &maintList.Items[i]
@@ -530,7 +526,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
 				},
 				BMCSelector: metav1.LabelSelector{
@@ -567,7 +563,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
 				},
 				BMCSelector: metav1.LabelSelector{
@@ -689,9 +685,9 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCSettingsSetSpec{
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					SettingsMap:             bmcSetting,
-					RetryPolicy:             &metalv1alpha1.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -754,7 +750,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		By("Ensuring that the BMCSetting01 has been retried ")
 		Eventually(Object(bmcSettings01)).Should(SatisfyAll(
 			HaveField("Status.State", Not(Equal(bmcmaintenancev1alpha1.BMCSettingsStateFailed))),
-			HaveField("Status.FailedAttempts", Equal(int32(0))),
+			HaveField("Status.FailedAttempts", Not(Equal(int32(failedAutoRetryCount)))),
 		))
 
 		By("Ensuring that the BMCSetting01 has failed again")

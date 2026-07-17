@@ -8,7 +8,9 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -30,8 +32,8 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   metalv1alpha1.ImageSpec{URI: "one"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: "one"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -53,8 +55,8 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   metalv1alpha1.ImageSpec{URI: "two"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: "two"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -71,8 +73,8 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   metalv1alpha1.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: "asd"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -89,8 +91,8 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   metalv1alpha1.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: "asd"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -112,8 +114,8 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   metalv1alpha1.ImageSpec{URI: "two"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: "two"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -135,8 +137,8 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   metalv1alpha1.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: "asd"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -151,19 +153,19 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	It("should not allow update when BIOSVersion is in progress, but should allow force update", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &metalv1alpha1.ServerMaintenance{
+		sm := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: metalv1alpha1.ServerMaintenanceSpec{
-				Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Patching the BIOSVersion V1 to in-progress state")
@@ -191,25 +193,25 @@ var _ = Describe("BIOSVersion Webhook", func() {
 		})).Should(Succeed())
 
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 	})
 
 	It("should refuse to delete while ServerMaintenance is active", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &metalv1alpha1.ServerMaintenance{
+		sm := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: metalv1alpha1.ServerMaintenanceSpec{
-				Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Setting ServerMaintenanceRef on BIOSVersion V1")
@@ -222,7 +224,7 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 		By("Deactivating the ServerMaintenance")
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 
 		By("Validating deletion of BIOSVersion V1 should succeed once maintenance is inactive")

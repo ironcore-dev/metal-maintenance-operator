@@ -15,6 +15,7 @@ import (
 
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	"github.com/ironcore-dev/metal-operator/bmc"
+	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	"github.com/stmcginnis/gofish/schemas"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/controller-utils/conditionutils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -277,9 +279,9 @@ func (r *BIOSSettingsReconciler) reconcile(ctx context.Context, settings *server
 		return ctrl.Result{}, err
 	}
 
-	bmcClient, err := utils.GetBMCClientForServer(ctx, r.Client, server, r.DefaultProtocol, r.SkipCertValidation, r.BMCOptions)
+	bmcClient, err := bmcutils.GetBMCClientForServer(ctx, r.Client, server, r.DefaultProtocol, r.SkipCertValidation, r.BMCOptions)
 	if err != nil {
-		if errors.As(err, &utils.BMCUnAvailableError{}) {
+		if errors.As(err, &bmcutils.BMCUnAvailableError{}) {
 			log.V(1).Info("BMC is not available", "BMC", server.Spec.BMCRef.Name, "Server", server.Name, "Message", err.Error())
 			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
@@ -480,7 +482,7 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 		return ctrl.Result{}, err
 	}
 
-	settingsFlow := append([]metalv1alpha1.SettingsFlowItem{}, settings.Spec.SettingsFlow...)
+	settingsFlow := append([]api.SettingsFlowItem{}, settings.Spec.SettingsFlow...)
 
 	sort.Slice(settingsFlow, func(i, j int) bool {
 		return settingsFlow[i].Priority <= settingsFlow[j].Priority
@@ -608,7 +610,7 @@ func (r *BIOSSettingsReconciler) handleBMCReset(ctx context.Context, bmcClient b
 	return true, nil
 }
 
-func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClient bmc.BMC, settings *servermaintenancev1alpha1.BIOSSettings, flowItem *metalv1alpha1.SettingsFlowItem, flowStatus *servermaintenancev1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server) (bool, error) {
+func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClient bmc.BMC, settings *servermaintenancev1alpha1.BIOSSettings, flowItem *api.SettingsFlowItem, flowStatus *servermaintenancev1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if modified, err := r.setTimeoutForAppliedSettings(ctx, settings, flowStatus); modified || err != nil {
 		return false, err
@@ -782,7 +784,7 @@ func (r *BIOSSettingsReconciler) setTimeoutForAppliedSettings(ctx context.Contex
 	return false, nil
 }
 
-func (r *BIOSSettingsReconciler) verifySettingsUpdateComplete(ctx context.Context, bmcClient bmc.BMC, biosSettings *servermaintenancev1alpha1.BIOSSettings, flowItem *metalv1alpha1.SettingsFlowItem, flowStatus *servermaintenancev1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server) (bool, error) {
+func (r *BIOSSettingsReconciler) verifySettingsUpdateComplete(ctx context.Context, bmcClient bmc.BMC, biosSettings *servermaintenancev1alpha1.BIOSSettings, flowItem *api.SettingsFlowItem, flowStatus *servermaintenancev1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	verifySettingUpdate, err := utils.GetCondition(r.Conditions, flowStatus.Conditions, ConditionSettingsVerify)
 	if err != nil {
@@ -888,7 +890,7 @@ func (r *BIOSSettingsReconciler) rebootServer(ctx context.Context, settings *ser
 	return nil
 }
 
-func (r *BIOSSettingsReconciler) applyBIOSSettings(ctx context.Context, bmcClient bmc.BMC, settings *servermaintenancev1alpha1.BIOSSettings, flowItem *metalv1alpha1.SettingsFlowItem, flowStatus *servermaintenancev1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server, issueBiosUpdate *metav1.Condition) error {
+func (r *BIOSSettingsReconciler) applyBIOSSettings(ctx context.Context, bmcClient bmc.BMC, settings *servermaintenancev1alpha1.BIOSSettings, flowItem *api.SettingsFlowItem, flowStatus *servermaintenancev1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server, issueBiosUpdate *metav1.Condition) error {
 	log := ctrl.LoggerFrom(ctx)
 	settingsDiff, err := r.getSettingsDiff(ctx, bmcClient, flowItem.Settings, server)
 	if err != nil {
@@ -1270,17 +1272,19 @@ func (r *BIOSSettingsReconciler) requestMaintenanceForServer(ctx context.Context
 		return true, nil
 	}
 
-	serverMaintenance := &metalv1alpha1.ServerMaintenance{
+	serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: r.ManagerNamespace,
 			Name:      settings.Name,
 		}}
 
 	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {
-		serverMaintenance.Spec.Policy = settings.Spec.ServerMaintenancePolicy
+		if settings.Spec.ServerMaintenancePolicy != nil {
+			serverMaintenance.Spec.Policy = *settings.Spec.ServerMaintenancePolicy
+		}
 		serverMaintenance.Spec.ServerPower = metalv1alpha1.PowerOn
 		serverMaintenance.Spec.ServerRef = &corev1.LocalObjectReference{Name: server.Name}
-		if serverMaintenance.Status.State != metalv1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
+		if serverMaintenance.Status.State != servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
 			serverMaintenance.Status.State = ""
 		}
 		return controllerutil.SetControllerReference(settings, serverMaintenance, r.Client.Scheme())
@@ -1326,7 +1330,7 @@ func (r *BIOSSettingsReconciler) patchBIOSSettingsRefForServer(ctx context.Conte
 	return r.Patch(ctx, server, client.MergeFrom(serverBase))
 }
 
-func (r *BIOSSettingsReconciler) patchMaintenanceRef(ctx context.Context, settings *servermaintenancev1alpha1.BIOSSettings, maintenance *metalv1alpha1.ServerMaintenance) error {
+func (r *BIOSSettingsReconciler) patchMaintenanceRef(ctx context.Context, settings *servermaintenancev1alpha1.BIOSSettings, maintenance *servermaintenancev1alpha1.ServerMaintenance) error {
 	biosSettingsBase := settings.DeepCopy()
 
 	if maintenance == nil {
@@ -1456,7 +1460,7 @@ func (r *BIOSSettingsReconciler) updateStatus(ctx context.Context, settings *ser
 	return nil
 }
 
-func (r *BIOSSettingsReconciler) getFlowItemFromSettingsStatus(settings *servermaintenancev1alpha1.BIOSSettings, flowItem *metalv1alpha1.SettingsFlowItem) *servermaintenancev1alpha1.BIOSSettingsFlowStatus {
+func (r *BIOSSettingsReconciler) getFlowItemFromSettingsStatus(settings *servermaintenancev1alpha1.BIOSSettings, flowItem *api.SettingsFlowItem) *servermaintenancev1alpha1.BIOSSettingsFlowStatus {
 	if len(settings.Status.FlowState) == 0 {
 		return nil
 	}
@@ -1563,7 +1567,7 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByBiosVersionResource(ctx co
 func (r *BIOSSettingsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&servermaintenancev1alpha1.BIOSSettings{}).
-		Owns(&metalv1alpha1.ServerMaintenance{}).
+		Owns(&servermaintenancev1alpha1.ServerMaintenance{}).
 		Watches(&metalv1alpha1.Server{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBiosSettingsByServerRefs)).
 		Watches(&servermaintenancev1alpha1.BIOSVersion{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBiosSettingsByBiosVersionResource)).
 		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBiosSettingsByBMC)).

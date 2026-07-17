@@ -14,14 +14,17 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/controller-utils/metautils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
-	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 )
 
 var _ = Describe("BMCVersion Controller", func() {
@@ -71,27 +74,27 @@ var _ = Describe("BMCVersion Controller", func() {
 		By("Ensuring that the Server resource will be created")
 		server = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmcObj),
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmcObj),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+		Eventually(Get(server)).Should(Succeed())
 
 		By("Ensuring that the Server is in an available state")
 		Eventually(UpdateStatus(server, func() {
 			server.Status.State = metalv1alpha1.ServerStateAvailable
 		})).Should(Succeed())
 
-		Eventually(UpdateStatus(bmcObj, func() {
-			bmcObj.Status.State = metalv1alpha1.BMCStateEnabled
-		})).Should(Succeed())
+		By("Ensuring that the BMC has right state: enabled")
+		Eventually(Object(bmcObj)).Should(SatisfyAll(
+			HaveField("Status.State", metalv1alpha1.BMCStateEnabled),
+		))
 	})
 
 	AfterEach(func(ctx SpecContext) {
 		Expect(k8sClient.Delete(ctx, bmcObj)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, server)).To(Succeed())
+		// The simulated BMC controller deletes its discovered Server on BMC
+		// deletion, so the Server may already be gone by the time we get here.
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server))).To(Succeed())
 		Expect(k8sClient.Delete(ctx, bmcSecret)).To(Succeed())
 		EnsureCleanState()
 		mockServers[0].ResetUpgradeTask("/redfish/v1/Managers/BMC")
@@ -107,8 +110,8 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 mockUpServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: mockUpServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -125,7 +128,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has NOT been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
 		By("Deleting the BMCVersion")
@@ -161,8 +164,8 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -174,10 +177,10 @@ var _ = Describe("BMCVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
@@ -198,7 +201,9 @@ var _ = Describe("BMCVersion Controller", func() {
 		)
 
 		By("Ensuring that Server in Maintenance state")
-		simulateMaintenanceGranted(server, serverMaintenance)
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
 
 		ensureBMCVersionConditionTransition(acc, bmcVersion)
 
@@ -217,7 +222,10 @@ var _ = Describe("BMCVersion Controller", func() {
 
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
-		simulateMaintenanceReleased(server)
+		By("Ensuring that Server has left Maintenance state")
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+		)
 
 		By("Deleting the BMCVersion")
 		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
@@ -278,8 +286,8 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyOwnerApproval,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				},
 			},
 		}
@@ -291,10 +299,10 @@ var _ = Describe("BMCVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
@@ -320,11 +328,13 @@ var _ = Describe("BMCVersion Controller", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring that Server in Maintenance state")
-		simulateMaintenanceGranted(server, serverMaintenance)
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
 
 		ensureBMCVersionConditionTransition(acc, bmcVersion)
 
@@ -352,7 +362,9 @@ var _ = Describe("BMCVersion Controller", func() {
 
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).To(Succeed())
-		simulateMaintenanceReleased(server)
+		Eventually(Update(server, func() {
+			server.Spec.ServerClaimRef = nil
+		})).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
@@ -373,9 +385,9 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion + " fail",
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &metalv1alpha1.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 			},
 		}
@@ -405,7 +417,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
 		// clean up maintenance if any, as the test not auto delete child objects
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Expect(k8sClient.List(ctx, &serverMaintenanceList)).To(Succeed())
 		for _, maintenance := range serverMaintenanceList.Items {
 			if metav1.IsControlledBy(&maintenance, bmcVersion) {
@@ -427,18 +439,18 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
@@ -446,7 +458,9 @@ var _ = Describe("BMCVersion Controller", func() {
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 
-		simulateMaintenanceGranted(server, serverMaintenance)
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
 
 		By("Manually clearing spec.serverMaintenanceRefs while keeping the object alive")
 		Eventually(Update(bmcVersion, func() {
@@ -476,8 +490,8 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -489,10 +503,10 @@ var _ = Describe("BMCVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
@@ -500,7 +514,9 @@ var _ = Describe("BMCVersion Controller", func() {
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 
-		simulateMaintenanceGranted(server, serverMaintenance)
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
 
 		By("Ensuring that spec.serverMaintenanceRefs is populated")
 		Eventually(Object(bmcVersion)).Should(
@@ -533,14 +549,14 @@ var _ = Describe("BMCVersion Controller", func() {
 
 	It("should not delete ServerMaintenance objects not owned by BMCVersion", func(ctx SpecContext) {
 		By("Creating a standalone ServerMaintenance without owner reference")
-		orphanMaintenance := &metalv1alpha1.ServerMaintenance{
+		orphanMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
 				GenerateName: "orphan-",
 			},
-			Spec: metalv1alpha1.ServerMaintenanceSpec{
+			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
-				Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 			},
 		}
 		Expect(k8sClient.Create(ctx, orphanMaintenance)).To(Succeed())
@@ -554,8 +570,8 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 mockUpServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: mockUpServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -567,7 +583,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		})).Should(Succeed())
 
 		By("Recording the non-owned ServerMaintenance for later verification")
-		nonOwnedMaintenance := &metalv1alpha1.ServerMaintenance{
+		nonOwnedMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      orphanMaintenance.Name,
@@ -584,7 +600,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		Consistently(Get(nonOwnedMaintenance)).Should(Succeed())
 
 		By("Verifying no other ServerMaintenance objects were created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Expect(ObjectList(&serverMaintenanceList)()).To(HaveField("Items", HaveLen(1)))
 		Expect(serverMaintenanceList.Items[0].Name).To(Equal(orphanMaintenance.Name))
 
@@ -604,18 +620,18 @@ var _ = Describe("BMCVersion Controller", func() {
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
@@ -623,7 +639,9 @@ var _ = Describe("BMCVersion Controller", func() {
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 
-		simulateMaintenanceGranted(server, serverMaintenance)
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
 
 		By("Clearing spec.serverMaintenanceRefs")
 		Eventually(Update(bmcVersion, func() {

@@ -16,6 +16,7 @@ import (
 	"github.com/ironcore-dev/controller-utils/modutils"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/testutil/simcontrollers"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
@@ -52,7 +53,6 @@ var (
 	mockServers []*mockserver.MockServer
 
 	mockUpServerBiosVersion = "P79 v1.45 (12/06/2017)"
-	trueValue               = "true"
 )
 
 func TestControllers(t *testing.T) {
@@ -114,9 +114,9 @@ func registerIndexFields(ctx context.Context, indexer client.FieldIndexer) error
 	}); err != nil {
 		return err
 	}
-	if err := indexer.IndexField(ctx, &metalv1alpha1.ServerMaintenance{}, "spec.serverRef.name", func(obj client.Object) []string {
-		sm := obj.(*metalv1alpha1.ServerMaintenance)
-		if sm.Spec.ServerRef == nil {
+	if err := indexer.IndexField(ctx, &servermaintenancev1alpha1.ServerMaintenance{}, serverRefField, func(obj client.Object) []string {
+		sm, ok := obj.(*servermaintenancev1alpha1.ServerMaintenance)
+		if !ok || sm.Spec.ServerRef == nil {
 			return nil
 		}
 		return []string{sm.Spec.ServerRef.Name}
@@ -194,6 +194,50 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			ResyncInterval: 10 * time.Millisecond,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		Expect((&ServerMaintenanceReconciler{
+			Client: k8sManager.GetClient(),
+			Scheme: k8sManager.GetScheme(),
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real
+		// BMC/Server controllers - which live in metal-operator's internal package
+		// and can't be imported - by syncing status (PowerState, FirmwareVersion,
+		// maintenance state) from the mock Redfish server and from
+		// Server.Spec.ServerMaintenanceRef, so tests don't need to manually patch
+		// those fields.
+		Expect((&simcontrollers.BMCReconciler{
+			Client:             k8sManager.GetClient(),
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			ResyncInterval:     10 * time.Millisecond,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		Expect((&simcontrollers.ServerReconciler{
+			Client:             k8sManager.GetClient(),
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			ResyncInterval:     10 * time.Millisecond,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		// simcontrollers.ServerClaimReconciler mimics metal-operator's real
+		// ServerClaimReconciler - which also lives in metal-operator's internal
+		// package - by claiming the referenced Server and propagating the
+		// claim's desired power state once the Server reaches Reserved.
+		Expect((&simcontrollers.ServerClaimReconciler{
+			Client:         k8sManager.GetClient(),
+			ResyncInterval: 10 * time.Millisecond,
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
 		if len(redfishMockServers) > 0 {
 			mockServers = make([]*mockserver.MockServer, 0, len(redfishMockServers))
 			for _, serverAddr := range redfishMockServers {
@@ -237,7 +281,7 @@ func EnsureCleanState() {
 		&metalv1alpha1.BMCList{},
 		&metalv1alpha1.BMCSecretList{},
 		&metalv1alpha1.ServerList{},
-		&metalv1alpha1.ServerMaintenanceList{},
+		&servermaintenancev1alpha1.ServerMaintenanceList{},
 		&servermaintenancev1alpha1.BIOSSettingsList{},
 		&servermaintenancev1alpha1.BIOSSettingsSetList{},
 		&servermaintenancev1alpha1.BIOSVersionList{},
@@ -248,4 +292,3 @@ func EnsureCleanState() {
 		Eventually(ObjectList(list)).Should(HaveField("Items", HaveLen(0)))
 	}
 }
-

@@ -7,7 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 )
 
 // BMCSettingsTemplate defines the template for BMC settings to be applied.
@@ -24,15 +25,15 @@ type BMCSettingsTemplate struct {
 	// Variables is a list of variables that can be used in the settings for templating.
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
-	Variables []metalv1alpha1.Variable `json:"variables,omitempty"`
+	Variables []api.Variable `json:"variables,omitempty"`
 
 	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
 	// +optional
-	RetryPolicy *metalv1alpha1.RetryPolicy `json:"retryPolicy,omitempty"`
+	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
 
 	// ServerMaintenancePolicy is a maintenance policy to be applied on the server.
 	// +optional
-	ServerMaintenancePolicy metalv1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+	ServerMaintenancePolicy servermaintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
 }
 
 // BMCSettingsSpec defines the desired state of BMCSettings.
@@ -42,7 +43,7 @@ type BMCSettingsSpec struct {
 	// ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each
 	// server that needs to be updated with the BMC settings.
 	// +optional
-	ServerMaintenanceRefs []metalv1alpha1.ServerMaintenanceRefItem `json:"serverMaintenanceRefs,omitempty"`
+	ServerMaintenanceRefs []api.ServerMaintenanceRefItem `json:"serverMaintenanceRefs,omitempty"`
 
 	// BMCRef is a reference to a specific BMC to apply settings to.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="BMCRef is immutable"

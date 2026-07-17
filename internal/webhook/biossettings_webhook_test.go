@@ -8,7 +8,9 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,12 +36,12 @@ var _ = Describe("BIOSSettings Webhook", func() {
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: defaultMockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -52,7 +54,7 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		By("Deleting Server resources if created")
 		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &metalv1alpha1.Server{}))).To(Succeed())
 		By("Deleting ServerMaintenance resources if created")
-		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &metalv1alpha1.ServerMaintenance{}))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &servermaintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
 	})
 
 	It("should deny creation if a Server already has a BIOSSettings", func(ctx SpecContext) {
@@ -65,12 +67,12 @@ var _ = Describe("BIOSSettings Webhook", func() {
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: defaultMockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -87,12 +89,12 @@ var _ = Describe("BIOSSettings Webhook", func() {
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: defaultMockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -109,12 +111,12 @@ var _ = Describe("BIOSSettings Webhook", func() {
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: anotherMockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -136,12 +138,12 @@ var _ = Describe("BIOSSettings Webhook", func() {
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: anotherMockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -163,12 +165,12 @@ var _ = Describe("BIOSSettings Webhook", func() {
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: anotherMockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -182,19 +184,19 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	It("should not allow update of BIOSSettings which are in-progress, but should allow forcefully deleting it", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &metalv1alpha1.ServerMaintenance{
+		sm := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: metalv1alpha1.ServerMaintenanceSpec{
-				Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Patching the BIOSSettings V1 to InProgress state")
@@ -209,7 +211,7 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 		By("Denying the spec update of an in-progress BIOSSettings")
 		biosSettingsV1Updated := biosSettingsV1.DeepCopy()
-		biosSettingsV1Updated.Spec.SettingsFlow = []metalv1alpha1.SettingsFlowItem{{Priority: 1, Settings: map[string]string{"test": "value"}}}
+		biosSettingsV1Updated.Spec.SettingsFlow = []api.SettingsFlowItem{{Priority: 1, Settings: map[string]string{"test": "value"}}}
 		Expect(validator.ValidateUpdate(ctx, biosSettingsV1, biosSettingsV1Updated)).Error().To(HaveOccurred())
 
 		By("Allowing the spec update of an in-progress BIOSSettings with force-update annotation")
@@ -222,25 +224,25 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		})).Should(Succeed())
 
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 	})
 
 	It("should deny deletion of an in-progress BIOSSettings", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &metalv1alpha1.ServerMaintenance{
+		sm := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: metalv1alpha1.ServerMaintenanceSpec{
-				Policy:    metalv1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Patching the BIOSSettings V1 to InProgress state")
@@ -262,7 +264,7 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		})).Should(Succeed())
 
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = metalv1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 	})
 })

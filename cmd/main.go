@@ -443,6 +443,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&servermaintenancectrl.ServerMaintenanceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create ServerMaintenance controller")
+		os.Exit(1)
+	}
+
 	if err = (&servermaintenancectrl.BIOSSettingsReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,

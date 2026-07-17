@@ -8,11 +8,13 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/controller-utils/metautils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
-	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -94,8 +96,8 @@ var _ = Describe("BIOSVersion Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 mockUpServerBiosVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: mockUpServerBiosVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: mockUpServerBiosVersion},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -113,7 +115,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has NOT been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
 		By("Deleting the BIOSVersion")
@@ -146,8 +148,8 @@ var _ = Describe("BIOSVersion Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 upgradeServerBiosVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBiosVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -160,10 +162,10 @@ var _ = Describe("BIOSVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosVersion.Name,
@@ -266,8 +268,8 @@ var _ = Describe("BIOSVersion Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 upgradeServerBiosVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBiosVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -280,10 +282,10 @@ var _ = Describe("BIOSVersion Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosVersion.Name,
@@ -306,7 +308,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring that Server in Maintenance state")
@@ -363,9 +365,9 @@ var _ = Describe("BIOSVersion Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 upgradeServerBiosVersion + " fail",
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBiosVersion + " fail"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &metalv1alpha1.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion + " fail"},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -396,7 +398,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
 		// clean up maintenance if any, as the test not auto delete child objects
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Expect(k8sClient.List(ctx, &serverMaintenanceList)).To(Succeed())
 		for _, maintenance := range serverMaintenanceList.Items {
 			if metav1.IsControlledBy(&maintenance, biosVersion) {
@@ -462,7 +464,7 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 		By("Ensuring that the Server resource will be created")
 		server = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmcObj),
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmcObj),
 			},
 		}
 		Eventually(Get(server)).Should(Succeed())
@@ -499,8 +501,8 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
 					Version:                 upgradeServerBiosVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBiosVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -513,10 +515,10 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosVersion.Name,

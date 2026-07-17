@@ -11,11 +11,13 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/controller-utils/conditionutils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
+	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	"github.com/stmcginnis/gofish"
 	"github.com/stmcginnis/gofish/schemas"
 	corev1 "k8s.io/api/core/v1"
@@ -186,9 +188,9 @@ func (r *BIOSVersionReconciler) transitionState(ctx context.Context, biosVersion
 		return false, fmt.Errorf("failed to fetch server: %w", err)
 	}
 
-	bmcClient, err := utils.GetBMCClientForServer(ctx, r.Client, server, r.DefaultProtocol, r.SkipCertValidation, r.BMCOptions)
+	bmcClient, err := bmcutils.GetBMCClientForServer(ctx, r.Client, server, r.DefaultProtocol, r.SkipCertValidation, r.BMCOptions)
 	if err != nil {
-		if errors.As(err, &utils.BMCUnAvailableError{}) {
+		if errors.As(err, &bmcutils.BMCUnAvailableError{}) {
 			log.V(1).Info("BMC is not available, skipping", "BMC", server.Spec.BMCRef.Name, "Server", server.Name, "error", err)
 			return true, nil
 		}
@@ -634,12 +636,12 @@ func (r *BIOSVersionReconciler) cleanup(ctx context.Context, bmcClient bmc.BMC, 
 	return r.updateStatus(ctx, biosVersion, servermaintenancev1alpha1.BIOSVersionStateInProgress, nil, nil)
 }
 
-func (r *BIOSVersionReconciler) getServerMaintenanceForRef(ctx context.Context, serverMaintenanceRef *metalv1alpha1.ObjectReference) (*metalv1alpha1.ServerMaintenance, error) {
+func (r *BIOSVersionReconciler) getServerMaintenanceForRef(ctx context.Context, serverMaintenanceRef *metalv1alpha1.ObjectReference) (*servermaintenancev1alpha1.ServerMaintenance, error) {
 	if serverMaintenanceRef == nil {
 		return nil, fmt.Errorf("server maintenance reference is nil")
 	}
 
-	serverMaintenance := &metalv1alpha1.ServerMaintenance{}
+	serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{}
 	if err := r.Get(ctx, client.ObjectKey{Name: serverMaintenanceRef.Name, Namespace: r.ManagerNamespace}, serverMaintenance); err != nil {
 		return serverMaintenance, err
 	}
@@ -651,7 +653,7 @@ func (r *BIOSVersionReconciler) updateStatus(
 	ctx context.Context,
 	biosVersion *servermaintenancev1alpha1.BIOSVersion,
 	state servermaintenancev1alpha1.BIOSVersionState,
-	upgradeTask *metalv1alpha1.Task,
+	upgradeTask *api.Task,
 	condition *metav1.Condition,
 ) error {
 	if biosVersion.Status.State == state && condition == nil && upgradeTask == nil {
@@ -685,7 +687,7 @@ func (r *BIOSVersionReconciler) updateStatus(
 	return nil
 }
 
-func (r *BIOSVersionReconciler) patchServerMaintenanceRef(ctx context.Context, biosVersion *servermaintenancev1alpha1.BIOSVersion, serverMaintenance *metalv1alpha1.ServerMaintenance) error {
+func (r *BIOSVersionReconciler) patchServerMaintenanceRef(ctx context.Context, biosVersion *servermaintenancev1alpha1.BIOSVersion, serverMaintenance *servermaintenancev1alpha1.ServerMaintenance) error {
 	biosVersionsBase := biosVersion.DeepCopy()
 
 	if serverMaintenance == nil {
@@ -755,7 +757,7 @@ func (r *BIOSVersionReconciler) requestServerMaintenance(ctx context.Context, bi
 		return true, nil
 	}
 
-	serverMaintenance := &metalv1alpha1.ServerMaintenance{
+	serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: r.ManagerNamespace,
 			Name:      biosVersion.Name,
@@ -763,10 +765,12 @@ func (r *BIOSVersionReconciler) requestServerMaintenance(ctx context.Context, bi
 	}
 
 	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {
-		serverMaintenance.Spec.Policy = biosVersion.Spec.ServerMaintenancePolicy
+		if biosVersion.Spec.ServerMaintenancePolicy != nil {
+			serverMaintenance.Spec.Policy = *biosVersion.Spec.ServerMaintenancePolicy
+		}
 		serverMaintenance.Spec.ServerPower = metalv1alpha1.PowerOn
 		serverMaintenance.Spec.ServerRef = &corev1.LocalObjectReference{Name: server.Name}
-		if serverMaintenance.Status.State != metalv1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
+		if serverMaintenance.Status.State != servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
 			serverMaintenance.Status.State = ""
 		}
 		return controllerutil.SetControllerReference(biosVersion, serverMaintenance, r.Client.Scheme())
@@ -808,7 +812,7 @@ func (r *BIOSVersionReconciler) checkUpdateBiosUpgradeStatus(
 	}
 	log.V(1).Info("BIOS upgrade task current status", "TaskState", taskCurrentStatus.TaskState)
 
-	upgradeCurrentTaskStatus := &metalv1alpha1.Task{
+	upgradeCurrentTaskStatus := &api.Task{
 		URI:             biosVersion.Status.UpgradeTask.URI,
 		State:           taskCurrentStatus.TaskState,
 		Status:          taskCurrentStatus.TaskStatus,
@@ -903,7 +907,7 @@ func (r *BIOSVersionReconciler) upgradeBIOSVersion(
 	}
 
 	var forceUpdate bool
-	if biosVersion.Spec.UpdatePolicy != nil && *biosVersion.Spec.UpdatePolicy == metalv1alpha1.UpdatePolicyForce {
+	if biosVersion.Spec.UpdatePolicy != nil && *biosVersion.Spec.UpdatePolicy == api.UpdatePolicyForce {
 		forceUpdate = true
 	}
 
@@ -919,7 +923,7 @@ func (r *BIOSVersionReconciler) upgradeBIOSVersion(
 		return bmcClient.UpgradeBiosVersion(ctx, server.Status.Manufacturer, parameters)
 	}()
 
-	upgradeCurrentTaskStatus := &metalv1alpha1.Task{URI: taskMonitor}
+	upgradeCurrentTaskStatus := &api.Task{URI: taskMonitor}
 
 	if isFatal {
 		log.Error(err, "Failed to issue BIOS upgrade", "Version", biosVersion.Spec.Version, "Server", server.Name)
@@ -1061,7 +1065,7 @@ func (r *BIOSVersionReconciler) enqueueBiosSettingsByBMC(ctx context.Context, ob
 func (r *BIOSVersionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&servermaintenancev1alpha1.BIOSVersion{}).
-		Owns(&metalv1alpha1.ServerMaintenance{}).
+		Owns(&servermaintenancev1alpha1.ServerMaintenance{}).
 		Watches(&metalv1alpha1.Server{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBiosVersionByServerRefs)).
 		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBiosSettingsByBMC)).
 		Complete(r)

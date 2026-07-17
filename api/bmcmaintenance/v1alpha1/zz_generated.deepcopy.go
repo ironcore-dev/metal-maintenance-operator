@@ -8,8 +8,9 @@
 package v1alpha1
 
 import (
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	apiv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -170,7 +171,7 @@ func (in *BMCSettingsSpec) DeepCopyInto(out *BMCSettingsSpec) {
 	in.BMCSettingsTemplate.DeepCopyInto(&out.BMCSettingsTemplate)
 	if in.ServerMaintenanceRefs != nil {
 		in, out := &in.ServerMaintenanceRefs, &out.ServerMaintenanceRefs
-		*out = make([]apiv1alpha1.ServerMaintenanceRefItem, len(*in))
+		*out = make([]api.ServerMaintenanceRefItem, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -226,14 +227,14 @@ func (in *BMCSettingsTemplate) DeepCopyInto(out *BMCSettingsTemplate) {
 	}
 	if in.Variables != nil {
 		in, out := &in.Variables, &out.Variables
-		*out = make([]apiv1alpha1.Variable, len(*in))
+		*out = make([]api.Variable, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	if in.RetryPolicy != nil {
 		in, out := &in.RetryPolicy, &out.RetryPolicy
-		*out = new(apiv1alpha1.RetryPolicy)
+		*out = new(api.RetryPolicy)
 		(*in).DeepCopyInto(*out)
 	}
 }
@@ -429,7 +430,7 @@ func (in *BMCVersionStatus) DeepCopyInto(out *BMCVersionStatus) {
 	*out = *in
 	if in.UpgradeTask != nil {
 		in, out := &in.UpgradeTask, &out.UpgradeTask
-		*out = new(apiv1alpha1.Task)
+		*out = new(api.Task)
 		**out = **in
 	}
 	if in.Conditions != nil {
@@ -456,13 +457,13 @@ func (in *BMCVersionTemplate) DeepCopyInto(out *BMCVersionTemplate) {
 	*out = *in
 	if in.UpdatePolicy != nil {
 		in, out := &in.UpdatePolicy, &out.UpdatePolicy
-		*out = new(apiv1alpha1.UpdatePolicy)
+		*out = new(api.UpdatePolicy)
 		**out = **in
 	}
 	in.Image.DeepCopyInto(&out.Image)
 	if in.RetryPolicy != nil {
 		in, out := &in.RetryPolicy, &out.RetryPolicy
-		*out = new(apiv1alpha1.RetryPolicy)
+		*out = new(api.RetryPolicy)
 		(*in).DeepCopyInto(*out)
 	}
 }

@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"net/netip"
 
-	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,13 +80,9 @@ var _ = Describe("BMCVersionSet Controller", func() {
 
 		server01 = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmc01),
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				BMCRef: &v1.LocalObjectReference{Name: bmc01.Name},
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmc01),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server01)).To(Succeed())
 
 		By("Ensuring that the server01 is in available state")
 		Eventually(UpdateStatus(server01, func() {
@@ -116,13 +115,9 @@ var _ = Describe("BMCVersionSet Controller", func() {
 
 		server02 = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmc02),
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				BMCRef: &v1.LocalObjectReference{Name: bmc02.Name},
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmc02),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server02)).To(Succeed())
 
 		By("Ensuring that the server02 is in available state")
 		Eventually(UpdateStatus(server02, func() {
@@ -152,15 +147,12 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, bmc03)).To(Succeed())
+
 		server03 = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmc03),
-			},
-			Spec: metalv1alpha1.ServerSpec{
-				BMCRef: &v1.LocalObjectReference{Name: bmc03.Name},
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmc03),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server03)).To(Succeed())
 
 		By("Ensuring that the server03 is in available state")
 		Eventually(UpdateStatus(server03, func() {
@@ -169,7 +161,7 @@ var _ = Describe("BMCVersionSet Controller", func() {
 	})
 
 	AfterEach(func(ctx SpecContext) {
-		maintenanceList := &metalv1alpha1.ServerMaintenanceList{}
+		maintenanceList := &servermaintenancev1alpha1.ServerMaintenanceList{}
 		Eventually(List(maintenanceList)).Should(Succeed())
 		for _, maintenance := range maintenanceList.Items {
 			Expect(k8sClient.Delete(ctx, &maintenance)).To(Succeed())
@@ -179,21 +171,21 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			server01.Status.State = metalv1alpha1.ServerStateAvailable
 		})).Should(Succeed())
 		Expect(k8sClient.Delete(ctx, bmc01)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, server01)).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server01))).To(Succeed())
 		Eventually(Get(server01)).Should(Satisfy(apierrors.IsNotFound))
 
 		Eventually(UpdateStatus(server02, func() {
 			server02.Status.State = metalv1alpha1.ServerStateAvailable
 		})).Should(Succeed())
 		Expect(k8sClient.Delete(ctx, bmc02)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, server02)).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server02))).To(Succeed())
 		Eventually(Get(server02)).Should(Satisfy(apierrors.IsNotFound))
 
 		Eventually(UpdateStatus(server03, func() {
 			server03.Status.State = metalv1alpha1.ServerStateAvailable
 		})).Should(Succeed())
 		Expect(k8sClient.Delete(ctx, bmc03)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, server03)).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server03))).To(Succeed())
 		Eventually(Get(server03)).Should(Satisfy(apierrors.IsNotFound))
 
 		Expect(k8sClient.Delete(ctx, bmcSecret)).To(Succeed())
@@ -212,8 +204,8 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCVersionSetSpec{
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -316,8 +308,8 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCVersionSetSpec{
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion,
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -490,7 +482,7 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			HaveField("Status.InProgressBMCVersion", BeNumerically("==", 0)),
 			HaveField("Status.FailedBMCVersion", BeNumerically("==", 0)),
 		))
-		var serverMaintainceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintainceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintainceList)).Should(HaveField("Items", HaveLen(0)))
 
 		// cleanup
@@ -527,9 +519,9 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			Spec: bmcmaintenancev1alpha1.BMCVersionSetSpec{
 				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
 					Version:                 upgradeServerBMCVersion + " fail",
-					Image:                   metalv1alpha1.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &metalv1alpha1.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{

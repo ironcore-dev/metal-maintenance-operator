@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/metautils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
-	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -106,12 +108,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -152,12 +154,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion + "2",
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -204,12 +206,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -267,12 +269,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -361,12 +363,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyOwnerApproval,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -380,10 +382,10 @@ var _ = Describe("BIOSSettings Controller", func() {
 		))
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosSettings.Name,
@@ -406,7 +408,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring that the biosSettings resource has started bios setting update")
@@ -416,7 +418,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		))
 
 		Eventually(Object(serverMaintenance)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
 		By("Ensuring that the Server is in correct power state")
@@ -508,12 +510,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyOwnerApproval,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -527,10 +529,10 @@ var _ = Describe("BIOSSettings Controller", func() {
 		))
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosSettings.Name,
@@ -553,7 +555,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring that the biosSettings resource has started bios setting update")
@@ -615,12 +617,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -639,10 +641,10 @@ var _ = Describe("BIOSSettings Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosSettings.Name,
@@ -733,12 +735,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: "2.45.455b66-rev4",
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -829,13 +831,13 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &metalv1alpha1.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -866,7 +868,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Eventually(Get(biosSettings)).Should(Satisfy(apierrors.IsNotFound))
 		// clean up maintenance if any, as the test not auto delete child objects
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Expect(k8sClient.List(ctx, &serverMaintenanceList)).To(Succeed())
 		for _, maintenance := range serverMaintenanceList.Items {
 			if metav1.IsControlledBy(&maintenance, biosSettings) {
@@ -902,12 +904,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -932,7 +934,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 			return err
 		}).Should(Succeed())
 		By("check if maintenance has been created on the server and delete if its present")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(func() error {
 			_, err := ObjectList(&serverMaintenanceList)()
 			if err != nil {
@@ -965,12 +967,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1044,7 +1046,7 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 		By("Ensuring that the Server resource will be created")
 		server = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmcObj),
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmcObj),
 			},
 		}
 		Eventually(Get(server)).Should(Succeed())
@@ -1113,12 +1115,12 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyOwnerApproval,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1132,10 +1134,10 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 		))
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", Not(BeEmpty())))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosSettings.Name,
@@ -1158,7 +1160,7 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, "true")
+			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, "true")
 		})).Should(Succeed())
 
 		By("Ensuring that the biosSettings resource has started bios setting update")
@@ -1277,12 +1279,12 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{{
+					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: biosSetting,
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyOwnerApproval,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1295,7 +1297,7 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 		)
 
 		By("Verifying ServerMaintenance object was created")
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosSettings.Name,
@@ -1406,7 +1408,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{
+					SettingsFlow: []api.SettingsFlowItem{
 						{
 							Priority: 100,
 							Settings: map[string]string{"AdminPhone": "1010101"},
@@ -1418,7 +1420,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 							Name:     "1000",
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1451,14 +1453,14 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{
+					SettingsFlow: []api.SettingsFlowItem{
 						{
 							Priority: 100,
 							Settings: map[string]string{"PowerProfile": "UnKnownValue"},
 							Name:     "100",
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1489,7 +1491,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 		)
 
 		By("Deleting the biosSettings")
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      biosSettings.Name,
@@ -1514,7 +1516,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{
+					SettingsFlow: []api.SettingsFlowItem{
 						{
 							Priority: 100,
 							Settings: map[string]string{"PowerProfile": "SysDbpm"},
@@ -1526,7 +1528,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 							Name:     "1000",
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1562,7 +1564,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{
+					SettingsFlow: []api.SettingsFlowItem{
 						{
 							Priority: 100,
 							Settings: map[string]string{"AdminPhone": "123-456"},
@@ -1574,7 +1576,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 							Name:     "100",
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1621,7 +1623,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{
+					SettingsFlow: []api.SettingsFlowItem{
 						{
 							Priority: 100,
 							Settings: map[string]string{"AdminPhone": "123-123"},
@@ -1633,7 +1635,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 							Name:     "1000",
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1690,7 +1692,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
 				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
 					Version: mockUpServerBiosVersion,
-					SettingsFlow: []metalv1alpha1.SettingsFlowItem{
+					SettingsFlow: []api.SettingsFlowItem{
 						{
 							Priority: 100,
 							Settings: map[string]string{"AdminPhone": "one-two-three"},
@@ -1702,7 +1704,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 							Name:     oldNames[1],
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -1727,7 +1729,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 		)
 
 		Eventually(Update(biosSettings, func() {
-			biosSettings.Spec.SettingsFlow = []metalv1alpha1.SettingsFlowItem{
+			biosSettings.Spec.SettingsFlow = []api.SettingsFlowItem{
 				{
 					Priority: 1000,
 					Settings: map[string]string{"AdminPhone": "three-two-one"},

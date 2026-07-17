@@ -15,11 +15,14 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/ironcore-dev/controller-utils/metautils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
-	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 )
 
 var _ = Describe("BMCSettings Controller", func() {
@@ -68,7 +71,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		By("Ensuring that the Server resource will be created")
 		server = &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: utils.GetServerNameFromBMCandIndex(0, bmc),
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmc),
 			},
 			Spec: metalv1alpha1.ServerSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
@@ -88,10 +91,9 @@ var _ = Describe("BMCSettings Controller", func() {
 
 	AfterEach(func(ctx SpecContext) {
 		Expect(k8sClient.Delete(ctx, bmc)).To(Succeed())
-		Eventually(UpdateStatus(server, func() {
-			server.Status.State = metalv1alpha1.ServerStateAvailable
-		})).To(Succeed())
-		Expect(k8sClient.Delete(ctx, server)).To(Succeed())
+		// The simulated BMC controller deletes its discovered Server on BMC
+		// deletion, so the Server may already be gone by the time we get here.
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server))).To(Succeed())
 		Expect(k8sClient.Delete(ctx, bmcSecret)).To(Succeed())
 		EnsureCleanState()
 		mockServers[0].ResetBMCSettings("BMC")
@@ -110,7 +112,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -141,7 +143,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -184,7 +186,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -204,7 +206,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		))
 
 		By("Ensuring that the Maintenance resource has been deleted")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 		Consistently(Object(settings)).Should(SatisfyAll(
@@ -276,7 +278,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyOwnerApproval,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -286,10 +288,10 @@ var _ = Describe("BMCSettings Controller", func() {
 		))
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
@@ -300,7 +302,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		By("Ensuring that the Maintenance resource has been referenced by BMCSettings resource")
 		Eventually(Object(settings)).Should(
 			HaveField("Spec.ServerMaintenanceRefs",
-				[]metalv1alpha1.ServerMaintenanceRefItem{{
+				[]api.ServerMaintenanceRefItem{{
 					ServerMaintenanceRef: &metalv1alpha1.ObjectReference{
 						Namespace: serverMaintenance.Namespace,
 						Name:      serverMaintenance.Name,
@@ -318,11 +320,9 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetAnnotation(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
-			metautils.SetLabel(serverClaim, metalv1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetAnnotation(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
-
-		simulateMaintenanceGranted(server, serverMaintenance)
 
 		Eventually(Object(settings)).Should(SatisfyAny(
 			HaveField("Status.State", bmcmaintenancev1alpha1.BMCSettingsStateInProgress),
@@ -350,6 +350,9 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).To(Succeed())
+		Eventually(Update(server, func() {
+			server.Spec.ServerClaimRef = nil
+		})).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
@@ -376,7 +379,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "2.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -408,18 +411,16 @@ var _ = Describe("BMCSettings Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been created")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
 
-		serverMaintenance := &metalv1alpha1.ServerMaintenance{
+		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: ns.Name,
 				Name:      serverMaintenanceList.Items[0].Name,
 			},
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
-
-		simulateMaintenanceGranted(server, serverMaintenance)
 
 		By("Ensuring that the BMCSettings resource has moved to next state")
 		Eventually(Object(settings)).Should(SatisfyAny(
@@ -475,7 +476,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -500,7 +501,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		)
 
 		By("Ensuring that the Maintenance resource has been deleted")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
 		// cleanup
@@ -531,7 +532,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -553,7 +554,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			return err
 		}).Should(Succeed())
 		By("check if maintenance has been created on the server and delete if its present")
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Eventually(func() error {
 			_, err := ObjectList(&serverMaintenanceList)()
 			if err != nil {
@@ -589,7 +590,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				}},
 		}
 		Expect(k8sClient.Create(ctx, bmcSettings2)).To(Succeed())
@@ -647,8 +648,8 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:                 "1.45.455b66-rev4",
 					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &metalv1alpha1.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, bmcSettings)).To(Succeed())
@@ -677,7 +678,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, bmcSettings)).To(Succeed())
 		// clean up maintenance if any, as the test not auto delete child objects
-		var serverMaintenanceList metalv1alpha1.ServerMaintenanceList
+		var serverMaintenanceList servermaintenancev1alpha1.ServerMaintenanceList
 		Expect(k8sClient.List(ctx, &serverMaintenanceList)).To(Succeed())
 		for _, maintenance := range serverMaintenanceList.Items {
 			if metav1.IsControlledBy(&maintenance, bmcSettings) {
@@ -713,11 +714,11 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:     "1.45.455b66-rev4",
 					SettingsMap: map[string]string{"abc": "$(SETTING_VAL)"},
-					Variables: []metalv1alpha1.Variable{
+					Variables: []api.Variable{
 						{
 							Key: "SETTING_VAL",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								SecretKeyRef: &metalv1alpha1.NamespacedKeySelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								SecretKeyRef: &api.NamespacedKeySelector{
 									Name:      varSecret.Name,
 									Namespace: ns.Name,
 									Key:       "bmc-setting",
@@ -725,7 +726,7 @@ var _ = Describe("BMCSettings Controller", func() {
 							},
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -770,11 +771,11 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:     "1.45.455b66-rev4",
 					SettingsMap: map[string]string{"abc": "$(SETTING_VAL)"},
-					Variables: []metalv1alpha1.Variable{
+					Variables: []api.Variable{
 						{
 							Key: "SETTING_VAL",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								ConfigMapKeyRef: &metalv1alpha1.NamespacedKeySelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								ConfigMapKeyRef: &api.NamespacedKeySelector{
 									Name:      varCM.Name,
 									Namespace: ns.Name,
 									Key:       "bmc-setting",
@@ -782,7 +783,7 @@ var _ = Describe("BMCSettings Controller", func() {
 							},
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -814,17 +815,17 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:     "1.45.455b66-rev4",
 					SettingsMap: map[string]string{"abc": "$(BMC_NAME)"},
-					Variables: []metalv1alpha1.Variable{
+					Variables: []api.Variable{
 						{
 							Key: "BMC_NAME",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								FieldRef: &metalv1alpha1.FieldRefSelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								FieldRef: &api.FieldRefSelector{
 									FieldPath: "spec.BMCRef.name",
 								},
 							},
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -871,19 +872,19 @@ var _ = Describe("BMCSettings Controller", func() {
 					Version: "1.45.455b66-rev4",
 					// Both placeholders resolved from different sources into one value.
 					SettingsMap: map[string]string{"abc": "$(BmcName).$(SearchDomain)"},
-					Variables: []metalv1alpha1.Variable{
+					Variables: []api.Variable{
 						{
 							Key: "BmcName",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								FieldRef: &metalv1alpha1.FieldRefSelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								FieldRef: &api.FieldRefSelector{
 									FieldPath: "spec.BMCRef.name",
 								},
 							},
 						},
 						{
 							Key: "SearchDomain",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								ConfigMapKeyRef: &metalv1alpha1.NamespacedKeySelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								ConfigMapKeyRef: &api.NamespacedKeySelector{
 									Name:      domainCM.Name,
 									Namespace: ns.Name,
 									Key:       "search-domain",
@@ -891,7 +892,7 @@ var _ = Describe("BMCSettings Controller", func() {
 							},
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -946,12 +947,12 @@ var _ = Describe("BMCSettings Controller", func() {
 				BMCSettingsTemplate: bmcmaintenancev1alpha1.BMCSettingsTemplate{
 					Version:     "1.45.455b66-rev4",
 					SettingsMap: map[string]string{"abc": "$(LicenseKey)"},
-					Variables: []metalv1alpha1.Variable{
+					Variables: []api.Variable{
 						{
 							// Step 1: resolve BmcName from the object's own field.
 							Key: "BmcName",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								FieldRef: &metalv1alpha1.FieldRefSelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								FieldRef: &api.FieldRefSelector{
 									FieldPath: "spec.BMCRef.name",
 								},
 							},
@@ -959,8 +960,8 @@ var _ = Describe("BMCSettings Controller", func() {
 						{
 							// Step 2: use the already-resolved $(BmcName) as the ConfigMap key.
 							Key: "LicenseKey",
-							ValueFrom: &metalv1alpha1.VariableSourceValueFrom{
-								ConfigMapKeyRef: &metalv1alpha1.NamespacedKeySelector{
+							ValueFrom: &api.VariableSourceValueFrom{
+								ConfigMapKeyRef: &api.NamespacedKeySelector{
 									Name:      licensesCM.Name,
 									Namespace: ns.Name,
 									Key:       "$(BmcName)", // expanded to bmc.Name at resolution time
@@ -968,7 +969,7 @@ var _ = Describe("BMCSettings Controller", func() {
 							},
 						},
 					},
-					ServerMaintenancePolicy: metalv1alpha1.ServerMaintenancePolicyEnforced,
+					ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}

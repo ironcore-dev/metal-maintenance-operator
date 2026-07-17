@@ -7,6 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
@@ -32,19 +34,19 @@ type BMCVersionTemplate struct {
 
 	// UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies.
 	// +optional
-	UpdatePolicy *metalv1alpha1.UpdatePolicy `json:"updatePolicy,omitempty"`
+	UpdatePolicy *api.UpdatePolicy `json:"updatePolicy,omitempty"`
 
 	// Image specifies the image to use to upgrade to the given BMC version.
 	// +required
-	Image metalv1alpha1.ImageSpec `json:"image"`
+	Image api.ImageSpec `json:"image"`
 
 	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
 	// +optional
-	RetryPolicy *metalv1alpha1.RetryPolicy `json:"retryPolicy,omitempty"`
+	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
 
 	// ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC.
 	// +optional
-	ServerMaintenancePolicy metalv1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+	ServerMaintenancePolicy servermaintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
 }
 
 // BMCVersionSpec defines the desired state of BMCVersion.
@@ -67,7 +69,7 @@ type BMCVersionStatus struct {
 	State BMCVersionState `json:"state,omitempty"`
 
 	// UpgradeTask contains the state of the upgrade task created by the BMC.
-	UpgradeTask *metalv1alpha1.Task `json:"upgradeTask,omitempty"`
+	UpgradeTask *api.Task `json:"upgradeTask,omitempty"`
 
 	// FailedAttempts is the number of automatic retry attempts made after failure.
 	// +optional

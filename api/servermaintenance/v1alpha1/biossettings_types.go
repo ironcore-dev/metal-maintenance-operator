@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
@@ -18,15 +19,15 @@ type BIOSSettingsTemplate struct {
 
 	// SettingsFlow contains the BIOS settings sequence to apply in the given order.
 	// +optional
-	SettingsFlow []metalv1alpha1.SettingsFlowItem `json:"settingsFlow,omitempty"`
+	SettingsFlow []api.SettingsFlowItem `json:"settingsFlow,omitempty"`
 
 	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
 	// +optional
-	RetryPolicy *metalv1alpha1.RetryPolicy `json:"retryPolicy,omitempty"`
+	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
 
 	// ServerMaintenancePolicy is a maintenance policy to be enforced on the server.
 	// +optional
-	ServerMaintenancePolicy metalv1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+	ServerMaintenancePolicy *ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
 }
 
 // BIOSSettingsSpec defines the desired state of BIOSSettings.

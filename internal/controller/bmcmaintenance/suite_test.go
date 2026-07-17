@@ -15,6 +15,10 @@ import (
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/controller-utils/modutils"
 	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/servermaintenance"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/testutil/simcontrollers"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
@@ -85,6 +89,7 @@ var _ = BeforeSuite(func() {
 
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(bmcmaintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	Expect(servermaintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -160,12 +165,47 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			ResyncInterval: 10 * time.Millisecond,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		Expect((&servermaintenance.ServerMaintenanceReconciler{
+			Client: k8sManager.GetClient(),
+			Scheme: k8sManager.GetScheme(),
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real
+		// BMC/Server controllers - which live in metal-operator's internal package
+		// and can't be imported - by syncing status (PowerState, FirmwareVersion,
+		// maintenance state) from the mock Redfish server and from
+		// Server.Spec.ServerMaintenanceRef, so tests don't need to manually patch
+		// those fields.
+		Expect((&simcontrollers.BMCReconciler{
+			Client:             k8sManager.GetClient(),
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			ResyncInterval:     10 * time.Millisecond,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		Expect((&simcontrollers.ServerReconciler{
+			Client:             k8sManager.GetClient(),
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			ResyncInterval:     10 * time.Millisecond,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
 		Expect(k8sManager.GetFieldIndexer().IndexField(
 			mgrCtx,
-			&metalv1alpha1.ServerMaintenance{},
-			"spec.serverRef.name",
+			&servermaintenancev1alpha1.ServerMaintenance{},
+			constants.ServerRefField,
 			func(obj client.Object) []string {
-				sm := obj.(*metalv1alpha1.ServerMaintenance)
+				sm := obj.(*servermaintenancev1alpha1.ServerMaintenance)
 				if sm.Spec.ServerRef == nil {
 					return nil
 				}
@@ -176,7 +216,7 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 		Expect(k8sManager.GetFieldIndexer().IndexField(
 			mgrCtx,
 			&metalv1alpha1.Server{},
-			"spec.bmcRef.name",
+			constants.BMCRefField,
 			func(obj client.Object) []string {
 				sv := obj.(*metalv1alpha1.Server)
 				if sv.Spec.BMCRef == nil {
@@ -229,7 +269,7 @@ func EnsureCleanState() {
 		&metalv1alpha1.BMCList{},
 		&metalv1alpha1.BMCSecretList{},
 		&metalv1alpha1.ServerList{},
-		&metalv1alpha1.ServerMaintenanceList{},
+		&servermaintenancev1alpha1.ServerMaintenanceList{},
 		&bmcmaintenancev1alpha1.BMCSettingsList{},
 		&bmcmaintenancev1alpha1.BMCSettingsSetList{},
 		&bmcmaintenancev1alpha1.BMCVersionList{},
@@ -239,34 +279,4 @@ func EnsureCleanState() {
 	for _, list := range objectLists {
 		Eventually(ObjectList(list)).Should(HaveField("Items", HaveLen(0)))
 	}
-}
-
-func simulateMaintenanceGranted(server *metalv1alpha1.Server, sm *metalv1alpha1.ServerMaintenance) {
-	GinkgoHelper()
-	Eventually(UpdateStatus(sm, func() {
-		sm.Status.State = metalv1alpha1.ServerMaintenanceStateInMaintenance
-	})).Should(Succeed())
-	Eventually(Update(server, func() {
-		server.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
-			Name:      sm.Name,
-			Namespace: sm.Namespace,
-		}
-	})).Should(Succeed())
-	Eventually(UpdateStatus(server, func() {
-		server.Status.State = metalv1alpha1.ServerStateMaintenance
-	})).Should(Succeed())
-}
-
-func simulateMaintenanceReleased(server *metalv1alpha1.Server) {
-	GinkgoHelper()
-	Eventually(Update(server, func() {
-		server.Spec.ServerMaintenanceRef = nil
-	})).Should(Succeed())
-	prevState := metalv1alpha1.ServerStateAvailable
-	if server.Spec.ServerClaimRef != nil {
-		prevState = metalv1alpha1.ServerStateReserved
-	}
-	Eventually(UpdateStatus(server, func() {
-		server.Status.State = prevState
-	})).Should(Succeed())
 }
