@@ -2,4 +2,5 @@
 resources:
 - vendorconsole_v1alpha1_console.yaml
 - readiness_v1alpha1_serverwiring.yaml
+- vendorconsole_v1alpha1_firmwareupdatedell.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

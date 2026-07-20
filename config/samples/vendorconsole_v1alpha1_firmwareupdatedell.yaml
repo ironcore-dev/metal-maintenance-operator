@@ -1,0 +1,29 @@
+apiVersion: vendorconsole.metal.ironcore.dev/v1alpha1
+kind: FirmwareUpdateDELL
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firmwareupdatedell-sample
+spec:
+  omeURL: "https://openmanage.dell.com/"
+  secretRef:
+    name: dell-ome-credentials
+  serverSelector:
+    matchLabels:
+      manufacturer: dell
+  serverMaintenancePolicy: Enforced
+  createCatalog:
+    fileName: "Driver_and_Firmware.xml"
+    sourcePath: "hw-firmware/dell/"
+    repository:
+      name: "dell-metal-Repository-3"
+      repositoryType: "HTTPS"
+      source: "firmware.repo.dell.com"
+  firmwareUpgradeConfig:
+    operationName: "INSTALL_FIRMWARE"
+    jobTypeName: "Update_Task"
+  baselineConfig:
+    name: "dell-metal-Baseline-1"
+    downgradeEnabled: DowngradableUpdate
+    bitType: 64BitType

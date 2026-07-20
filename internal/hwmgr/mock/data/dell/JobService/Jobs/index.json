@@ -1,0 +1,27 @@
+{
+  "@odata.context": "/api/$metadata#Collection(JobService.Job)",
+  "@odata.count": 1,
+  "value": [
+    {
+      "Id": 100,
+      "JobName": "test-job",
+      "JobDescription": "Test Job",
+      "NextRun": "",
+      "LastRun": "2024-01-01T00:00:00Z",
+      "StartTime": "2024-01-01T00:00:00Z",
+      "EndTime": "2024-01-01T01:00:00Z",
+      "Schedule": "startnow",
+      "State": "Completed",
+      "CreatedBy": "admin",
+      "UpdatedBy": "admin",
+      "Visible": true,
+      "Editable": true,
+      "Builtin": false,
+      "ExecutionHistories@odata.navigationLink": "/api/JobService/Jobs(100)/ExecutionHistories",
+      "LastRunStatus": {"Id": 2060, "Name": "Completed"},
+      "JobType": {"Id": 5, "Name": "Update_Task"},
+      "Targets": [{"Id": 1}, {"Id": 2}],
+      "Params": []
+    }
+  ]
+}

@@ -1,3 +1,21 @@
 {
-    "Token": "abc123def456ghi789jkl012mno345pq"
+  "@odata.context": "/api/$metadata#Collection(SessionService.Session)",
+  "@odata.count": 1,
+  "value": [
+    {
+      "@odata.type": "#SessionService.Session",
+      "@odata.id": "/api/SessionService/Sessions('abc123')",
+      "Id": "abc123",
+      "Description": "mock session",
+      "Name": "admin",
+      "UserName": "admin",
+      "UserId": 1,
+      "Password": null,
+      "Roles": ["ADMINISTRATOR"],
+      "IpAddress": "127.0.0.1",
+      "StartTimeStamp": "2024-01-01T00:00:00Z",
+      "LastAccessedTimeStamp": "2024-01-01T00:00:00Z",
+      "DirectoryGroup": []
+    }
+  ]
 }

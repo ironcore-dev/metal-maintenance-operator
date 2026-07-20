@@ -1,0 +1,9 @@
+{
+  "@odata.context": "/api/$metadata#Collection(JobService.JobType)",
+  "@odata.count": 3,
+  "value": [
+    {"Id": 5, "Name": "Update_Task", "Internal": false},
+    {"Id": 8, "Name": "Inventory_Task", "Internal": false},
+    {"Id": 3, "Name": "DeviceAction_Task", "Internal": false}
+  ]
+}

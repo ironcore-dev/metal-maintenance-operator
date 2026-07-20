@@ -8,6 +8,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
@@ -33,6 +34,7 @@ import (
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -67,6 +69,7 @@ func main() {
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
+	var vcManagedNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -98,6 +101,8 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
+	flag.StringVar(&vcManagedNamespace, "vc-managed-namespace", "",
+		"Namespace where vendor console resources (FirmwareUpdateDELL, secrets) are managed.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -268,6 +273,20 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerWiring controller")
+		os.Exit(1)
+	}
+
+	if err = (&vendorconsolectrl.FirmwareUpdateDELLReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		ManagerNamespace: vcManagedNamespace,
+		OMEConfig: &hwmgr.MgrConfig{
+			InsecureSkipVerify: true,
+			ReuseConnections:   false,
+		},
+		ResyncInterval: 30 * time.Second,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create FirmwareUpdateDELL controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
