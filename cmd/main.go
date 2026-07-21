@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -22,6 +23,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -29,9 +31,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
+	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
+	servermaintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/servermaintenance"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -48,6 +52,7 @@ func init() {
 	utilruntime.Must(vendorconsolev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(servermaintenancev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -268,6 +273,32 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerWiring controller")
+		os.Exit(1)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&servermaintenancev1alpha1.ServerMaintenance{},
+		"spec.serverRef.name",
+		func(rawObj client.Object) []string {
+			m, ok := rawObj.(*servermaintenancev1alpha1.ServerMaintenance)
+			if !ok {
+				return nil
+			}
+			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
+				return []string{m.Spec.ServerRef.Name}
+			}
+			return nil
+		}); err != nil {
+		setupLog.Error(err, "Unable to set up ServerMaintenance field indexer")
+		os.Exit(1)
+	}
+
+	if err = (&servermaintenancectrl.ServerMaintenanceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create ServerMaintenance controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
