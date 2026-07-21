@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/HewlettPackard/oneview-golang v11.3.0+incompatible
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/google/uuid v1.6.0
 	github.com/ironcore-dev/controller-utils v0.12.0
 	github.com/ironcore-dev/metal-operator v0.6.1
