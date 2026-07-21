@@ -4,6 +4,7 @@
 resources:
 - bases/vendorconsole.metal.ironcore.dev_consoles.yaml
 - bases/readiness.metal.ironcore.dev_serverwirings.yaml
+- bases/bmc.metal.ironcore.dev_bmcusers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
