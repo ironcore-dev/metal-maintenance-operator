@@ -7,10 +7,19 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
   - delete
+  - deletecollection
   - get
   - list
   - patch
@@ -28,10 +37,17 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - bmcs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - serverclaims
   verbs:
   - create
   - delete
+  - deletecollection
   - get
   - list
   - patch

@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Sample telemetry ConfigMap for the maintenance operator's event-push
+# pipeline.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: telemetry-collector-config
+  # The operator reads this ConfigMap from its own POD_NAMESPACE (see
+  # cmd/main.go's --telemetry-config-namespace flag). This file names
+  # the operator's default install namespace; the kustomization
+  # rewrites it if the operator is deployed elsewhere.
+  namespace: metal-maintenance-operator-system
+data:
+  config.yaml: |
+    apiVersion: telemetry.metal.ironcore.dev/v1alpha1
+
+    # Subscription reconcile cadence — how often the operator re-verifies
+    # subscriptions on event-eligible BMCs. Defends against BMC reboots
+    # that silently drop the subscription on their side. Operators can
+    # retune without a restart; the running operator picks up the new
+    # cadence on its next tick.
+    #
+    # Bounds: 5s – 24h.
+    subscriptionReconcileInterval: 10m
+
+    # Per-Redfish-operation deadline for the subscription manager
+    # (subscription create / delete / list). Operators with slow or
+    # flaky BMCs may raise this so a single laggy BMC doesn't fail-fast
+    # through the reconcile loop.
+    #
+    # Bounds: 1s – 10m. Unset → 30s default.
+    perBMCTimeout: 30s
+
+    # Vendor/model rows that opt INTO event-based subscription. A BMC
+    # matches when its Status.Manufacturer equals Vendor exactly AND
+    # its Status.Model is in Models (or Models == ["*"]) AND its
+    # Status.FirmwareVersion is >= MinFirmware (when set).
+    #
+    # Vendor MUST be one of metal-operator's canonical bmc.Manufacturer
+    # values: "Dell Inc.", "HPE", "Lenovo", "Supermicro". Short forms
+    # ("Dell", "dell") are rejected — metal-operator writes the
+    # canonical strings to BMC.Status.Manufacturer and a short form
+    # would silently never match.
+    eventBasedHardware:
+      - vendor: "Dell Inc."
+        models:
+          - PowerEdge R650
+          - PowerEdge R750
+        minFirmware: "5.10.0"
+      - vendor: HPE
+        models: ["*"]
+        minFirmware: "2.95"

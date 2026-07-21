@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The operator's event-push pipeline is gated by --enable-telemetry. This
+# Kustomization ships only the operator-managed ConfigMap; the Deployment,
+# ServiceAccount, RBAC, and metrics Service come from the existing
+# operator deployment (config/default/, config/rbac/, config/manager/).
+#
+# Operators that want event-based delivery must additionally:
+#
+#   1. Set --enable-telemetry=true and --telemetry-receiver-url=<url> on
+#      the operator container.
+#   2. Expose the events port (default :9092) on the operator's Pod
+#      template via a containerPort and (typically) a Service.
+#   3. Ensure --telemetry-receiver-url resolves to that Service from
+#      every BMC's network.
+#
+# Operators that want sensor metrics scraped from BMCs deploy an
+# external redfish-exporter pointing its http_sd_configs at the
+# operator's /sd/bmcs endpoint. That endpoint is always available — no
+# flag to enable. See config/telemetry/README.md for the integration
+# story.
+#
+# See cmd/main.go's --enable-telemetry and --telemetry-* flags for the
+# full list of knobs.
+
+# Deploys into the same namespace as the operator (see
+# config/default/kustomization.yaml). Change here AND in
+# config/default/kustomization.yaml together if you're relocating the
+# operator install.
+namespace: metal-maintenance-operator-system
+
+commonLabels:
+  app.kubernetes.io/name: telemetry-collector
+  app.kubernetes.io/component: config
+
+resources:
+  - configmap.yaml

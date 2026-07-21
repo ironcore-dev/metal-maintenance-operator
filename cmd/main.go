@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/discovery"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
+	telemetryruntime "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -98,6 +100,48 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
+
+	// Telemetry collector flags. The whole pipeline is gated by
+	// --enable-telemetry — when off (the default), zero telemetry
+	// Runnables are added to the manager and the operator behaves
+	// exactly like a pure maintenance operator.
+	var (
+		enableTelemetry                bool
+		telemetryConfigName            string
+		telemetryConfigNamespace       string
+		telemetryReceiverURL           string
+		telemetryEventsAddr            string
+		telemetryInsecureTLS           bool
+		telemetryEnableCriticalHandler bool
+		telemetrySubscriberID          string
+	)
+	flag.BoolVar(&enableTelemetry, "enable-telemetry", false,
+		"Enable the BMC event-push pipeline: subscribes for Event-format pushes on event-eligible BMCs, "+
+			"receives them at --telemetry-events-bind-address, and (optionally) writes a "+
+			"CriticalEventReceived condition on matching Servers via the readiness bridge. "+
+			"Metric scraping is a separate concern handled by an external redfish-exporter that "+
+			"scrapes BMCs via the always-on /sd/bmcs service-discovery endpoint.")
+	flag.StringVar(&telemetryConfigName, "telemetry-config-name", "telemetry-collector-config",
+		"Name of the ConfigMap holding the telemetry configuration. Ignored when --enable-telemetry=false.")
+	flag.StringVar(&telemetryConfigNamespace, "telemetry-config-namespace", "",
+		"Namespace of the telemetry ConfigMap. Defaults to POD_NAMESPACE.")
+	flag.StringVar(&telemetryReceiverURL, "telemetry-receiver-url", "",
+		"Externally-reachable base URL BMCs POST events to. Required when --enable-telemetry is set.")
+	flag.StringVar(&telemetryEventsAddr, "telemetry-events-bind-address", ":9092",
+		"Listen address for the Redfish event receiver.")
+	flag.BoolVar(&telemetryInsecureTLS, "telemetry-bmc-insecure-tls", false,
+		"Skip TLS verification when the operator dials BMCs. Default false (secure). ")
+	flag.BoolVar(&telemetryEnableCriticalHandler, "telemetry-enable-critical-event-handler", false,
+		"When true, Critical-severity Redfish events set a CriticalEventReceived condition on the matching Server. "+
+			"The operator does not create any ServerReadinessRule; apply "+
+			"config/samples/serverreadinessrule-critical-event.yaml (or equivalent) by hand to consume the condition.")
+	flag.StringVar(&telemetrySubscriberID, "telemetry-subscriber-id", "",
+		"Single path segment that scopes this binary's subscriptions when multiple subscribers "+
+			"(e.g. the maintenance operator and an external redfish-exporter) share a BMC fleet. "+
+			"Becomes the <subscriberID> segment in /serverevents/<subscriberID>/alerts/<bmcName>. "+
+			"Empty defaults to \"metal-maintenance-operator\" — set explicitly only when running "+
+			"alongside another subscriber against the same BMCs.")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -271,6 +315,52 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	if enableTelemetry {
+		ns := telemetryConfigNamespace
+		if ns == "" {
+			ns = os.Getenv("POD_NAMESPACE")
+		}
+		if ns == "" {
+			setupLog.Error(nil,
+				"Telemetry enabled but --telemetry-config-namespace and POD_NAMESPACE are both empty")
+			os.Exit(1)
+		}
+		if err := telemetryruntime.AddTo(mgr, telemetryruntime.Options{
+			ConfigName:                 telemetryConfigName,
+			ConfigNamespace:            ns,
+			ReceiverURL:                telemetryReceiverURL,
+			EventsAddr:                 telemetryEventsAddr,
+			InsecureTLS:                telemetryInsecureTLS,
+			SubscriberID:               telemetrySubscriberID,
+			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
+		}); err != nil {
+			setupLog.Error(err, "Unable to add telemetry pipeline")
+			os.Exit(1)
+		}
+		setupLog.Info("Telemetry pipeline enabled",
+			"configMap", ns+"/"+telemetryConfigName,
+			"receiverURL", telemetryReceiverURL)
+	}
+
+	// BMC service-discovery endpoint.
+	sdHandler := &discovery.Handler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("discovery"),
+	}
+	if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
+		setupLog.Error(err, "Unable to register SD handler", "path", discovery.Path)
+		os.Exit(1)
+	}
+	if metricsAddr == "0" || metricsAddr == "" {
+		setupLog.Info("BMC service discovery registered but unreachable: metrics server is disabled",
+			"path", discovery.Path,
+			"hint", "set --metrics-bind-address to enable")
+	} else {
+		setupLog.Info("BMC service discovery available on metrics server",
+			"path", discovery.Path,
+			"metricsBindAddress", metricsAddr)
+	}
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")

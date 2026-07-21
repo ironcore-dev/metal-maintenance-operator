@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# EXAMPLE — NOT SHIPPED BY THE OPERATOR.
+#
+# metal-maintenance-operator writes a CriticalEventReceived condition on
+# Servers whose BMCs push Critical Redfish events (enable with
+# --telemetry-enable-critical-event-handler=true). It does NOT create
+# any ServerReadinessRule. If you want the taint side effect, apply a
+# rule of your own — this file is a template.
+#
+# WARNING — READ BEFORE APPLYING:
+#
+# metal-operator's rule matcher treats an ABSENT condition as failing
+# the requirement. A rule with `requiredStatus: "False"` and an empty
+# `serverSelector` would taint EVERY Server in the cluster the moment
+# it lands (because no Server has the condition until a Critical event
+# arrives, and the "no condition yet" state does not satisfy
+# "condition == False"). Scope with a label selector so the rule only
+# applies to Servers you've opted in — e.g. by adding a label to the
+# Servers you want the taint on.
+#
+# CriticalEventReceived is a ONE-WAY DOOR. Once a BMC pushes a Critical
+# event, the condition goes True and stays True; the operator never
+# clears it. Recovery is manual — an operator or an out-of-band
+# reconciler must patch Status.Conditions[CriticalEventReceived] back
+# to False (or remove the condition) after the underlying fault has
+# been addressed.
+apiVersion: metal.ironcore.dev/v1alpha1
+kind: ServerReadinessRule
+metadata:
+  name: critical-event-taint
+spec:
+  # Opt-in per Server. Add `readiness.metal.ironcore.dev/critical-event-taint: enabled`
+  # to any Server you want this rule to guard.
+  serverSelector:
+    matchLabels:
+      readiness.metal.ironcore.dev/critical-event-taint: enabled
+  conditions:
+    # The condition must exist on the Server AND be False for the rule
+    # to pass. Under the current operator design, the condition is
+    # created only when a Critical event arrives — at which point it
+    # goes True and stays True, tainting the Server until manually
+    # cleared. To pre-seed False on healthy Servers so the rule doesn't
+    # taint them, you need a separate controller of your own.
+    - type: CriticalEventReceived
+      requiredStatus: "False"
+  enforcementMode: Continuous
+  taint:
+    key: metal.ironcore.dev/critical-event-received
+    effect: NoBind

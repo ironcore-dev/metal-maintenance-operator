@@ -63,6 +63,18 @@ manager:
       cpu: 10m
       memory: 64Mi
 
+  ## Container ports exposed on the manager Pod.
+  ##
+  ## The event-receiver port is listed by default so a Service targeting
+  ## :9092 routes the moment --enable-telemetry is on; remove or override
+  ## if you don't run the telemetry pipeline at all. Each entry follows
+  ## the Kubernetes ContainerPort schema.
+  ##
+  ports:
+    - name: events
+      containerPort: 9092
+      protocol: TCP
+
   ## Manager pod's affinity
   ##
   affinity: {}
@@ -174,6 +186,24 @@ certManager:
 ##
 prometheus:
   enable: false
+
+## Telemetry pipeline configuration.
+##
+## The pipeline itself is gated by the operator binary's --enable-telemetry
+## flag; this section controls the chart's view of associated resources.
+##
+telemetry:
+  events:
+    # Install a Service exposing the operator's :9092 event receiver so
+    # BMCs can POST events to a stable DNS name. Leave true even when
+    # --enable-telemetry is off: the Service is a no-op until the
+    # listener binds, and removing it later would force a Service-name
+    # change in --telemetry-receiver-url. Operators who never run the
+    # telemetry pipeline can set this to false to save the resource.
+    serviceEnabled: true
+    # Port the Service exposes; should match the targetPort baked into
+    # manager.ports[*].containerPort.
+    port: 9092
 
 ## Additional Secret resources to render in the release namespace.
 ## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).

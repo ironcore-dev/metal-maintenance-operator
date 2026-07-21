@@ -12,6 +12,11 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
+const (
+	dellProfileTypeKey = "type"
+	dellCredentialsKey = "credentials"
+)
+
 type DellClient struct {
 	client client
 }
@@ -115,13 +120,13 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 	connectionProfile := map[string]any{
 		"profileName":        "",
 		"profileDescription": "",
-		"type":               "DISCOVERY",
-		"credentials": []map[string]any{
+		dellProfileTypeKey:   "DISCOVERY",
+		dellCredentialsKey: []map[string]any{
 			{
-				"type":     "WSMAN",
-				"authType": "Basic",
-				"modified": false,
-				"credentials": map[string]string{
+				dellProfileTypeKey: "WSMAN",
+				"authType":         "Basic",
+				"modified":         false,
+				dellCredentialsKey: map[string]string{
 					"username": bmcUser,
 					"password": bmcPassword,
 				},
@@ -268,13 +273,13 @@ func (c *DellClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmc
 	connectionProfile := map[string]any{
 		"profileName":        "",
 		"profileDescription": "",
-		"type":               "DISCOVERY",
-		"credentials": []map[string]any{
+		dellProfileTypeKey:   "DISCOVERY",
+		dellCredentialsKey: []map[string]any{
 			{
-				"type":     "WSMAN",
-				"authType": "Basic",
-				"modified": false,
-				"credentials": map[string]string{
+				dellProfileTypeKey: "WSMAN",
+				"authType":         "Basic",
+				"modified":         false,
+				dellCredentialsKey: map[string]string{
 					"username": bmcUser,
 					"password": bmcPassword,
 				},
