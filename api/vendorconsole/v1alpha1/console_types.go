@@ -23,6 +23,12 @@ type ConsoleSpec struct {
 	Manufacturer bmc.Manufacturer `json:"manufacturer"`
 	// BMCCredentialSecretRef references the secret containing BMC credentials.
 	BMCCredentialSecretRef v1.LocalObjectReference `json:"bmcCredentialSecretRef,omitempty"`
+	// InsecureSkipVerify disables TLS certificate verification when communicating
+	// with the management console. This should only be used for consoles that
+	// present self-signed or otherwise untrusted certificates.
+	// +optional
+	// +kubebuilder:default=false
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
 }
 
 // ConsoleStatus defines the observed state of Console.

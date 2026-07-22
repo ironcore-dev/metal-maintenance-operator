@@ -7,3 +7,6 @@ metadata:
   name: console-sample
 spec:
   # TODO(user): Add fields here
+  # insecureSkipVerify disables TLS certificate verification for consoles
+  # presenting self-signed or otherwise untrusted certificates.
+  insecureSkipVerify: false
