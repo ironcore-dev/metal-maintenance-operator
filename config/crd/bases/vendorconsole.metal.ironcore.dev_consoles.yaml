@@ -54,16 +54,23 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              consoleURL:
-                description: ConsoleURL is the URL of the server management console.
-                type: string
-              insecureSkipVerify:
-                default: false
-                description: |-
-                  InsecureSkipVerify disables TLS certificate verification when communicating
-                  with the management console. This should only be used for consoles that
-                  present self-signed or otherwise untrusted certificates.
-                type: boolean
+              connection:
+                description: Connection contains the console endpoint and transport-security
+                  settings.
+                properties:
+                  insecureSkipTLSVerify:
+                    default: false
+                    description: |-
+                      InsecureSkipTLSVerify disables TLS certificate verification when
+                      communicating with the management console. This should only be used for
+                      consoles that present self-signed or otherwise untrusted certificates.
+                    type: boolean
+                  url:
+                    description: URL is the URL of the server management console.
+                    type: string
+                required:
+                - url
+                type: object
               manufacturer:
                 description: Manufacturer is the manufacturer of the server management
                   console (e.g., "Dell", "HPE", "Lenovo").
@@ -116,7 +123,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
             required:
-            - consoleURL
+            - connection
             - manufacturer
             - serverSelector
             type: object

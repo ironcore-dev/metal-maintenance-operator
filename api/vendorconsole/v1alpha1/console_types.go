@@ -17,18 +17,26 @@ type ConsoleSpec struct {
 	// ServerSelector specifies a label selector to identify the servers that are to be selected.
 	// +required
 	ServerSelector metav1.LabelSelector `json:"serverSelector"`
-	// ConsoleURL is the URL of the server management console.
-	ConsoleURL string `json:"consoleURL"`
+	// Connection contains the console endpoint and transport-security settings.
+	// +required
+	Connection ConsoleConnection `json:"connection"`
 	// Manufacturer is the manufacturer of the server management console (e.g., "Dell", "HPE", "Lenovo").
 	Manufacturer bmc.Manufacturer `json:"manufacturer"`
 	// BMCCredentialSecretRef references the secret containing BMC credentials.
 	BMCCredentialSecretRef v1.LocalObjectReference `json:"bmcCredentialSecretRef,omitempty"`
-	// InsecureSkipVerify disables TLS certificate verification when communicating
-	// with the management console. This should only be used for consoles that
-	// present self-signed or otherwise untrusted certificates.
+}
+
+// ConsoleConnection describes how to reach the server management console.
+type ConsoleConnection struct {
+	// URL is the URL of the server management console.
+	// +required
+	URL string `json:"url"`
+	// InsecureSkipTLSVerify disables TLS certificate verification when
+	// communicating with the management console. This should only be used for
+	// consoles that present self-signed or otherwise untrusted certificates.
 	// +optional
 	// +kubebuilder:default=false
-	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+	InsecureSkipTLSVerify bool `json:"insecureSkipTLSVerify,omitempty"`
 }
 
 // ConsoleStatus defines the observed state of Console.

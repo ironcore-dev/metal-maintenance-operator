@@ -351,13 +351,13 @@ func (r *ConsoleReconciler) createConsoleClient(
 		token = []byte("")
 	}
 
-	log.FromContext(ctx).Info("Creating console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.ConsoleURL)
+	log.FromContext(ctx).Info("Creating console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.Connection.URL)
 	return hwmgr.New(console.Spec.Manufacturer, hwmgr.ClientOptions{
-		Endpoint:           console.Spec.ConsoleURL,
+		Endpoint:           console.Spec.Connection.URL,
 		Username:           string(username),
 		Password:           string(password),
 		Token:              string(token),
-		InsecureSkipVerify: console.Spec.InsecureSkipVerify,
+		InsecureSkipVerify: console.Spec.Connection.InsecureSkipTLSVerify,
 	})
 }
 
