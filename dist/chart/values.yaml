@@ -2,7 +2,6 @@ owner-info:
   support-group: containers
   helm-chart-url: https://github.com/ironcore-dev/metal-maintenance-operator/tree/main/dist/chart
 
-
 # nameOverride: ""
 
 ## String to fully override chart.fullname template
@@ -175,18 +174,6 @@ certManager:
 prometheus:
   enable: false
 
-## Additional Secret resources to render in the release namespace.
-## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).
-##
-# additionalSecrets:
-#   - name: my-secret
-#     labels:
-#       resources.gardener.cloud/purpose: token-requestor
-#     annotations:
-#       serviceaccount.resources.gardener.cloud/name: my-sa
-#     stringData:
-#       token: ""
-additionalSecrets: []
 
 ## Ingress and Service for the sanitization report endpoint (port 8082).
 ## Enable to expose the report callback URL to the sanitizer.
@@ -215,3 +202,7 @@ ingress:
 ## Argora (or other spec writers) create ServerReadinessCheck objects in these namespaces.
 ## Example: ["metal-servers"]
 serverReadinessNamespaces: []
+
+## Additional Kubernetes objects to deploy alongside the operator.
+## Accepts any valid Kubernetes manifest as a list entry.
+extraObjects: []
