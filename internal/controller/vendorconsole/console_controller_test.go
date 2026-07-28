@@ -269,6 +269,73 @@ var _ = Describe("Console Controller", func() {
 		})
 
 		It("should succeed with InsecureSkipTLSVerify enabled", func() {
+			By("Creating a BMCSecret for TLS test")
+			tlsBMCSecret := &metalv1alpha1.BMCSecret{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "tls-bmc-secret-",
+					Namespace:    ns.Name,
+				},
+				Data: map[string][]byte{
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, tlsBMCSecret)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, tlsBMCSecret)
+
+			By("Creating a BMC for TLS test")
+			tlsHostname := "node-tls.qa-de-1.example.com"
+			tlsBMC := &metalv1alpha1.BMC{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "tls-bmc-",
+					Namespace:    ns.Name,
+				},
+				Spec: metalv1alpha1.BMCSpec{
+					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					Hostname:    &tlsHostname,
+					BMCSecretRef: corev1.LocalObjectReference{
+						Name: tlsBMCSecret.Name,
+					},
+					Protocol: metalv1alpha1.Protocol{
+						Name: metalv1alpha1.ProtocolRedfishLocal,
+						Port: 8443,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, tlsBMC)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, tlsBMC)
+
+			Eventually(UpdateStatus(tlsBMC, func() {
+				tlsBMC.Status.IP = metalv1alpha1.MustParseIP("127.0.0.1")
+			})).Should(Succeed())
+
+			By("Creating a Server for TLS test")
+			tlsServer := &metalv1alpha1.Server{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "tls-server-",
+					Namespace:    ns.Name,
+					Labels: map[string]string{
+						"tls-test": "true",
+					},
+				},
+				Spec: metalv1alpha1.ServerSpec{
+					SystemUUID: "99947555-7742-3448-3784-823347823899",
+					BMCRef:     &corev1.LocalObjectReference{Name: tlsBMC.Name},
+					BMC: &metalv1alpha1.BMCAccess{
+						Protocol: metalv1alpha1.Protocol{
+							Name: metalv1alpha1.ProtocolRedfishLocal,
+							Port: 8443,
+						},
+						Address: "127.0.0.1",
+						BMCSecretRef: corev1.LocalObjectReference{
+							Name: tlsBMCSecret.Name,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, tlsServer)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, tlsServer)
+
 			By("Creating Console credential secret")
 			tlsSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
@@ -283,7 +350,7 @@ var _ = Describe("Console Controller", func() {
 			Expect(k8sClient.Create(ctx, tlsSecret)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, tlsSecret)
 
-			By("Creating a Console with InsecureSkipTLSVerify: true")
+			By("Creating a Console pointing at the self-signed HTTPS mock with InsecureSkipTLSVerify: true")
 			tlsConsole := &vendorconsole.Console{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "tls-console-",
@@ -292,11 +359,11 @@ var _ = Describe("Console Controller", func() {
 				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							"nonexistent": "label",
+							"tls-test": "true",
 						},
 					},
 					Connection: vendorconsole.ConsoleConnection{
-						URL:                   "http://127.0.0.1:8000",
+						URL:                   mockTLSURL,
 						InsecureSkipTLSVerify: true,
 					},
 					Manufacturer:           "Dell Inc.",
@@ -306,10 +373,10 @@ var _ = Describe("Console Controller", func() {
 			Expect(k8sClient.Create(ctx, tlsConsole)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, tlsConsole)
 
-			By("Verifying reconciliation succeeds with InsecureSkipTLSVerify set")
-			Eventually(Object(tlsConsole)).Should(SatisfyAll(
-				HaveField("Status.TotalServers", int32(0)),
-				HaveField("Status.ManagedServers", int32(0)),
+			By("Verifying reconciliation succeeds and the server is managed despite the self-signed certificate")
+			Eventually(Object(tlsConsole), "15s").Should(SatisfyAll(
+				HaveField("Status.TotalServers", int32(1)),
+				HaveField("Status.ManagedServers", int32(1)),
 				HaveField("Status.UnmanagedServers", int32(0)),
 			))
 		})
