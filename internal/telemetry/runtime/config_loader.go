@@ -58,6 +58,7 @@ func (l *ConfigLoader) Start(ctx context.Context) error {
 		l.Log.Info("Initial ConfigMap load deferred to watch", "reason", err.Error())
 	}
 
+	// The cache is scoped to l.Namespace/l.Name via cache.ByObject in cmd/main.go.
 	inf, err := l.Cache.GetInformer(ctx, &corev1.ConfigMap{})
 	if err != nil {
 		return fmt.Errorf("ConfigLoader: get ConfigMap informer: %w", err)
@@ -75,8 +76,7 @@ func (l *ConfigLoader) Start(ctx context.Context) error {
 
 func (l *ConfigLoader) handler(ctx context.Context) toolscache.ResourceEventHandler {
 	onChange := func(obj any) {
-		cm, ok := obj.(*corev1.ConfigMap)
-		if !ok || cm.Namespace != l.Namespace || cm.Name != l.Name {
+		if _, ok := obj.(*corev1.ConfigMap); !ok {
 			return
 		}
 		if err := l.reload(ctx); err != nil {
