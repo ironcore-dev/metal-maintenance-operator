@@ -267,6 +267,52 @@ var _ = Describe("Console Controller", func() {
 				HaveField("Status.ManagedServers", int32(0)),
 			))
 		})
+
+		It("should succeed with InsecureSkipTLSVerify enabled", func() {
+			By("Creating Console credential secret")
+			tlsSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "tls-secret-",
+					Namespace:    ns.Name,
+				},
+				Data: map[string][]byte{
+					"username": []byte("admin"),
+					"password": []byte("password"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, tlsSecret)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, tlsSecret)
+
+			By("Creating a Console with InsecureSkipTLSVerify: true")
+			tlsConsole := &vendorconsole.Console{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "tls-console-",
+					Namespace:    ns.Name,
+				},
+				Spec: vendorconsole.ConsoleSpec{
+					ServerSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"nonexistent": "label",
+						},
+					},
+					Connection: vendorconsole.ConsoleConnection{
+						URL:                   "http://127.0.0.1:8000",
+						InsecureSkipTLSVerify: true,
+					},
+					Manufacturer:           "Dell Inc.",
+					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: tlsSecret.Name},
+				},
+			}
+			Expect(k8sClient.Create(ctx, tlsConsole)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, tlsConsole)
+
+			By("Verifying reconciliation succeeds with InsecureSkipTLSVerify set")
+			Eventually(Object(tlsConsole)).Should(SatisfyAll(
+				HaveField("Status.TotalServers", int32(0)),
+				HaveField("Status.ManagedServers", int32(0)),
+				HaveField("Status.UnmanagedServers", int32(0)),
+			))
+		})
 	})
 
 	Context("When handling async operations", func() {
