@@ -5,12 +5,20 @@ package mock
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"embed"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"math/big"
 	"net/http"
 	"path"
 	"strings"
@@ -91,35 +99,34 @@ func (s *MockServer) handleRedfishPOST(w http.ResponseWriter, r *http.Request) {
 	if hasOverride {
 		resp, _ := json.MarshalIndent(cached, "", "  ")
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
 		_, err := w.Write(resp)
 		if err != nil {
 			s.log.Error(err, "Failed to write response")
 		}
 		return
-	} else {
-		s.log.Info("Using embedded data for POST", "path", urlPath)
-		data, err := dataFS.ReadFile(urlPath)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		var existing map[string]any
-		if err := json.Unmarshal(data, &existing); err != nil {
-			http.Error(w, "Invalid JSON in embedded data", http.StatusInternalServerError)
-			return
-		}
-		maps.Copy(existing, update)
-		s.mu.Lock()
-		s.overrides[urlPath] = existing
-		s.mu.Unlock()
-		resp, _ := json.MarshalIndent(existing, "", "  ")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, err = w.Write(resp)
-		if err != nil {
-			s.log.Error(err, "Failed to write response")
-		}
+	}
+	s.log.Info("Using embedded data for POST", "path", urlPath)
+	data, err := dataFS.ReadFile(urlPath)
+	if err != nil {
+		http.NotFound(w, r)
 		return
+	}
+	var existing map[string]any
+	if err := json.Unmarshal(data, &existing); err != nil {
+		http.Error(w, "Invalid JSON in embedded data", http.StatusInternalServerError)
+		return
+	}
+	maps.Copy(existing, update)
+	s.mu.Lock()
+	s.overrides[urlPath] = existing
+	s.mu.Unlock()
+	resp, _ := json.MarshalIndent(existing, "", "  ")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_, err = w.Write(resp)
+	if err != nil {
+		s.log.Error(err, "Failed to write response")
 	}
 }
 
@@ -197,6 +204,67 @@ func (s *MockServer) Start(ctx context.Context) error {
 		s.log.Error(err, "Mock server shutdown failed")
 	}
 	return nil
+}
+
+// StartTLS starts a TLS server on addr using a self-signed certificate.
+// It is intended for testing InsecureSkipVerify behaviour.
+func (s *MockServer) StartTLS(ctx context.Context, addr string) error {
+	if s.handler == nil {
+		return fmt.Errorf("mock redfish handler is nil")
+	}
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		return fmt.Errorf("failed to generate self-signed cert: %w", err)
+	}
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: s.handler,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		},
+	}
+	go func() {
+		s.log.Info("Started mock TLS server", "address", addr)
+		if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.log.Error(err, "TLS server failed")
+		}
+	}()
+
+	<-ctx.Done()
+	s.log.Info("Shutting down mock TLS server")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		s.log.Error(err, "Mock TLS server shutdown failed")
+	}
+	return nil
+}
+
+func generateSelfSignedCert() (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "mock-console"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		DNSNames:     []string{"localhost"},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
 func resolvePath(urlPath string) string {

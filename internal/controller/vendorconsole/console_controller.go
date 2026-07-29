@@ -351,13 +351,19 @@ func (r *ConsoleReconciler) createConsoleClient(
 		token = []byte("")
 	}
 
-	log.FromContext(ctx).Info("Creating console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.ConsoleURL)
-	return hwmgr.New(console.Spec.Manufacturer, hwmgr.ClientOptions{
-		Endpoint: console.Spec.ConsoleURL,
-		Username: string(username),
-		Password: string(password),
-		Token:    string(token),
+	logger := log.FromContext(ctx)
+	hwmgrClient, err := hwmgr.New(console.Spec.Manufacturer, hwmgr.ClientOptions{
+		Endpoint:           console.Spec.Connection.URL,
+		Username:           string(username),
+		Password:           string(password),
+		Token:              string(token),
+		InsecureSkipVerify: console.Spec.Connection.InsecureSkipTLSVerify,
 	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Created console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.Connection.URL)
+	return hwmgrClient, nil
 }
 
 func (r *ConsoleReconciler) getConsoleSecret(
