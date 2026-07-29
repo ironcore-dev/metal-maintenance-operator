@@ -351,7 +351,7 @@ func (r *ConsoleReconciler) createConsoleClient(
 		token = []byte("")
 	}
 
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 	hwmgrClient, err := hwmgr.New(console.Spec.Manufacturer, hwmgr.ClientOptions{
 		Endpoint:           console.Spec.Connection.URL,
 		Username:           string(username),
@@ -362,7 +362,7 @@ func (r *ConsoleReconciler) createConsoleClient(
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Created console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.Connection.URL)
+	logger.Info("Created console client", "manufacturer", console.Spec.Manufacturer, "consoleURL", console.Spec.Connection.URL)
 	return hwmgrClient, nil
 }
 
