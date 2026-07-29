@@ -8,14 +8,15 @@ on:
 
 jobs:
   check-codegen:
+    name: Run code generation checks
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
-    - name: Run make generate
-      run: make generate
+    - name: Run code gen checks
+      run: make check-gen
     - name: Compare the expected and actual generated/* directories
       run: |
         if [ "$(git diff | wc -l)" -gt "0" ]; then

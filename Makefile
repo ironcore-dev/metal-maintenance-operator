@@ -117,6 +117,9 @@ check-license: addlicense ## Check that every file has a license header present.
 .PHONY: check
 check: generate manifests add-license fmt lint test # Generate manifests, code, lint, add licenses, test
 
+.PHONY: check-gen
+check-gen: generate manifests docs helm fmt ## Run code generation, manifests, docs, helm, and formatting.
+
 ##@ Build
 
 .PHONY: docs
@@ -279,6 +282,24 @@ $(ADDLICENSE): $(LOCALBIN)
 .PHONY: helm
 helm: manifests kubebuilder
 	"$(KUBEBUILDER)" edit --plugins=helm/v2-alpha
+	@# Patch manager env: replace generated env block with POD_NAMESPACE fieldRef + env/envOverrides
+	@grep -qF '        - name: POD_NAMESPACE' \
+	  dist/chart/templates/manager/manager.yaml || { \
+	  python3 -c "\
+import re; \
+t = open('dist/chart/templates/manager/manager.yaml').read(); \
+old = r'        env:\n\{\{- if or \.Values\.manager\.env.*?\{\{- end \}\}\n        image:'; \
+new = '        env:\n        - name: POD_NAMESPACE\n          valueFrom:\n            fieldRef:\n              fieldPath: metadata.namespace\n        {{- with .Values.manager.env }}\n        {{- toYaml . | nindent 8 }}\n        {{- end }}\n        {{- if kindIs \"map\" .Values.manager.envOverrides }}\n        {{- range \$$k, \$$v := .Values.manager.envOverrides }}\n        - name: {{ \$$k }}\n          value: {{ \$$v | quote }}\n        {{- end }}\n        {{- end }}\n        image:'; \
+open('dist/chart/templates/manager/manager.yaml', 'w').write(re.sub(old, new, t, flags=re.DOTALL))"; \
+	  grep -qF '        - name: POD_NAMESPACE' dist/chart/templates/manager/manager.yaml || { echo 'env patch not applied' >&2; exit 1; }; \
+	  }
+	@# Patch manager ports: replace static [] with values-driven template
+	@grep -qF '        {{- with .Values.manager.ports }}' \
+	  dist/chart/templates/manager/manager.yaml || { \
+	  sed -i.bak 's/^        ports: \[\]$$/        ports:\n        {{- with .Values.manager.ports }}\n        {{- toYaml . | nindent 8 }}\n        {{- else }}\n        []\n        {{- end }}/' \
+	    dist/chart/templates/manager/manager.yaml && rm -f dist/chart/templates/manager/manager.yaml.bak; \
+	  grep -qF '        {{- with .Values.manager.ports }}' dist/chart/templates/manager/manager.yaml || { echo 'ports patch not applied' >&2; exit 1; }; \
+	  }
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # Note: All paths are quoted to work in directories containing spaces or parentheses.
