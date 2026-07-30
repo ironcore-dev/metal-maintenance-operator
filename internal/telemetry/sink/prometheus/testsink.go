@@ -10,7 +10,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const pipelineTestTimestampName = "event_pipeline_test_timestamp"
+const (
+	pipelineTestTimestampName = "event_pipeline_test_timestamp"
+	labelResult               = "result"
+)
 
 // testSeriesKey identifies one redfish_event_pipeline_test_timestamp series.
 type testSeriesKey struct{ result string }
@@ -46,7 +49,7 @@ func NewTestEventSink(reg prometheus.Registerer) (*TestEventSink, error) {
 		Namespace: metricNamespace,
 		Name:      pipelineTestTimestampName,
 		Help:      "Unix timestamp of the most recent end-to-end pipeline health check per BMC and result (success/failure).",
-	}, []string{labelHostname, "result"})
+	}, []string{labelHostname, labelResult})
 	if err := reg.Register(s.gauge); err != nil {
 		return nil, err
 	}
@@ -66,7 +69,7 @@ func (s *TestEventSink) RecordTestResult(bmcName, result string) {
 	keys[key] = struct{}{}
 	s.gauge.With(prometheus.Labels{
 		labelHostname: bmcName,
-		"result":      result,
+		labelResult:   result,
 	}).Set(float64(time.Now().Unix()))
 }
 
@@ -80,7 +83,7 @@ func (s *TestEventSink) Forget(bmcName string) {
 	for key := range keys {
 		s.gauge.Delete(prometheus.Labels{
 			labelHostname: bmcName,
-			"result":      key.result,
+			labelResult:   key.result,
 		})
 	}
 }

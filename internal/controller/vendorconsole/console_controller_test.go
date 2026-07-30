@@ -25,6 +25,7 @@ const (
 	testConsoleURL        = "http://127.0.0.1:8000"
 	testSecretUsernameKey = "username"
 	testSecretPasswordKey = "password"
+	testFoo               = "foo"
 )
 
 var _ = Describe("Console Controller", func() {
@@ -47,7 +48,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte(testFoo),
 					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 				},
 			}
@@ -61,7 +62,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
 					Hostname:    &hostname,
 
 					BMCSecretRef: corev1.LocalObjectReference{
@@ -152,8 +153,8 @@ var _ = Describe("Console Controller", func() {
 							testManufacturerLabel: testManufacturerDell,
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: dellSecret.Name},
 				},
 			}
@@ -234,8 +235,8 @@ var _ = Describe("Console Controller", func() {
 							"nonexistent": "label",
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: emptySecret.Name},
 				},
 			}
@@ -263,8 +264,8 @@ var _ = Describe("Console Controller", func() {
 							"test": "label",
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: "nonexistent-secret"},
 				},
 			}
@@ -286,7 +287,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte(testFoo),
 					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 				},
 			}
@@ -301,7 +302,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
 					Hostname:    &tlsHostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: tlsBMCSecret.Name,
@@ -376,7 +377,7 @@ var _ = Describe("Console Controller", func() {
 						URL:                   mockTLSURL,
 						InsecureSkipTLSVerify: true,
 					},
-					Manufacturer:           "Dell Inc.",
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: tlsSecret.Name},
 				},
 			}
@@ -407,7 +408,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte(testFoo),
 					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 				},
 			}
@@ -421,7 +422,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
 					Hostname:    &hostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: asyncBMCSecret.Name,
@@ -508,8 +509,8 @@ var _ = Describe("Console Controller", func() {
 							testManufacturerLabel: testManufacturerDell,
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: asyncSecret.Name},
 				},
 			}
@@ -550,8 +551,8 @@ var _ = Describe("Console Controller", func() {
 							testManufacturerLabel: testManufacturerDell,
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: pollSecret.Name},
 				},
 			}
