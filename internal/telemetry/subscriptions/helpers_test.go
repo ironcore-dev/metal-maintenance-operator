@@ -102,6 +102,8 @@ func (c *fakeClient) ListEventSubscriptions(_ context.Context) ([]subscriptions.
 	return out, nil
 }
 
+func (c *fakeClient) SubmitTestEvent(_ context.Context, _ string) error { return nil }
+
 func (c *fakeClient) setSubscriptions(subs []subscriptions.Subscription) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

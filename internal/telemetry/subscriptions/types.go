@@ -65,6 +65,10 @@ type Client interface {
 	) (string, error)
 	DeleteEventSubscription(ctx context.Context, uri string) error
 	ListEventSubscriptions(ctx context.Context) ([]Subscription, error)
+	// SubmitTestEvent fires a Redfish SubmitTestEvent action using the
+	// given messageId as a correlation token. The caller can match the
+	// token when the event arrives at the receiver to confirm round-trip.
+	SubmitTestEvent(ctx context.Context, messageId string) error
 	Logout()
 }
 

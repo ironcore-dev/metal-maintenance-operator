@@ -20,6 +20,12 @@ const (
 
 	minPerBMCTimeout = time.Second
 	maxPerBMCTimeout = 10 * time.Minute
+
+	minTestEventInterval = time.Minute
+	maxTestEventInterval = 7 * 24 * time.Hour
+
+	minTestEventTimeout = 5 * time.Second
+	maxTestEventTimeout = 5 * time.Minute
 )
 
 var knownVendors = map[bmc.Manufacturer]struct{}{
@@ -85,6 +91,18 @@ func Validate(cfg *Config) field.ErrorList {
 	if cfg.PerBMCTimeout != 0 && (cfg.PerBMCTimeout < minPerBMCTimeout || cfg.PerBMCTimeout > maxPerBMCTimeout) {
 		errs = append(errs, field.Invalid(root.Child("perBMCTimeout"), cfg.PerBMCTimeout,
 			fmt.Sprintf("must be between %s and %s when set", minPerBMCTimeout, maxPerBMCTimeout)))
+	}
+
+	// testEventInterval — optional; zero disables the health check.
+	if cfg.TestEventInterval != 0 && (cfg.TestEventInterval < minTestEventInterval || cfg.TestEventInterval > maxTestEventInterval) {
+		errs = append(errs, field.Invalid(root.Child("testEventInterval"), cfg.TestEventInterval,
+			fmt.Sprintf("must be between %s and %s when set", minTestEventInterval, maxTestEventInterval)))
+	}
+
+	// testEventTimeout — only meaningful when testEventInterval is set.
+	if cfg.TestEventTimeout != 0 && (cfg.TestEventTimeout < minTestEventTimeout || cfg.TestEventTimeout > maxTestEventTimeout) {
+		errs = append(errs, field.Invalid(root.Child("testEventTimeout"), cfg.TestEventTimeout,
+			fmt.Sprintf("must be between %s and %s when set", minTestEventTimeout, maxTestEventTimeout)))
 	}
 
 	// metrics — no allow-list validated here. The collector publishes every

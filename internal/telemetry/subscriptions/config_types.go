@@ -35,6 +35,18 @@ type Config struct {
 	// single slow BMC doesn't fail-fast through the reconcile loop.
 	PerBMCTimeout time.Duration `yaml:"perBMCTimeout"`
 
+	// TestEventInterval controls how often the operator fires a
+	// SubmitTestEvent on each subscribed BMC to verify the full
+	// push pipeline. Zero (the default) disables the health check.
+	// When enabled, the test fires at most once per interval per BMC,
+	// piggybacking on the normal subscription reconcile loop.
+	TestEventInterval time.Duration `yaml:"testEventInterval,omitempty"`
+
+	// TestEventTimeout is how long the operator waits for the test
+	// event to arrive at the receiver before recording a failure.
+	// Defaults to 30s when zero (and TestEventInterval > 0).
+	TestEventTimeout time.Duration `yaml:"testEventTimeout,omitempty"`
+
 	EventBasedHardware []HardwareMatch `yaml:"eventBasedHardware,omitempty"`
 }
 

@@ -20,6 +20,7 @@ import (
 	"net/url"
 
 	"github.com/stmcginnis/gofish"
+	"github.com/stmcginnis/gofish/schemas"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -81,6 +82,10 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	metricSink, err := promsink.NewMetricReportSink(ctrlmetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("init metric-report sink: %w", err)
+	}
+	testSink, err := promsink.NewTestEventSink(ctrlmetrics.Registry)
+	if err != nil {
+		return fmt.Errorf("init test-event sink: %w", err)
 	}
 
 	if opts.EnableCriticalEventHandler {
@@ -144,6 +149,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		Factory:          &subscriptionClientFactory{insecureTLS: opts.InsecureTLS},
 		Sink:             eventSink,
 		MetricReportSink: metricSink,
+		TestRecorder:     testSink,
 		ReceiverURL:      opts.ReceiverURL,
 		SubscriberID:     opts.SubscriberID,
 		// ReconcileInterval and PerBMCTimeout intentionally unset:
@@ -155,6 +161,10 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	if err := subReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup subscription reconciler: %w", err)
 	}
+
+	// Wire the receiver's test notifier to the reconciler so round-trip
+	// confirmations update the health-check metric.
+	receiver.SetTestNotifier(subReconciler)
 
 	return nil
 }
@@ -229,6 +239,23 @@ func (c *extendedClient) ListEventSubscriptions(_ context.Context) ([]subscripti
 		})
 	}
 	return out, nil
+}
+
+func (c *extendedClient) SubmitTestEvent(_ context.Context, messageId string) error {
+	svc := c.api.GetService()
+	if svc == nil {
+		return fmt.Errorf("submit test event: no service root")
+	}
+	es, err := svc.EventService()
+	if err != nil {
+		return fmt.Errorf("submit test event: event service: %w", err)
+	}
+	_, err = es.SubmitTestEvent(&schemas.EventServiceSubmitTestEventParameters{
+		MessageID: messageId,
+		Message:   "metal-maintenance-operator pipeline health check",
+		Severity:  "Informational",
+	})
+	return err
 }
 
 func (f *subscriptionClientFactory) NewClient(ctx context.Context, r *subscriptions.Resolved) (subscriptions.Client, error) {

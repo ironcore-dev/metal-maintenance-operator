@@ -43,7 +43,18 @@ type Config struct {
 	// SubscriberID scopes the receiver's route under a per-subscriber
 	// path segment.
 	SubscriberID string
+	// TestNotifier is called for every incoming alert event so the
+	// subscription reconciler can correlate SubmitTestEvent round-trips.
+	// Nil disables notification (backward compatible).
+	TestNotifier TestEventNotifier
 	Log          logr.Logger
+}
+
+// TestEventNotifier is notified when an alert event arrives at the receiver.
+// The subscription reconciler implements this to correlate SubmitTestEvent
+// round-trips by matching the messageId it sent with what arrives here.
+type TestEventNotifier interface {
+	NotifyTestEvent(bmcName, messageId string)
 }
 
 // Receiver is an HTTP server that decodes Redfish event POSTs and
@@ -153,6 +164,12 @@ func (r *Receiver) Handler() http.Handler {
 	return r.mux
 }
 
+// SetTestNotifier wires a TestEventNotifier after construction. Called by
+// the runtime package once the subscription reconciler is ready.
+func (r *Receiver) SetTestNotifier(n TestEventNotifier) {
+	r.cfg.TestNotifier = n
+}
+
 func (r *Receiver) handleAlerts(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "Only POST is allowed", http.StatusMethodNotAllowed)
@@ -188,6 +205,13 @@ func (r *Receiver) handleAlerts(w http.ResponseWriter, req *http.Request) {
 		r.log.Error(err, "Event sink publish failed", "bmc", bmcName)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
+	}
+	if r.cfg.TestNotifier != nil {
+		for i := range events {
+			if events[i].MessageID != "" {
+				r.cfg.TestNotifier.NotifyTestEvent(bmcName, events[i].MessageID)
+			}
+		}
 	}
 	r.log.V(2).Info("Published events", "bmc", bmcName, "count", len(events))
 	w.WriteHeader(http.StatusNoContent)

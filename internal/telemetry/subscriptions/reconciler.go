@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -21,6 +23,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+// TestResultRecorder records the outcome of a pipeline health-check test
+// event. The production implementation updates a Prometheus gauge; nil
+// disables recording (useful in tests that don't care about health-check
+// metrics).
+type TestResultRecorder interface {
+	RecordTestResult(bmcName, result string)
+	Forget(bmcName string)
+}
 
 const bmcSubscriptionFinalizer = "telemetry.metal.ironcore.dev/subscriptions"
 
@@ -75,12 +86,22 @@ type BMCReconciler struct {
 	// Defaults to 30s.
 	PerBMCTimeout time.Duration
 
+	// TestRecorder is optional. When set, the reconciler records pipeline
+	// health-check results (success/failure) via RecordTestResult after
+	// each SubmitTestEvent round-trip. Nil disables recording.
+	TestRecorder TestResultRecorder
+
 	Log logr.Logger
 
 	// srvURL is the parsed ReceiverURL, computed during SetupWithManager
 	// so destinationFor and classify don't re-parse on every call. Not
 	// guarded by a mutex — written once during setup, then only read.
 	srvURL *url.URL
+
+	// testPending tracks in-flight health-check tests: bmcName → testEntry.
+	testPending sync.Map
+	// lastTestTime tracks when we last fired a test per BMC: bmcName → time.Time.
+	lastTestTime sync.Map
 }
 
 // SetupWithManager registers the reconciler against the controller-runtime manager.
@@ -161,6 +182,7 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			// with the object. The finalizer path below covers the
 			// well-managed case.
 			r.tearDownOne(ctx, req.Name)
+			r.ForgetTestState(req.Name)
 			if r.Sink != nil {
 				r.Sink.Forget(req.Name)
 			}
@@ -182,6 +204,7 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			return ctrl.Result{}, nil
 		}
 		r.tearDownOne(ctx, req.Name)
+		r.ForgetTestState(req.Name)
 		if r.Sink != nil {
 			r.Sink.Forget(req.Name)
 		}
@@ -271,6 +294,7 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 			return
 		}
 		r.ensureSubscriptions(ctx, c, ref.Name, current)
+		r.maybeRunTestEvent(ctx, c, ref.Name, cfg)
 	} else {
 		// BMC isn't in the event-based set (or was and is no longer):
 		// tear off any subscriptions we previously created here, then
@@ -494,6 +518,92 @@ func bmcRefFromObject(bmc *metalv1alpha1.BMC) BMCRef {
 		Vendor:          bmc.Status.Manufacturer,
 		Model:           bmc.Status.Model,
 		FirmwareVersion: bmc.Status.FirmwareVersion,
+	}
+}
+
+// testEntry holds the correlation state for one in-flight SubmitTestEvent.
+type testEntry struct {
+	messageID string
+	deadline  time.Time
+}
+
+const (
+	testResultSuccess = "success"
+	testResultFailure = "failure"
+)
+
+// maybeRunTestEvent fires a SubmitTestEvent health check if the configured
+// interval has elapsed since the last test for this BMC. It also enforces
+// the deadline for any pending test that has not yet been confirmed, recording
+// a failure if it expired.
+func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config) {
+	if cfg == nil || cfg.TestEventInterval <= 0 {
+		return
+	}
+
+	// Enforce deadline of any previous pending test.
+	if raw, ok := r.testPending.Load(bmcName); ok {
+		entry := raw.(testEntry)
+		if time.Now().After(entry.deadline) {
+			r.testPending.Delete(bmcName)
+			r.Log.V(1).Info("Test event timed out", "bmc", bmcName)
+			if r.TestRecorder != nil {
+				r.TestRecorder.RecordTestResult(bmcName, testResultFailure)
+			}
+		} else {
+			// Still waiting for arrival — don't fire another test yet.
+			return
+		}
+	}
+
+	// Check if enough time has elapsed since the last test.
+	if raw, ok := r.lastTestTime.Load(bmcName); ok {
+		if time.Since(raw.(time.Time)) < cfg.TestEventInterval {
+			return
+		}
+	}
+
+	timeout := cfg.TestEventTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
+	msgID := uuid.New().String()
+	if err := c.SubmitTestEvent(ctx, msgID); err != nil {
+		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
+		return
+	}
+	r.testPending.Store(bmcName, testEntry{messageID: msgID, deadline: time.Now().Add(timeout)})
+	r.lastTestTime.Store(bmcName, time.Now())
+	r.Log.V(1).Info("Submitted test event", "bmc", bmcName, "messageID", msgID)
+}
+
+// NotifyTestEvent is called by the event receiver when an alert arrives.
+// It correlates the messageId against any pending test for the BMC and
+// records a success result if matched. Implements events.TestEventNotifier.
+func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
+	raw, ok := r.testPending.Load(bmcName)
+	if !ok {
+		return
+	}
+	entry := raw.(testEntry)
+	if entry.messageID != messageId {
+		return
+	}
+	r.testPending.Delete(bmcName)
+	r.Log.V(1).Info("Test event round-trip confirmed", "bmc", bmcName)
+	if r.TestRecorder != nil {
+		r.TestRecorder.RecordTestResult(bmcName, testResultSuccess)
+	}
+}
+
+// ForgetTestState clears all pending test state for a BMC. Called during
+// teardown so stale entries don't affect a future re-subscription.
+func (r *BMCReconciler) ForgetTestState(bmcName string) {
+	r.testPending.Delete(bmcName)
+	r.lastTestTime.Delete(bmcName)
+	if r.TestRecorder != nil {
+		r.TestRecorder.Forget(bmcName)
 	}
 }
 

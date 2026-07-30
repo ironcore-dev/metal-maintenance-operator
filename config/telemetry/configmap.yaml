@@ -33,6 +33,19 @@ data:
     # Bounds: 1s – 10m. Unset → 30s default.
     perBMCTimeout: 30s
 
+    # End-to-end pipeline health check: how often the operator fires a
+    # Redfish SubmitTestEvent on each subscribed BMC and waits for the
+    # event to arrive at the receiver. A Prometheus gauge
+    # (redfish_event_pipeline_test_timestamp{result="success|failure"})
+    # records the Unix timestamp of each outcome.
+    #
+    # Bounds: 1m – 7d. Unset or 0 → health check disabled (default).
+    # testEventInterval: 1h
+    #
+    # How long to wait for the round-trip before recording a failure.
+    # Bounds: 5s – 5m. Unset → 30s default.
+    # testEventTimeout: 30s
+
     # Vendor/model rows that opt INTO event-based subscription. A BMC
     # matches when its Status.Manufacturer equals Vendor exactly AND
     # its Status.Model is in Models (or Models == ["*"]) AND its
