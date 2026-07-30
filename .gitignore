@@ -29,3 +29,4 @@ go.work
 
 # Helm chart dependencies
 dist/chart/charts/
+vendor

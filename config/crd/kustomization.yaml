@@ -4,9 +4,11 @@
 resources:
 - bases/vendorconsole.metal.ironcore.dev_consoles.yaml
 - bases/readiness.metal.ironcore.dev_serverwirings.yaml
+- bases/maintenance.metal.ironcore.dev_maintenanceplans.yaml
+- bases/maintenance.metal.ironcore.dev_maintenanceplanruns.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
-patches:
+#patches:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
 # +kubebuilder:scaffold:crdkustomizewebhookpatch

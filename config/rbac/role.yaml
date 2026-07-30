@@ -7,7 +7,59 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - maintenanceplanruns
+  - maintenanceplans
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - maintenanceplanruns/finalizers
+  - maintenanceplans/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - maintenanceplanruns/status
+  - maintenanceplans/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - biossettings
+  - biosversions
+  - bmcsettings
+  - bmcversions
+  - serverclaims
   verbs:
   - create
   - delete
@@ -24,18 +76,6 @@ rules:
   verbs:
   - get
   - list
-  - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
-  - serverclaims
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - metal.ironcore.dev
