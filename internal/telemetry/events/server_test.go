@@ -20,6 +20,8 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 )
 
+const testBMCName = "bmc-1"
+
 // recordingEventSink records every PublishEvents call for assertions.
 type recordingEventSink struct {
 	mu    sync.Mutex
@@ -88,7 +90,7 @@ func TestAlerts_HappyPath_EventsField(t *testing.T) {
 		t.Fatalf("status: got %d, want 204", res.StatusCode)
 	}
 	got := eSink.lastCall()
-	if got.bmcName != "bmc-1" || len(got.events) != 1 || got.events[0].EventID != "E1" {
+	if got.bmcName != testBMCName || len(got.events) != 1 || got.events[0].EventID != "E1" {
 		t.Errorf("unexpected publish: %+v", got)
 	}
 }
@@ -314,7 +316,7 @@ func TestMetricsReport_HappyPath(t *testing.T) {
 		t.Errorf("status: got %d, want 204", res.StatusCode)
 	}
 	got := mSink.lastCall()
-	if got.bmcName != "bmc-1" || len(got.samples) != 1 {
+	if got.bmcName != testBMCName || len(got.samples) != 1 {
 		t.Fatalf("call: %+v", got)
 	}
 	s := got.samples[0]
@@ -469,7 +471,7 @@ func TestAlerts_TestNotifier_CalledWithMessageID(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("notifier calls: got %d, want 1", len(calls))
 	}
-	if calls[0].bmcName != "bmc-1" || calls[0].messageID != "FOO.1.0.Bar" {
+	if calls[0].bmcName != testBMCName || calls[0].messageID != "FOO.1.0.Bar" {
 		t.Errorf("unexpected call: %+v", calls[0])
 	}
 }
