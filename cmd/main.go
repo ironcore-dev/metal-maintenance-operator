@@ -171,7 +171,7 @@ func main() {
 		telemetryConfigNamespace = os.Getenv("POD_NAMESPACE")
 		if telemetryConfigNamespace == "" {
 			setupLog.Error(nil,
-				"Telemetry enabled but --telemetry-config-namespace and POD_NAMESPACE are both empty")
+				"Telemetry ConfigMap namespace resolution failed: neither --telemetry-config-namespace nor POD_NAMESPACE is set")
 			os.Exit(1)
 		}
 	}
@@ -342,10 +342,10 @@ func main() {
 			SubscriberID:               telemetrySubscriberID,
 			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
 		}); err != nil {
-			setupLog.Error(err, "Unable to add telemetry pipeline")
+			setupLog.Error(err, "Failed to add telemetry pipeline")
 			os.Exit(1)
 		}
-		setupLog.Info("Telemetry pipeline enabled",
+		setupLog.Info("Enabled telemetry pipeline",
 			"configMap", telemetryConfigNamespace+"/"+telemetryConfigName,
 			"receiverURL", telemetryReceiverURL)
 	}
@@ -356,15 +356,15 @@ func main() {
 		Log:    ctrl.Log.WithName("discovery"),
 	}
 	if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
-		setupLog.Error(err, "Unable to register SD handler", "path", discovery.Path)
+		setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
 		os.Exit(1)
 	}
 	if metricsAddr == "0" || metricsAddr == "" {
-		setupLog.Info("BMC service discovery registered but unreachable: metrics server is disabled",
+		setupLog.Info("BMC service discovery registered but metrics server is disabled",
 			"path", discovery.Path,
 			"hint", "set --metrics-bind-address to enable")
 	} else {
-		setupLog.Info("BMC service discovery available on metrics server",
+		setupLog.Info("Registered BMC service discovery on metrics server",
 			"path", discovery.Path,
 			"metricsBindAddress", metricsAddr)
 	}

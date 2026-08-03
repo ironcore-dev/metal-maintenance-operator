@@ -55,8 +55,10 @@ type fakeClient struct {
 	mu          sync.Mutex
 	createCalls []createCall
 	deleteCalls []string
+	submitCalls []string
 	createErr   error
 	deleteErr   error
+	submitErr   error
 	createURI   string // returned by CreateEventSubscription on success
 	subs        []subscriptions.Subscription
 	listErr     error
@@ -102,8 +104,23 @@ func (c *fakeClient) ListEventSubscriptions(_ context.Context) ([]subscriptions.
 	return out, nil
 }
 
-func (c *fakeClient) SubmitTestEvent(_ context.Context, _ string) error { return nil }
+func (c *fakeClient) SubmitTestEvent(_ context.Context, msgID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.submitErr != nil {
+		return c.submitErr
+	}
+	c.submitCalls = append(c.submitCalls, msgID)
+	return nil
+}
 
+func (c *fakeClient) snapshotSubmits() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.submitCalls))
+	copy(out, c.submitCalls)
+	return out
+}
 func (c *fakeClient) setSubscriptions(subs []subscriptions.Subscription) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -262,6 +279,66 @@ func bmcObjectBeingDeleted(name, vendor, model string) *metalv1alpha1.BMC {
 func newClientWith(t *testing.T, objs ...client.Object) client.Client {
 	t.Helper()
 	return fake.NewClientBuilder().WithScheme(reconcilerScheme(t)).WithObjects(objs...).Build()
+}
+
+// fakeTestRecorder records RecordTestResult and Forget calls.
+type fakeTestRecorder struct {
+	mu        sync.Mutex
+	results   []testResult
+	forgotten []string
+}
+
+type testResult struct {
+	bmcName string
+	result  string
+}
+
+func (r *fakeTestRecorder) RecordTestResult(bmcName, result string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.results = append(r.results, testResult{bmcName: bmcName, result: result})
+}
+
+func (r *fakeTestRecorder) Forget(bmcName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.forgotten = append(r.forgotten, bmcName)
+}
+
+func (r *fakeTestRecorder) snapshotResults() []testResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]testResult, len(r.results))
+	copy(out, r.results)
+	return out
+}
+
+func (r *fakeTestRecorder) snapshotForgotten() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.forgotten))
+	copy(out, r.forgotten)
+	return out
+}
+
+// newRecWithTestRecorder builds a reconciler with a fakeTestRecorder and
+// a test-event interval set so maybeRunTestEvent will fire.
+func newRecWithTestRecorder(t *testing.T, c client.Client, cfg *subscriptions.Config, res *fakeResolver, fac *fakeFactory, rec *fakeTestRecorder) *subscriptions.BMCReconciler {
+	t.Helper()
+	r := &subscriptions.BMCReconciler{
+		Client:            c,
+		Config:            func() *subscriptions.Config { return cfg },
+		Resolver:          res,
+		Factory:           fac,
+		ReceiverURL:       testReceiverURL,
+		ReconcileInterval: time.Hour,
+		PerBMCTimeout:     time.Second,
+		TestRecorder:      rec,
+	}
+	if err := subscriptions.InitForTest(r); err != nil {
+		t.Fatalf("InitForTest: %v", err)
+	}
+	return r
 }
 
 // dellVendorMatch is the canonical EventBased policy used by most

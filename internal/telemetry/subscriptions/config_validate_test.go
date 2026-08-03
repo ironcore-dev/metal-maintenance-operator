@@ -134,6 +134,60 @@ func TestValidate_EventBasedHardware_ValidSemver(t *testing.T) {
 	}
 }
 
+func TestValidate_TestEventInterval_Range(t *testing.T) {
+	cases := []struct {
+		name    string
+		val     time.Duration
+		wantErr bool
+	}{
+		{"zero disables, no error", 0, false},
+		{"below min (30s)", 30 * time.Second, true},
+		{"at min (1m)", time.Minute, false},
+		{"valid (1h)", time.Hour, false},
+		{"at max (7d)", 7 * 24 * time.Hour, false},
+		{"above max (8d)", 8 * 24 * time.Hour, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalValid()
+			cfg.TestEventInterval = tc.val
+			errs := Validate(cfg)
+			if tc.wantErr {
+				assertFieldError(t, errs, "testEventInterval")
+			} else if len(errs) != 0 {
+				t.Errorf("unexpected errors: %v", errs)
+			}
+		})
+	}
+}
+
+func TestValidate_TestEventTimeout_Range(t *testing.T) {
+	cases := []struct {
+		name    string
+		val     time.Duration
+		wantErr bool
+	}{
+		{"zero defaults, no error", 0, false},
+		{"below min (1s)", time.Second, true},
+		{"at min (5s)", 5 * time.Second, false},
+		{"valid (30s)", 30 * time.Second, false},
+		{"at max (5m)", 5 * time.Minute, false},
+		{"above max (10m)", 10 * time.Minute, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalValid()
+			cfg.TestEventTimeout = tc.val
+			errs := Validate(cfg)
+			if tc.wantErr {
+				assertFieldError(t, errs, "testEventTimeout")
+			} else if len(errs) != 0 {
+				t.Errorf("unexpected errors: %v", errs)
+			}
+		})
+	}
+}
+
 func TestParse_UnknownField(t *testing.T) {
 	raw := []byte(`
 apiVersion: telemetry.metal.ironcore.dev/v1alpha1

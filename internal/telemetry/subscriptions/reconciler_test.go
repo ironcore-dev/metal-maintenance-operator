@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/subscriptions"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -686,5 +687,177 @@ func TestSubscriberID_EmptyProducesBareShape(t *testing.T) {
 			!strings.HasPrefix(stripped, "/serverevents/alerts/") {
 			t.Errorf("bare destination shape broken: %q", ev.dest)
 		}
+	}
+}
+
+// -- health-check (maybeRunTestEvent / NotifyTestEvent / ForgetTestState) --
+
+func cfgWithTestInterval(interval time.Duration) *subscriptions.Config {
+	cfg := dellVendorMatch()
+	cfg.TestEventInterval = interval
+	cfg.TestEventTimeout = 5 * time.Second
+	return cfg
+}
+
+func TestReconcile_TestEvent_DisabledWhenIntervalZero(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	r := newRecWithTestRecorder(t, c, dellVendorMatch(), res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if n := len(fc.snapshotSubmits()); n != 0 {
+		t.Errorf("SubmitTestEvent called %d times with zero interval, want 0", n)
+	}
+}
+
+func TestReconcile_TestEvent_FiresWhenDue(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond) // interval already elapsed
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if n := len(fc.snapshotSubmits()); n != 1 {
+		t.Errorf("SubmitTestEvent calls: got %d, want 1", n)
+	}
+}
+
+func TestReconcile_TestEvent_DoesNotFireTwiceWithinInterval(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Hour) // large interval
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	// First reconcile — fires test (lastTestTime unset → due immediately)
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+	// Notify so there's no pending entry blocking the second reconcile
+	submits := fc.snapshotSubmits()
+	if len(submits) == 1 {
+		r.NotifyTestEvent(testBMCName, submits[0])
+	}
+
+	// Second reconcile — interval not yet elapsed, should not fire again
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if n := len(fc.snapshotSubmits()); n != 1 {
+		t.Errorf("SubmitTestEvent calls: got %d, want 1 (no second fire within interval)", n)
+	}
+}
+
+func TestReconcile_TestEvent_SubmitErrorLeavesNoPending(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{submitErr: errors.New("bmc unreachable")}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond)
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	// NotifyTestEvent with any ID should be a no-op (no pending entry)
+	r.NotifyTestEvent(testBMCName, "whatever")
+	if results := rec.snapshotResults(); len(results) != 0 {
+		t.Errorf("no result should be recorded after submit error, got %+v", results)
+	}
+}
+
+func TestNotifyTestEvent_MatchingID_RecordsSuccess(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond)
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	submits := fc.snapshotSubmits()
+	if len(submits) != 1 {
+		t.Fatalf("expected 1 submit, got %d", len(submits))
+	}
+	r.NotifyTestEvent(testBMCName, submits[0])
+
+	results := rec.snapshotResults()
+	if len(results) != 1 || results[0].bmcName != testBMCName || results[0].result != "success" {
+		t.Errorf("unexpected results: %+v", results)
+	}
+}
+
+func TestNotifyTestEvent_WrongID_NoOp(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond)
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	r.NotifyTestEvent(testBMCName, "wrong-id")
+	if results := rec.snapshotResults(); len(results) != 0 {
+		t.Errorf("wrong messageId should be a no-op, got %+v", results)
+	}
+}
+
+func TestNotifyTestEvent_NoPending_NoOp(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	rec := &fakeTestRecorder{}
+	r := newRecWithTestRecorder(t, c, dellVendorMatch(), &fakeResolver{}, &fakeFactory{client: &fakeClient{}}, rec)
+
+	r.NotifyTestEvent(testBMCName, "some-id")
+	if results := rec.snapshotResults(); len(results) != 0 {
+		t.Errorf("no-pending NotifyTestEvent should be a no-op, got %+v", results)
+	}
+}
+
+func TestForgetTestState_ClearsAndCallsRecorderForget(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond)
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	// Fire a test event to set up pending + lastTestTime state.
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	r.ForgetTestState(testBMCName)
+
+	// Recorder.Forget should have been called.
+	if forgotten := rec.snapshotForgotten(); len(forgotten) == 0 || forgotten[0] != testBMCName {
+		t.Errorf("ForgetTestState should call recorder.Forget(%q), got %v", testBMCName, forgotten)
+	}
+	// NotifyTestEvent after Forget is a no-op — pending was cleared.
+	submits := fc.snapshotSubmits()
+	if len(submits) > 0 {
+		r.NotifyTestEvent(testBMCName, submits[0])
+	}
+	if results := rec.snapshotResults(); len(results) != 0 {
+		t.Errorf("after ForgetTestState, NotifyTestEvent should be a no-op, got %+v", results)
 	}
 }

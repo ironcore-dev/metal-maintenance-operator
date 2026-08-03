@@ -87,7 +87,8 @@ func (h *ConditionHandler) patchCondition(ctx context.Context, server *metalv1al
 		return nil
 	}
 
-	if err := h.Client.Status().Patch(ctx, server, client.MergeFrom(base)); err != nil {
+	if err := h.Client.Status().Patch(ctx, server,
+		client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 		return fmt.Errorf("patch server %s status: %w", server.Name, err)
 	}
 	return nil

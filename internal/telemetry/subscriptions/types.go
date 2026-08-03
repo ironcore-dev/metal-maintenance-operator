@@ -10,6 +10,7 @@ package subscriptions
 
 import (
 	"context"
+	"net"
 	"strconv"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -38,7 +39,7 @@ func BMCEndpoint(b *metalv1alpha1.BMC) string {
 	}
 	host := b.Status.IP.String()
 	if p := b.Spec.Protocol.Port; p > 0 {
-		host = host + ":" + strconv.Itoa(int(p))
+		host = net.JoinHostPort(host, strconv.Itoa(int(p)))
 	}
 	return scheme + "://" + host
 }

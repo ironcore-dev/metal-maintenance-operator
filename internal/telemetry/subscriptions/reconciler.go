@@ -461,8 +461,14 @@ func (r *BMCReconciler) classify(subs []Subscription, bmcName string) (current, 
 		var typeSeg, foundSubscriberID string
 		switch len(segs) {
 		case 3:
-			// /serverevents/{type}/{bmcName}
+			// /serverevents/{type}/{bmcName} — no subscriberID segment.
+			// Treat as stale when we're now running with a SubscriberID
+			// (upgrade path), so old bare subscriptions are cleaned up.
 			typeSeg = segs[1]
+			if subscriberID != "" {
+				stale = append(stale, sub)
+				continue
+			}
 		case 4:
 			// /serverevents/{subscriberID}/{type}/{bmcName}
 			foundSubscriberID = segs[1]

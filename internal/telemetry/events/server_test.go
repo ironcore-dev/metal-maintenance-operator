@@ -419,3 +419,95 @@ func TestReceiver_NeedLeaderElectionFalse(t *testing.T) {
 		t.Error("NeedLeaderElection returned true; every pod must bind the receive port")
 	}
 }
+
+// -- TestEventNotifier --
+
+type fakeNotifier struct {
+	mu    sync.Mutex
+	calls []notifyCall
+}
+
+type notifyCall struct {
+	bmcName   string
+	messageID string
+}
+
+func (f *fakeNotifier) NotifyTestEvent(bmcName, messageID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, notifyCall{bmcName: bmcName, messageID: messageID})
+}
+
+func (f *fakeNotifier) snapshot() []notifyCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]notifyCall, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+func newReceiverWithNotifier(t *testing.T, eSink *recordingEventSink, n events.TestEventNotifier) http.Handler {
+	t.Helper()
+	cfg := events.Config{Addr: ":0", TestNotifier: n}
+	if eSink != nil {
+		cfg.EventSink = eSink
+	}
+	r, err := events.New(cfg)
+	if err != nil {
+		t.Fatalf("events.New: %v", err)
+	}
+	return r.Handler()
+}
+
+func TestAlerts_TestNotifier_CalledWithMessageID(t *testing.T) {
+	eSink := &recordingEventSink{}
+	n := &fakeNotifier{}
+	h := newReceiverWithNotifier(t, eSink, n)
+	doPost(t, h, "/serverevents/alerts/bmc-1",
+		`{"Events":[{"MessageId":"FOO.1.0.Bar","EventId":"E1","Severity":"Warning"}]}`)
+	calls := n.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("notifier calls: got %d, want 1", len(calls))
+	}
+	if calls[0].bmcName != "bmc-1" || calls[0].messageID != "FOO.1.0.Bar" {
+		t.Errorf("unexpected call: %+v", calls[0])
+	}
+}
+
+func TestAlerts_TestNotifier_NotCalledWhenMessageIDEmpty(t *testing.T) {
+	eSink := &recordingEventSink{}
+	n := &fakeNotifier{}
+	h := newReceiverWithNotifier(t, eSink, n)
+	doPost(t, h, "/serverevents/alerts/bmc-1",
+		`{"Events":[{"EventId":"E1","Severity":"Warning"}]}`)
+	if calls := n.snapshot(); len(calls) != 0 {
+		t.Errorf("notifier should not be called for empty MessageID, got %+v", calls)
+	}
+}
+
+func TestAlerts_NilTestNotifier_NoPanic(t *testing.T) {
+	eSink := &recordingEventSink{}
+	h := newReceiverWithNotifier(t, eSink, nil)
+	res := doPost(t, h, "/serverevents/alerts/bmc-1",
+		`{"Events":[{"MessageId":"FOO.1.0.Bar","EventId":"E1"}]}`)
+	if res.StatusCode != http.StatusNoContent {
+		t.Errorf("status: got %d, want 204", res.StatusCode)
+	}
+}
+
+func TestAlerts_SetTestNotifier_WiresCorrectly(t *testing.T) {
+	eSink := &recordingEventSink{}
+	r, err := events.New(events.Config{Addr: ":0", EventSink: eSink})
+	if err != nil {
+		t.Fatalf("events.New: %v", err)
+	}
+	n := &fakeNotifier{}
+	r.SetTestNotifier(n)
+	h := r.Handler()
+
+	doPost(t, h, "/serverevents/alerts/bmc-1",
+		`{"Events":[{"MessageId":"FOO.1.0.Bar"}]}`)
+	if calls := n.snapshot(); len(calls) != 1 {
+		t.Errorf("expected 1 notify call after SetTestNotifier, got %d", len(calls))
+	}
+}
