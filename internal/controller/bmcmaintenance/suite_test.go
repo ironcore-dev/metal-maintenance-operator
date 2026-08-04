@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -277,6 +278,22 @@ func EnsureCleanState() {
 	}
 
 	for _, list := range objectLists {
-		Eventually(ObjectList(list)).Should(HaveField("Items", HaveLen(0)))
+		// A background simulated controller (e.g. BMCReconciler's
+		// discoverServers, which runs on a fast ResyncInterval) can still be
+		// mid-flight when a test issues its one-shot AfterEach deletes, and
+		// re-create/patch an object right after the test deleted it. Re-issue
+		// the delete on every poll for anything still around so cleanup
+		// converges instead of racing a single one-shot delete.
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.List(context.Background(), list)).To(Succeed())
+			items, err := apimeta.ExtractList(list)
+			g.Expect(err).NotTo(HaveOccurred())
+			for _, item := range items {
+				if obj, ok := item.(client.Object); ok {
+					_ = k8sClient.Delete(context.Background(), obj)
+				}
+			}
+			g.Expect(items).To(BeEmpty())
+		}).Should(Succeed())
 	}
 }

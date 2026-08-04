@@ -159,6 +159,25 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 	}
 
+	// Re-check for deletion right before discovering/creating Server objects:
+	// with ResyncInterval this frequent, a Reconcile invocation started before
+	// a test's AfterEach deletes the BMC can otherwise still be mid-flight
+	// (already past the DeletionTimestamp check above) when the test also
+	// deletes the discovered Server, causing CreateOrPatch below to silently
+	// resurrect it after the test believes cleanup is done. Since
+	// controller-runtime serializes reconciles per object, re-fetching here
+	// picks up a concurrently-set DeletionTimestamp and skips discovery.
+	latestBMC := &metalv1alpha1.BMC{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(bmcObj), latestBMC); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	if !latestBMC.DeletionTimestamp.IsZero() {
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+	}
+
 	if err := r.discoverServers(ctx, bmcClient, bmcObj); err != nil {
 		log.V(1).Info("sim-bmc: failed to discover servers, will retry", "error", err)
 	}
