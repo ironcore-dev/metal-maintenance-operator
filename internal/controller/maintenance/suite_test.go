@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
+	serverMaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr/mock"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -78,6 +79,7 @@ var _ = BeforeSuite(func() {
 
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(readinessv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	Expect(serverMaintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -134,6 +136,53 @@ func SetupNamespace() *corev1.Namespace {
 			) ([]byte, error) {
 				return fmt.Appendf(nil, "%s/%s", server.UID, sanitizationUID), nil
 			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		go func() {
+			defer GinkgoRecover()
+			Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start manager")
+		}()
+	})
+	return ns
+}
+
+// SetupServerMaintenanceNamespace creates a test namespace and starts a manager with the
+// ServerMaintenance controller for each test. Returns the namespace.
+func SetupServerMaintenanceNamespace() *corev1.Namespace {
+	ns := &corev1.Namespace{}
+	BeforeEach(func(ctx SpecContext) {
+		mgrCtx, cancel := context.WithCancel(context.Background())
+		DeferCleanup(cancel)
+
+		*ns = corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
+		DeferCleanup(k8sClient.Delete, ns)
+
+		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
+			Scheme: k8sClient.Scheme(),
+			Controller: config.Controller{
+				SkipNameValidation: new(true),
+			},
+			Metrics: metricsserver.Options{BindAddress: "0"},
+		})
+		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
+
+		Expect(k8sManager.GetFieldIndexer().IndexField(ctx, &serverMaintenancev1alpha1.ServerMaintenance{}, serverRefField, func(rawObj client.Object) []string {
+			m, ok := rawObj.(*serverMaintenancev1alpha1.ServerMaintenance)
+			if !ok {
+				return nil
+			}
+			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
+				return []string{m.Spec.ServerRef.Name}
+			}
+			return nil
+		})).To(Succeed())
+
+		Expect((&ServerMaintenanceReconciler{
+			Client: k8sManager.GetClient(),
+			Scheme: k8sManager.GetScheme(),
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		go func() {
