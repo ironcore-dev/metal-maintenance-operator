@@ -17,6 +17,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testManufacturerLabel = "metal.ironcore.dev/Manufacturer"
+	testManufacturerDell  = "Dell"
+	testDellInc           = "Dell Inc."
+	testBMCAddress        = "127.0.0.1"
+	testConsoleURL        = "http://127.0.0.1:8000"
+	testSecretUsernameKey = "username"
+	testSecretPasswordKey = "password"
+	testFoo               = "foo"
+)
+
 var _ = Describe("Console Controller", func() {
 	ns := SetupNamespace()
 
@@ -37,7 +48,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte(testFoo),
 					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 				},
 			}
@@ -51,7 +62,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
 					Hostname:    &hostname,
 
 					BMCSecretRef: corev1.LocalObjectReference{
@@ -67,7 +78,7 @@ var _ = Describe("Console Controller", func() {
 
 			By("Updating BMC Status with IP address")
 			Eventually(UpdateStatus(dellBMC, func() {
-				dellBMC.Status.IP = metalv1alpha1.MustParseIP("127.0.0.1")
+				dellBMC.Status.IP = metalv1alpha1.MustParseIP(testBMCAddress)
 			})).Should(Succeed())
 
 			By("Creating a Server")
@@ -76,7 +87,7 @@ var _ = Describe("Console Controller", func() {
 					Name:      "node001-bb001",
 					Namespace: ns.Name,
 					Labels: map[string]string{
-						"metal.ironcore.dev/Manufacturer": "Dell",
+						testManufacturerLabel: testManufacturerDell,
 					},
 				},
 				Spec: metalv1alpha1.ServerSpec{
@@ -89,7 +100,7 @@ var _ = Describe("Console Controller", func() {
 							Name: metalv1alpha1.ProtocolRedfishLocal,
 							Port: 8000,
 						},
-						Address: "127.0.0.1",
+						Address: testBMCAddress,
 						BMCSecretRef: corev1.LocalObjectReference{
 							Name: bmcSecret.Name,
 						},
@@ -139,11 +150,11 @@ var _ = Describe("Console Controller", func() {
 				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							"metal.ironcore.dev/Manufacturer": "Dell",
+							testManufacturerLabel: testManufacturerDell,
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: dellSecret.Name},
 				},
 			}
@@ -162,7 +173,7 @@ var _ = Describe("Console Controller", func() {
 					Name:      "node002-bb001",
 					Namespace: ns.Name,
 					Labels: map[string]string{
-						"metal.ironcore.dev/Manufacturer": "Dell",
+						testManufacturerLabel: testManufacturerDell,
 					},
 				},
 				Spec: metalv1alpha1.ServerSpec{
@@ -175,7 +186,7 @@ var _ = Describe("Console Controller", func() {
 							Name: metalv1alpha1.ProtocolRedfishLocal,
 							Port: 8000,
 						},
-						Address: "127.0.0.1",
+						Address: testBMCAddress,
 						BMCSecretRef: corev1.LocalObjectReference{
 							Name: bmcSecret.Name,
 						},
@@ -205,8 +216,8 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					"username": []byte("admin"),
-					"password": []byte("password"),
+					testSecretUsernameKey: []byte("admin"),
+					testSecretPasswordKey: []byte("password"),
 				},
 			}
 			Expect(k8sClient.Create(ctx, emptySecret)).To(Succeed())
@@ -224,8 +235,8 @@ var _ = Describe("Console Controller", func() {
 							"nonexistent": "label",
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: emptySecret.Name},
 				},
 			}
@@ -253,8 +264,8 @@ var _ = Describe("Console Controller", func() {
 							"test": "label",
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: "nonexistent-secret"},
 				},
 			}
@@ -276,7 +287,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte(testFoo),
 					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 				},
 			}
@@ -291,7 +302,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
 					Hostname:    &tlsHostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: tlsBMCSecret.Name,
@@ -366,7 +377,7 @@ var _ = Describe("Console Controller", func() {
 						URL:                   mockTLSURL,
 						InsecureSkipTLSVerify: true,
 					},
-					Manufacturer:           "Dell Inc.",
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: tlsSecret.Name},
 				},
 			}
@@ -397,7 +408,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+					metalv1alpha1.BMCSecretUsernameKeyName: []byte(testFoo),
 					metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 				},
 			}
@@ -411,7 +422,7 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: "foo"},
+					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
 					Hostname:    &hostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: asyncBMCSecret.Name,
@@ -426,7 +437,7 @@ var _ = Describe("Console Controller", func() {
 
 			By("Updating BMC Status with IP address")
 			Eventually(UpdateStatus(asyncBMC, func() {
-				asyncBMC.Status.IP = metalv1alpha1.MustParseIP("127.0.0.1")
+				asyncBMC.Status.IP = metalv1alpha1.MustParseIP(testBMCAddress)
 			})).Should(Succeed())
 
 			By("Creating a Server for async tests")
@@ -435,7 +446,7 @@ var _ = Describe("Console Controller", func() {
 					Name:      "node099-bb099",
 					Namespace: ns.Name,
 					Labels: map[string]string{
-						"metal.ironcore.dev/Manufacturer": "Dell",
+						testManufacturerLabel: testManufacturerDell,
 					},
 				},
 				Spec: metalv1alpha1.ServerSpec{
@@ -448,7 +459,7 @@ var _ = Describe("Console Controller", func() {
 							Name: metalv1alpha1.ProtocolRedfishLocal,
 							Port: 8000,
 						},
-						Address: "127.0.0.1",
+						Address: testBMCAddress,
 						BMCSecretRef: corev1.LocalObjectReference{
 							Name: asyncBMCSecret.Name,
 						},
@@ -479,8 +490,8 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					"username": []byte("admin"),
-					"password": []byte("password"),
+					testSecretUsernameKey: []byte("admin"),
+					testSecretPasswordKey: []byte("password"),
 				},
 			}
 			Expect(k8sClient.Create(ctx, asyncSecret)).To(Succeed())
@@ -495,11 +506,11 @@ var _ = Describe("Console Controller", func() {
 				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							"metal.ironcore.dev/Manufacturer": "Dell",
+							testManufacturerLabel: testManufacturerDell,
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: asyncSecret.Name},
 				},
 			}
@@ -521,8 +532,8 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Data: map[string][]byte{
-					"username": []byte("admin"),
-					"password": []byte("password"),
+					testSecretUsernameKey: []byte("admin"),
+					testSecretPasswordKey: []byte("password"),
 				},
 			}
 			Expect(k8sClient.Create(ctx, pollSecret)).To(Succeed())
@@ -537,11 +548,11 @@ var _ = Describe("Console Controller", func() {
 				Spec: vendorconsole.ConsoleSpec{
 					ServerSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
-							"metal.ironcore.dev/Manufacturer": "Dell",
+							testManufacturerLabel: testManufacturerDell,
 						},
 					},
-					Connection:             vendorconsole.ConsoleConnection{URL: "http://127.0.0.1:8000"},
-					Manufacturer:           "Dell Inc.",
+					Connection:             vendorconsole.ConsoleConnection{URL: testConsoleURL},
+					Manufacturer:           testDellInc,
 					BMCCredentialSecretRef: corev1.LocalObjectReference{Name: pollSecret.Name},
 				},
 			}

@@ -12,6 +12,8 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
+const lenovoRackTowerServerType = "Rack-Tower Server"
+
 type ServerSecurityDescriptor struct {
 	ManagedAuthEnabled   bool `json:"managedAuthEnabled"`
 	ManagedAuthSupported bool `json:"managedAuthSupported"`
@@ -86,7 +88,7 @@ func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUse
 		IPAddresses: []string{IP.String()},
 		Username:    bmcUser,
 		Password:    bmcPassword,
-		Type:        "Rack-Tower Server",
+		Type:        lenovoRackTowerServerType,
 		SecurityDescriptor: ServerSecurityDescriptor{
 			ManagedAuthEnabled:   false,
 			ManagedAuthSupported: false,
@@ -128,7 +130,7 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 	url := c.client.parsedURL.JoinPath("/unmanageRequest")
 	payload := ServerUnmanageRequest{
 		IPAddresses: []string{ip.String()},
-		Type:        "Rack-Tower Server",
+		Type:        lenovoRackTowerServerType,
 		UUID:        serverUUID,
 	}
 	payloadBytes, err := json.Marshal(payload)
@@ -236,7 +238,7 @@ func (c *LenovoClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, b
 		IPAddresses: []string{IP.String()},
 		Username:    bmcUser,
 		Password:    bmcPassword,
-		Type:        "Rack-Tower Server",
+		Type:        lenovoRackTowerServerType,
 		SecurityDescriptor: ServerSecurityDescriptor{
 			ManagedAuthEnabled:   false,
 			ManagedAuthSupported: false,
@@ -303,7 +305,7 @@ func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
 		if node.HostName == jobID {
 			return &JobInfo{
 				JobID:    jobID,
-				Status:   "completed",
+				Status:   jobStatusCompleted,
 				Progress: 100,
 				Message:  "Server imported successfully",
 			}, nil
@@ -321,10 +323,10 @@ func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
 
 // IsJobComplete returns true if the Lenovo job is no longer running.
 func (c *LenovoClient) IsJobComplete(jobInfo *JobInfo) bool {
-	return jobInfo.Status == "completed"
+	return jobInfo.Status == jobStatusCompleted
 }
 
 // IsJobSuccessful returns true if the Lenovo job completed successfully.
 func (c *LenovoClient) IsJobSuccessful(jobInfo *JobInfo) bool {
-	return jobInfo.Status == "completed"
+	return jobInfo.Status == jobStatusCompleted
 }
