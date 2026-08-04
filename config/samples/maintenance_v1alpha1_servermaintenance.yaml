@@ -1,0 +1,13 @@
+apiVersion: maintenance.metal.ironcore.dev/v1alpha1
+kind: ServerMaintenance
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: servermaintenance-sample
+spec:
+  serverRef:
+    name: endpoint-sample-system-0
+  policy: Enforced
+  priority: 100
+  serverPower: "Off"

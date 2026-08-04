@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package servermaintenancecontroller
+package maintenance
 
 import (
 	"github.com/ironcore-dev/controller-utils/metautils"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	serverMaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -17,7 +17,7 @@ import (
 )
 
 var _ = Describe("ServerMaintenance Controller", func() {
-	ns := SetupNamespace()
+	ns := SetupServerMaintenanceNamespace()
 
 	var server *metalv1alpha1.Server
 
@@ -45,19 +45,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 	It("should force a Server into maintenance with Enforced policy and apply boot configuration", func(ctx SpecContext) {
 		By("Creating a ServerMaintenance object with Enforced policy and boot configuration template")
-		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance",
 				Namespace: ns.Name,
 				Annotations: map[string]string{
-					servermaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "test-maintenance",
+					serverMaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "test-maintenance",
 				},
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
-				ServerBootConfigurationTemplate: &servermaintenancev1alpha1.ServerBootConfigurationTemplate{
+				ServerBootConfigurationTemplate: &serverMaintenancev1alpha1.ServerBootConfigurationTemplate{
 					Name: "test-boot",
 					Spec: metalv1alpha1.ServerBootConfigurationSpec{
 						ServerRef: corev1.LocalObjectReference{Name: server.Name},
@@ -70,7 +70,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the ServerMaintenance transitions to InMaintenance state")
 		Eventually(Object(serverMaintenance)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
 
 		By("Checking the Server has ServerMaintenanceRef and MaintenanceBootConfigurationRef set")
@@ -135,19 +135,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Creating a ServerMaintenance with OwnerApproval policy and boot configuration template")
-		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance",
 				Namespace: ns.Name,
 				Annotations: map[string]string{
-					servermaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "test-maintenance",
+					serverMaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "test-maintenance",
 				},
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				ServerPower: metalv1alpha1.PowerOff,
-				ServerBootConfigurationTemplate: &servermaintenancev1alpha1.ServerBootConfigurationTemplate{
+				ServerBootConfigurationTemplate: &serverMaintenancev1alpha1.ServerBootConfigurationTemplate{
 					Name: "test-boot",
 					Spec: metalv1alpha1.ServerBootConfigurationSpec{
 						ServerRef: corev1.LocalObjectReference{Name: server.Name},
@@ -160,12 +160,12 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the ServerMaintenance is Pending")
 		Eventually(Object(serverMaintenance)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending),
 		))
 
 		By("Ensuring that the ServerClaim has the maintenance-needed label")
 		Eventually(Object(serverClaim)).Should(SatisfyAll(
-			HaveField("ObjectMeta.Labels", HaveKeyWithValue(servermaintenancev1alpha1.ServerMaintenanceNeededLabelKey, trueValue)),
+			HaveField("ObjectMeta.Labels", HaveKeyWithValue(serverMaintenancev1alpha1.ServerMaintenanceNeededLabelKey, trueValue)),
 		))
 
 		By("Checking the Server is not yet in maintenance")
@@ -175,12 +175,12 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		maintenanceLabels := map[string]string{
-			servermaintenancev1alpha1.ServerMaintenanceNeededLabelKey:   trueValue,
-			servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey: trueValue,
+			serverMaintenancev1alpha1.ServerMaintenanceNeededLabelKey:   trueValue,
+			serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey: trueValue,
 		}
 
 		By("Checking the Server has ServerMaintenanceRef and MaintenanceBootConfigurationRef set")
@@ -205,7 +205,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the ServerMaintenance is InMaintenance")
 		Eventually(Object(serverMaintenance)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
 
 		By("Checking the ServerClaim has both maintenance labels")
@@ -224,22 +224,22 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the ServerClaim maintenance labels are cleaned up")
 		Eventually(Object(serverClaim)).Should(SatisfyAll(
-			HaveField("ObjectMeta.Labels", Not(HaveKey(servermaintenancev1alpha1.ServerMaintenanceNeededLabelKey))),
+			HaveField("ObjectMeta.Labels", Not(HaveKey(serverMaintenancev1alpha1.ServerMaintenanceNeededLabelKey))),
 		))
 	})
 
 	It("should wait for other maintenance to complete before starting a new one", func(ctx SpecContext) {
 		By("Creating first ServerMaintenance with Enforced policy and boot configuration")
-		serverMaintenance01 := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance01 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance01",
 				Namespace: ns.Name,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
-				ServerBootConfigurationTemplate: &servermaintenancev1alpha1.ServerBootConfigurationTemplate{
+				ServerBootConfigurationTemplate: &serverMaintenancev1alpha1.ServerBootConfigurationTemplate{
 					Name: "test-boot",
 					Spec: metalv1alpha1.ServerBootConfigurationSpec{
 						ServerRef: corev1.LocalObjectReference{Name: server.Name},
@@ -256,7 +256,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 			HaveField("Spec.MaintenanceBootConfigurationRef", Not(BeNil())),
 		))
 		Eventually(Object(serverMaintenance01)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
 
 		bootConfig := &metalv1alpha1.ServerBootConfiguration{
@@ -273,14 +273,14 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Creating a second ServerMaintenance")
-		serverMaintenance02 := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance02 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance02",
 				Namespace: ns.Name,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
@@ -288,7 +288,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the second ServerMaintenance is still pending")
 		Eventually(Object(serverMaintenance02)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending),
 		))
 
 		By("Deleting first ServerMaintenance to finish maintenance")
@@ -296,7 +296,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the second ServerMaintenance is now InMaintenance")
 		Eventually(Object(serverMaintenance02)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
 
 		By("Deleting the second ServerMaintenance")
@@ -334,20 +334,20 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Creating low and high priority ServerMaintenance objects")
-		lowPriorityMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		lowPriorityMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-low-priority-maintenance", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				Priority:    10,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
-		highPriorityMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		highPriorityMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-high-priority-maintenance", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				Priority:    100,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
@@ -356,25 +356,25 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		Expect(k8sClient.Create(ctx, highPriorityMaintenance)).To(Succeed())
 
 		By("Ensuring both ServerMaintenances are pending")
-		Eventually(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
-		Eventually(Object(highPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(highPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
 		By("Approving maintenance on the ServerClaim")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring high-priority maintenance starts first")
 		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", highPriorityMaintenance.Name))
-		Eventually(Object(highPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
-		Consistently(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(highPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Consistently(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
 		By("Deleting high-priority maintenance")
 		Expect(k8sClient.Delete(ctx, highPriorityMaintenance)).To(Succeed())
 		Eventually(Get(highPriorityMaintenance)).Should(Satisfy(apierrors.IsNotFound))
 
 		By("Ensuring low-priority maintenance can proceed with the existing approval")
-		Eventually(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Eventually(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Deleting low-priority maintenance")
 		Expect(k8sClient.Delete(ctx, lowPriorityMaintenance)).To(Succeed())
@@ -407,19 +407,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Creating maintenances with unset and set priority")
-		unsetPriorityMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		unsetPriorityMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-unset-priority-maintenance", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
-		setPriorityMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		setPriorityMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-set-priority-maintenance", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				Priority:    1,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
@@ -429,20 +429,20 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Approving maintenance on the ServerClaim")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring maintenance with explicit priority runs before unset priority")
 		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", setPriorityMaintenance.Name))
-		Eventually(Object(setPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
-		Consistently(Object(unsetPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(setPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Consistently(Object(unsetPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
 		By("Deleting set-priority maintenance")
 		Expect(k8sClient.Delete(ctx, setPriorityMaintenance)).To(Succeed())
 		Eventually(Get(setPriorityMaintenance)).Should(Satisfy(apierrors.IsNotFound))
 
 		By("Ensuring unset-priority maintenance can proceed with the existing approval")
-		Eventually(Object(unsetPriorityMaintenance)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Eventually(Object(unsetPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Deleting unset-priority maintenance")
 		Expect(k8sClient.Delete(ctx, unsetPriorityMaintenance)).To(Succeed())
@@ -451,14 +451,14 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 	It("should complete deletion when the referenced Server is already gone", func(ctx SpecContext) {
 		By("Creating a ServerMaintenance object")
-		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance-server-gone",
 				Namespace: ns.Name,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
@@ -466,7 +466,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Waiting for the ServerMaintenance to reach InMaintenance state")
 		Eventually(Object(serverMaintenance)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
 		By("Deleting the Server before deleting the ServerMaintenance")
@@ -482,17 +482,17 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 	It("should not allow an Enforced maintenance to steal the ref from an already-active maintenance", func(ctx SpecContext) {
 		By("Creating first ServerMaintenance with Enforced policy")
-		serverMaintenance01 := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance01 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-enforced-maintenance-active",
 				Namespace: ns.Name,
 				Annotations: map[string]string{
-					servermaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "first-maintenance",
+					serverMaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "first-maintenance",
 				},
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
@@ -500,10 +500,10 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Waiting for the first ServerMaintenance to reach InMaintenance state")
 		Eventually(Object(serverMaintenance01)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 		Consistently(Object(serverMaintenance01)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
 		By("Verifying the Server's ServerMaintenanceRef points to the first maintenance")
@@ -515,17 +515,17 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		)
 
 		By("Creating second Enforced ServerMaintenance for the same server")
-		serverMaintenance02 := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance02 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-enforced-maintenance-challenger",
 				Namespace: ns.Name,
 				Annotations: map[string]string{
-					servermaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "second-maintenance",
+					serverMaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "second-maintenance",
 				},
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
@@ -533,15 +533,15 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Ensuring the second Enforced maintenance stays Pending and does not steal the ref")
 		Eventually(Object(serverMaintenance02)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending),
 		)
 		Consistently(Object(serverMaintenance02)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending),
 		)
 
 		By("Verifying the first maintenance remains InMaintenance (not evicted to Pending)")
 		Consistently(Object(serverMaintenance01)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
 		By("Verifying the Server's ServerMaintenanceRef is still held by the first maintenance")
@@ -555,7 +555,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Verifying the second maintenance can now proceed to InMaintenance")
 		Eventually(Object(serverMaintenance02)).Should(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
 		By("Deleting the second ServerMaintenance")
@@ -565,19 +565,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 	It("should keep server in Maintenance throughout all queued Enforced maintenances without state bounce", func(ctx SpecContext) {
 		By("Creating two Enforced ServerMaintenance objects")
-		maintenance01 := &servermaintenancev1alpha1.ServerMaintenance{
+		maintenance01 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-no-bounce-enforced-01", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
-		maintenance02 := &servermaintenancev1alpha1.ServerMaintenance{
+		maintenance02 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-no-bounce-enforced-02", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
@@ -586,17 +586,17 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Waiting for the first maintenance to be active")
 		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance01.Name))
-		Eventually(Object(maintenance01)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Eventually(Object(maintenance01)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Ensuring the second maintenance is pending while first is active")
-		Eventually(Object(maintenance02)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
 		By("Completing the first maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance01)).To(Succeed())
 
 		By("Verifying server's ref transitions to the second maintenance (no ref gap)")
 		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance02.Name))
-		Eventually(Object(maintenance02)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Completing the second maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance02)).To(Succeed())
@@ -634,38 +634,38 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Creating two OwnerApproval ServerMaintenance objects")
-		maintenance01 := &servermaintenancev1alpha1.ServerMaintenance{
+		maintenance01 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-no-bounce-approval-01", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				Priority:    10,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
-		maintenance02 := &servermaintenancev1alpha1.ServerMaintenance{
+		maintenance02 := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-no-bounce-approval-02", Namespace: ns.Name},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				Priority:    5,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
 		Expect(k8sClient.Create(ctx, maintenance01)).To(Succeed())
 		Expect(k8sClient.Create(ctx, maintenance02)).To(Succeed())
-		Eventually(Object(maintenance01)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
-		Eventually(Object(maintenance02)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(maintenance01)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
 		By("Approving maintenance on the ServerClaim (single approval covers all queued maintenances)")
 		Eventually(Update(serverClaim, func() {
-			metautils.SetLabel(serverClaim, servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+			metautils.SetLabel(serverClaim, serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
 		By("Ensuring the higher-priority maintenance starts first")
 		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance01.Name))
-		Eventually(Object(maintenance01)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
-		Consistently(Object(maintenance02)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStatePending))
+		Eventually(Object(maintenance01)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Consistently(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
 		By("Completing the first maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance01)).To(Succeed())
@@ -673,7 +673,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Verifying server ref transitions to the second maintenance (no bounce)")
 		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance02.Name))
-		Eventually(Object(maintenance02)).Should(HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
+		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Completing the second maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance02)).To(Succeed())
@@ -686,21 +686,21 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Verifying approval and maintenance-needed labels are cleaned up on the ServerClaim")
 		Eventually(Object(serverClaim)).Should(SatisfyAll(
-			HaveField("ObjectMeta.Labels", Not(HaveKey(servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey))),
-			HaveField("ObjectMeta.Labels", Not(HaveKey(servermaintenancev1alpha1.ServerMaintenanceNeededLabelKey))),
+			HaveField("ObjectMeta.Labels", Not(HaveKey(serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey))),
+			HaveField("ObjectMeta.Labels", Not(HaveKey(serverMaintenancev1alpha1.ServerMaintenanceNeededLabelKey))),
 		))
 	})
 
 	It("should skip cleanup and remove finalizer when no finalizer is present on deletion", func(ctx SpecContext) {
 		By("Creating a ServerMaintenance object")
-		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance-no-finalizer",
 				Namespace: ns.Name,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:   &corev1.LocalObjectReference{Name: server.Name},
-				Policy:      servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 			},
 		}
@@ -733,17 +733,17 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 	It("should set the LocatorLED on maintenance start and turn it off when maintenance ends", func(ctx SpecContext) {
 		By("Creating a ServerMaintenance with LocatorLED Lit")
-		serverMaintenance := &servermaintenancev1alpha1.ServerMaintenance{
+		serverMaintenance := &serverMaintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-server-maintenance-led",
 				Namespace: ns.Name,
 				Annotations: map[string]string{
-					servermaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "test-led-maintenance",
+					serverMaintenancev1alpha1.ServerMaintenanceReasonAnnotationKey: "test-led-maintenance",
 				},
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
+			Spec: serverMaintenancev1alpha1.ServerMaintenanceSpec{
 				ServerRef:  &corev1.LocalObjectReference{Name: server.Name},
-				Policy:     servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Policy:     serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				LocatorLED: metalv1alpha1.LitIndicatorLED,
 			},
 		}
@@ -751,7 +751,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Checking the ServerMaintenance transitions to InMaintenance")
 		Eventually(Object(serverMaintenance)).Should(SatisfyAll(
-			HaveField("Status.State", servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
 
 		By("Checking that the server LocatorLED is set to Lit")

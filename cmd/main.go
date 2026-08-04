@@ -35,12 +35,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
-	servermaintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/servermaintenance"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -57,7 +56,7 @@ func init() {
 	utilruntime.Must(vendorconsolev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(servermaintenancev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -337,10 +336,10 @@ func main() {
 
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
-		&servermaintenancev1alpha1.ServerMaintenance{},
+		&maintenancev1alpha1.ServerMaintenance{},
 		"spec.serverRef.name",
 		func(rawObj client.Object) []string {
-			m, ok := rawObj.(*servermaintenancev1alpha1.ServerMaintenance)
+			m, ok := rawObj.(*maintenancev1alpha1.ServerMaintenance)
 			if !ok {
 				return nil
 			}
@@ -353,7 +352,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&servermaintenancectrl.ServerMaintenanceReconciler{
+	if err = (&maintenancectrl.ServerMaintenanceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
