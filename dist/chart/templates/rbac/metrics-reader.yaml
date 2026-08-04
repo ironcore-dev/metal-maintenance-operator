@@ -5,7 +5,10 @@ metadata:
   name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "metrics-reader" "context" $) }}
 rules:
 - nonResourceURLs:
+  # Standard Prometheus scrape endpoint.
   - /metrics
+  # BMC service-discovery endpoint (redfish-exporter http_sd_configs).
+  - /sd/bmcs
   verbs:
   - get
 {{- end }}

@@ -5,6 +5,7 @@ package vendorconsole
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -40,9 +41,10 @@ const (
 )
 
 var (
-	testEnv   *envtest.Environment
-	cfg       *rest.Config
-	k8sClient client.Client
+	testEnv    *envtest.Environment
+	cfg        *rest.Config
+	k8sClient  client.Client
+	mockTLSURL string
 )
 
 func TestControllers(t *testing.T) {
@@ -102,6 +104,23 @@ var _ = BeforeSuite(func() {
 		_ = resp.Body.Close()
 		return nil
 	}, 5*time.Second, 50*time.Millisecond).Should(Succeed(), "mock server did not become ready")
+
+	mockTLSURL = "https://127.0.0.1:8443"
+	go func() {
+		defer GinkgoRecover()
+		Expect(mockServer.StartTLS(mockCtx, ":8443")).To(Succeed(), "failed to start mock TLS server")
+	}()
+
+	Eventually(func() error {
+		//nolint:gosec // self-signed cert is intentional in tests
+		insecureClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+		resp, err := insecureClient.Get(mockTLSURL + "/api/SessionService/Sessions")
+		if err != nil {
+			return err
+		}
+		_ = resp.Body.Close()
+		return nil
+	}, 5*time.Second, 50*time.Millisecond).Should(Succeed(), "mock TLS server did not become ready")
 })
 
 func SetupNamespace() *corev1.Namespace {

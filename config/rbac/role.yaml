@@ -7,6 +7,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
@@ -55,6 +63,15 @@ rules:
   - metal.ironcore.dev
   resources:
   - serverbootconfigurations
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - bmcs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - serverclaims
   verbs:
   - create

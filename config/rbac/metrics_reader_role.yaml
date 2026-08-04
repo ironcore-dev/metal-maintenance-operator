@@ -4,6 +4,13 @@ metadata:
   name: metrics-reader
 rules:
 - nonResourceURLs:
+  # Standard Prometheus scrape endpoint.
   - "/metrics"
+  # BMC service-discovery endpoint. Read by an external redfish-exporter
+  # via http_sd_configs to enumerate scrape targets. Registered
+  # unconditionally on the manager's metrics server, so the controller-
+  # runtime auth filter gates it with the same SubjectAccessReview as
+  # /metrics — this ClusterRole must list it explicitly.
+  - "/sd/bmcs"
   verbs:
   - get

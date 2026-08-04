@@ -1,0 +1,22 @@
+{{- if .Values.telemetry.events.serviceEnabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "metal-maintenance-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: controller-manager
+  name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "controller-manager-telemetry-events" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: events
+    port: {{ .Values.telemetry.events.port }}
+    protocol: TCP
+    targetPort: events
+  selector:
+    app.kubernetes.io/name: {{ include "metal-maintenance-operator.name" . }}
+    control-plane: controller-manager
+{{- end }}
