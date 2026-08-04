@@ -1,0 +1,7 @@
+resources:
+- ../default
+- sanitized-server-service.yaml
+
+patches:
+- path: delete_manager_auth_proxy_patch.yaml
+- path: manager_patch.yaml
