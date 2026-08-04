@@ -21,15 +21,10 @@ type DellClient struct {
 	client client
 }
 
-// AuthRequest is used to get the X-Auth-Token
+// AuthRequest is used to authenticate against the OME session endpoint.
 type AuthRequest struct {
 	UserName string `json:"UserName"`
 	Password string `json:"Password"`
-}
-
-// AuthResponse contains the session token
-type AuthResponse struct {
-	Token string `json:"Token"`
 }
 
 // DevicesResponse is the top-level structure for the GET /Devices endpoint
@@ -110,6 +105,7 @@ func NewDellClient(options ClientOptions) (*DellClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	client.tokenHeader = "X-Auth-Token"
 	return &DellClient{client: *client}, nil
 }
 
@@ -252,18 +248,23 @@ func (c *DellClient) createToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error creating auth request: %w", err)
 	}
+	req.Header = http.Header{"Content-Type": []string{"application/json"}}
 
-	respBody, err := c.client.DoRequest(req, []int{http.StatusCreated})
+	res, err := c.client.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("error executing auth request: %w", err)
 	}
-
-	var authResp AuthResponse
-	if err := json.Unmarshal(respBody, &authResp); err != nil {
-		return "", fmt.Errorf("error parsing auth response: %w", err)
+	defer res.Body.Close() //nolint:errcheck
+	if res.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("error executing auth request: unexpected status %d", res.StatusCode)
 	}
-	c.client.token = authResp.Token
-	return authResp.Token, nil
+
+	token := res.Header.Get("X-Auth-Token")
+	if token == "" {
+		return "", fmt.Errorf("X-Auth-Token header missing from session response")
+	}
+	c.client.token = token
+	return token, nil
 }
 
 // ImportServerAsync initiates an asynchronous import and returns the job ID.

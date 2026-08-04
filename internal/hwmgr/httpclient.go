@@ -18,11 +18,12 @@ import (
 )
 
 type client struct {
-	httpClient HTTPClient
-	parsedURL  *url.URL
-	username   string
-	password   string
-	token      string
+	httpClient  HTTPClient
+	parsedURL   *url.URL
+	username    string
+	password    string
+	token       string
+	tokenHeader string // header name to carry the auth token; empty means "Authorization: Bearer"
 }
 
 // ClientOptions represents the options for the client.
@@ -81,9 +82,12 @@ func (c *client) DoRequest(req *http.Request, okCodes []int) ([]byte, error) {
 		}
 	}
 	req.Header = http.Header{
-		"Authorization": []string{"Bearer " + c.token},
-		// "User-Agent":    []string{c.agent},
 		"Content-Type": []string{"application/json"},
+	}
+	if c.tokenHeader != "" {
+		req.Header.Set(c.tokenHeader, c.token)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	res, err := c.httpClient.Do(req)
 	if err != nil {
