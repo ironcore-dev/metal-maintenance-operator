@@ -143,9 +143,8 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 		if err = r.updateServerRef(ctx, maintenance, server); err != nil {
 			return ctrl.Result{}, err
 		}
-		if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance); err != nil || modified {
-			return ctrl.Result{}, err
-		}
+		_, err = r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance)
+		return ctrl.Result{}, err
 	}
 
 	serverClaim := &metalv1alpha1.ServerClaim{}
@@ -178,9 +177,8 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 			if err = r.updateServerRef(ctx, maintenance, server); err != nil {
 				return ctrl.Result{}, err
 			}
-			if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance); err != nil || modified {
-				return ctrl.Result{}, err
-			}
+			_, err = r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance)
+			return ctrl.Result{}, err
 		}
 		log.V(1).Info("Server not approved for maintenance, waiting for approval", "Server", server.Name)
 		return ctrl.Result{}, nil
@@ -463,7 +461,7 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 }
 
 func (r *ServerMaintenanceReconciler) removeBootConfigRefFromServer(ctx context.Context, config *metalv1alpha1.ServerBootConfiguration, server *metalv1alpha1.Server) error {
-	if ref := server.Spec.MaintenanceBootConfigurationRef; ref == nil || (ref.Name != config.Name && ref.Namespace != config.Namespace) {
+	if ref := server.Spec.MaintenanceBootConfigurationRef; ref == nil || ref.Name != config.Name || ref.Namespace != config.Namespace {
 		return nil
 	}
 	serverBase := server.DeepCopy()
@@ -514,7 +512,7 @@ func (r *ServerMaintenanceReconciler) enqueueMaintenanceByServerRefs() handler.E
 
 		if server.Spec.ServerMaintenanceRef != nil {
 			req = append(req, reconcile.Request{
-				NamespacedName: types.NamespacedName{Namespace: server.Namespace, Name: server.Spec.ServerMaintenanceRef.Name},
+				NamespacedName: types.NamespacedName{Namespace: server.Spec.ServerMaintenanceRef.Namespace, Name: server.Spec.ServerMaintenanceRef.Name},
 			})
 		}
 

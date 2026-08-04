@@ -284,6 +284,23 @@ Console is the Schema for the consoles API.
 | `status` _[ConsoleStatus](#consolestatus)_ |  |  |  |
 
 
+#### ConsoleConnection
+
+
+
+ConsoleConnection describes how to reach the server management console.
+
+
+
+_Appears in:_
+- [ConsoleSpec](#consolespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `url` _string_ | URL is the URL of the server management console. |  |  |
+| `insecureSkipTLSVerify` _boolean_ | InsecureSkipTLSVerify disables TLS certificate verification when<br />communicating with the management console. This should only be used for<br />consoles that present self-signed or otherwise untrusted certificates. | false |  |
+
+
 #### ConsoleSpec
 
 
@@ -298,7 +315,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
-| `consoleURL` _string_ | ConsoleURL is the URL of the server management console. |  |  |
+| `connection` _[ConsoleConnection](#consoleconnection)_ | Connection contains the console endpoint and transport-security settings. |  |  |
 | `manufacturer` _[Manufacturer](#manufacturer)_ | Manufacturer is the manufacturer of the server management console (e.g., "Dell", "HPE", "Lenovo"). |  |  |
 | `bmcCredentialSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCCredentialSecretRef references the secret containing BMC credentials. |  |  |
 

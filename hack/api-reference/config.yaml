@@ -16,6 +16,8 @@ render:
       docsURLTemplate: "https://pkg.go.dev/k8s.io/apimachinery/pkg/types#{{.TypeIdentifier}}"
     - typeMatchPrefix: "^k8s\\.io/(api|apimachinery/pkg/apis)/"
       docsURLTemplate: "https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#{{lower .TypeIdentifier}}-{{arrIndex .PackageSegments -1}}-{{arrIndex .PackageSegments -2}}"
+    - typeMatchPrefix: "^github\\.com/ironcore-dev/metal-operator/"
+      docsURLTemplate: "https://github.com/ironcore-dev/metal-operator/blob/main/docs/api-reference/api.md#{{lower .TypeIdentifier}}"
   typeDisplayNamePrefixOverrides:
     k8s.io/api/: "Kubernetes "
     k8s.io/apimachinery/pkg/apis/: "Kubernetes "

@@ -25,14 +25,16 @@ the lifecycle of a maintenance task, ensuring servers are properly taken offline
 2. If a [`Server`](https://github.com/ironcore-dev/metal-operator/blob/main/docs/concepts/server.md) is claimed, the label `metal.ironcore.dev/maintenance-needed: "true"` is added to the [`ServerClaim`](https://github.com/ironcore-dev/metal-operator/blob/main/docs/concepts/serverclaim.md).
 3. If `policy` is `OwnerApproval` and no `metal.ironcore.dev/maintenance-approved` label is set on the `ServerClaim`, the `ServerMaintenance`
    stays in `Pending`. The `Server` also remains unchanged.
-4. If `policy` is `OwnerApproval` and the `ok-to-maintenance` label is present, or if the policy is `Enforced`, the
+4. If `policy` is `OwnerApproval` and the `metal.ironcore.dev/maintenance-approved: "true"` label is present, or if the policy is `Enforced`, the
    `metal-operator` transitions the `Server` into `Maintenance` and updates the `ServerMaintenance` state accordingly.
 5. The `ServerMaintenanceReconciler` creates a `ServerBootConfiguration` out of the `ServerMaintenance`'s
    `ServerBootConfigurationTemplate` and applies it to the `Server`. The power state of the `Server` can be set by
    providing the `ServerPower` field in the `ServerMaintenance` object.
 6. (optional) In case no `ServerBootConfigurationTemplate` is provided, the maintenance operator powers off the `Server`,
-   applies a `ServerBootConfiguration` (if needed), performs the maintenance, and sets `ServerMaintenance` to `Completed`.
-7. The `metal-operator` transitions the `Server` back to its prior state. If additional `ServerMaintenance` objects are
+   applies a `ServerBootConfiguration` (if needed), and performs the maintenance.
+7. Once the maintenance task is complete, the external operator **deletes** the `ServerMaintenance` resource.
+   The controller removes the finalizer, cleans up labels on the `Server` and `ServerClaim`, and releases the `Server`.
+8. The `metal-operator` transitions the `Server` back to its prior state. If additional `ServerMaintenance` objects are
    pending, the next one is processed.
 
 ## Example

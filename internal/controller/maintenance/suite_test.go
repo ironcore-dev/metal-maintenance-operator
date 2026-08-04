@@ -38,6 +38,8 @@ const (
 	eventuallyTimeout    = 5 * time.Second
 	consistentlyDuration = 1 * time.Second
 
+	testGenerateName = "test-"
+
 	sanitizationNamespace = "metal-maintenance-sanitization"
 	sanitizationImage     = "metal-maintenance-sanitization:latest"
 )
@@ -110,7 +112,7 @@ func SetupNamespace() *corev1.Namespace {
 		DeferCleanup(cancel)
 
 		*ns = corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"},
+			ObjectMeta: metav1.ObjectMeta{GenerateName: testGenerateName},
 		}
 		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
 		DeferCleanup(k8sClient.Delete, ns)
@@ -155,7 +157,7 @@ func SetupServerMaintenanceNamespace() *corev1.Namespace {
 		DeferCleanup(cancel)
 
 		*ns = corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"},
+			ObjectMeta: metav1.ObjectMeta{GenerateName: testGenerateName},
 		}
 		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
 		DeferCleanup(k8sClient.Delete, ns)

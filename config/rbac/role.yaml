@@ -69,9 +69,6 @@ rules:
   - metal.ironcore.dev
   resources:
   - serverbootconfigurations
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
   - serverclaims
   verbs:
   - create

@@ -97,7 +97,7 @@ const (
 // +kubebuilder:printcolumn:name="Server",type="string",JSONPath=".spec.serverRef.name"
 // +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=`.spec.policy`
 // +kubebuilder:printcolumn:name="BootConfiguration",type="string",JSONPath=`.spec.serverBootConfigurationTemplate.name`
-// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.metadata.annotations.metal\.ironcore\.dev\/reason`
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.metadata.annotations.metal\.ironcore\.dev\/maintenance-reason`
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=`.spec.priority`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

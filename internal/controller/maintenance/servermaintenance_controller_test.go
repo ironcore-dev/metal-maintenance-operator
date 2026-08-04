@@ -16,6 +16,12 @@ import (
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
+const (
+	testBootName  = "test-boot"
+	testSecretKey = "foo"
+	testImage     = "foo:latest"
+)
+
 var _ = Describe("ServerMaintenance Controller", func() {
 	ns := SetupServerMaintenanceNamespace()
 
@@ -58,7 +64,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 				ServerBootConfigurationTemplate: &serverMaintenancev1alpha1.ServerBootConfigurationTemplate{
-					Name: "test-boot",
+					Name: testBootName,
 					Spec: metalv1alpha1.ServerBootConfigurationSpec{
 						ServerRef: corev1.LocalObjectReference{Name: server.Name},
 						Image:     "some_image",
@@ -103,9 +109,9 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		ignitionSecret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
-				GenerateName: "test-",
+				GenerateName: testGenerateName,
 			},
-			Data: map[string][]byte{"foo": []byte("bar")},
+			Data: map[string][]byte{testSecretKey: []byte("bar")},
 		}
 		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
 		DeferCleanup(k8sClient.Delete, ignitionSecret)
@@ -114,13 +120,13 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		serverClaim := &metalv1alpha1.ServerClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
-				GenerateName: "test-",
+				GenerateName: testGenerateName,
 			},
 			Spec: metalv1alpha1.ServerClaimSpec{
 				Power:             metalv1alpha1.PowerOff,
 				ServerRef:         &corev1.LocalObjectReference{Name: server.Name},
 				IgnitionSecretRef: &corev1.LocalObjectReference{Name: ignitionSecret.Name},
-				Image:             "foo:latest",
+				Image:             testImage,
 			},
 		}
 		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
@@ -148,10 +154,10 @@ var _ = Describe("ServerMaintenance Controller", func() {
 				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
 				ServerPower: metalv1alpha1.PowerOff,
 				ServerBootConfigurationTemplate: &serverMaintenancev1alpha1.ServerBootConfigurationTemplate{
-					Name: "test-boot",
+					Name: testBootName,
 					Spec: metalv1alpha1.ServerBootConfigurationSpec{
 						ServerRef: corev1.LocalObjectReference{Name: server.Name},
-						Image:     "foo:latest",
+						Image:     testImage,
 					},
 				},
 			},
@@ -240,7 +246,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 				Policy:      serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerPower: metalv1alpha1.PowerOff,
 				ServerBootConfigurationTemplate: &serverMaintenancev1alpha1.ServerBootConfigurationTemplate{
-					Name: "test-boot",
+					Name: testBootName,
 					Spec: metalv1alpha1.ServerBootConfigurationSpec{
 						ServerRef: corev1.LocalObjectReference{Name: server.Name},
 						Image:     "some_image",
@@ -311,19 +317,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 	It("should prioritize higher-priority maintenance for the same server", func(ctx SpecContext) {
 		By("Creating an Ignition secret and ServerClaim")
 		ignitionSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
-			Data:       map[string][]byte{"foo": []byte("bar")},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: testGenerateName},
+			Data:       map[string][]byte{testSecretKey: []byte("bar")},
 		}
 		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
 		DeferCleanup(k8sClient.Delete, ignitionSecret)
 
 		serverClaim := &metalv1alpha1.ServerClaim{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: testGenerateName},
 			Spec: metalv1alpha1.ServerClaimSpec{
 				Power:             metalv1alpha1.PowerOff,
 				ServerRef:         &corev1.LocalObjectReference{Name: server.Name},
 				IgnitionSecretRef: &corev1.LocalObjectReference{Name: ignitionSecret.Name},
-				Image:             "foo:latest",
+				Image:             testImage,
 			},
 		}
 		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
@@ -384,19 +390,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 	It("should treat unset priority as zero", func(ctx SpecContext) {
 		By("Creating an Ignition secret and ServerClaim")
 		ignitionSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
-			Data:       map[string][]byte{"foo": []byte("bar")},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: testGenerateName},
+			Data:       map[string][]byte{testSecretKey: []byte("bar")},
 		}
 		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
 		DeferCleanup(k8sClient.Delete, ignitionSecret)
 
 		serverClaim := &metalv1alpha1.ServerClaim{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: testGenerateName},
 			Spec: metalv1alpha1.ServerClaimSpec{
 				Power:             metalv1alpha1.PowerOff,
 				ServerRef:         &corev1.LocalObjectReference{Name: server.Name},
 				IgnitionSecretRef: &corev1.LocalObjectReference{Name: ignitionSecret.Name},
-				Image:             "foo:latest",
+				Image:             testImage,
 			},
 		}
 		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
@@ -611,19 +617,19 @@ var _ = Describe("ServerMaintenance Controller", func() {
 	It("should keep reserved server in Maintenance throughout all queued OwnerApproval maintenances and return after all are done", func(ctx SpecContext) {
 		By("Creating an Ignition secret and ServerClaim")
 		ignitionSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
-			Data:       map[string][]byte{"foo": []byte("bar")},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: testGenerateName},
+			Data:       map[string][]byte{testSecretKey: []byte("bar")},
 		}
 		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
 		DeferCleanup(k8sClient.Delete, ignitionSecret)
 
 		serverClaim := &metalv1alpha1.ServerClaim{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: testGenerateName},
 			Spec: metalv1alpha1.ServerClaimSpec{
 				Power:             metalv1alpha1.PowerOff,
 				ServerRef:         &corev1.LocalObjectReference{Name: server.Name},
 				IgnitionSecretRef: &corev1.LocalObjectReference{Name: ignitionSecret.Name},
-				Image:             "foo:latest",
+				Image:             testImage,
 			},
 		}
 		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
