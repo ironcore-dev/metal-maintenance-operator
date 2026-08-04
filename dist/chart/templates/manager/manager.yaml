@@ -90,12 +90,6 @@ spec:
         command:
         - /manager
         env:
-        # POD_NAMESPACE is the fallback that --telemetry-config-namespace
-        # and --leader-election-namespace resolve to when their flags are
-        # unset. Without this fieldRef the telemetry pipeline would fail
-        # to locate its ConfigMap in-cluster and the operator would exit
-        # 1 at startup. Always injected — user-supplied .Values.manager.env
-        # / envOverrides append below.
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
