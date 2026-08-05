@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -28,10 +29,15 @@ type ServerManageRequest struct {
 	SecurityDescriptor ServerSecurityDescriptor `json:"securityDescriptor"`
 }
 
-type ServerUnmanageRequest struct {
+type ServerUnmanageEndpoint struct {
 	IPAddresses []string `json:"ipAddresses"`
 	Type        string   `json:"type"`
 	UUID        string   `json:"uuid"`
+}
+
+type ServerUnmanageRequest struct {
+	Endpoints     []ServerUnmanageEndpoint `json:"endpoints"`
+	ForceUnmanage bool                     `json:"forceUnmanage"`
 }
 
 // NodeListResponse mirrors the expected LXCA JSON response for GET /nodes
@@ -43,9 +49,10 @@ type NodeListResponse struct {
 type ServerNode struct {
 	UUID        string `json:"uuid"`
 	Name        string `json:"name"`
-	Type        string `json:"type"` // e.g., "RackServer", "ComputeNode"
-	HostName    string `json:"hostName"`
-	HealthState string `json:"healthState"` // e.g., "Normal", "Warning", "Critical"
+	Type        string `json:"type"`
+	HostName    string `json:"hostname"`
+	FQDN        string `json:"FQDN"`
+	HealthState string `json:"overallHealthState"`
 }
 
 type LenovoClient struct {
@@ -75,7 +82,7 @@ func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUse
 			ManagedAuthSupported: false,
 		},
 	}
-	payloadBytes, err := json.Marshal(discoveryPayload)
+	payloadBytes, err := json.Marshal([]ServerManageRequest{discoveryPayload})
 	if err != nil {
 		return fmt.Errorf("error marshalling discovery payload: %w", err)
 	}
@@ -83,7 +90,7 @@ func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUse
 	if err != nil {
 		return fmt.Errorf("error creating discovery request: %w", err)
 	}
-	body, err := c.client.DoRequest(req, []int{202})
+	body, err := c.client.DoRequest(req, []int{http.StatusOK, http.StatusCreated, http.StatusAccepted})
 	if err != nil {
 		return err
 	}
@@ -110,9 +117,14 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 	}
 	url := c.client.parsedURL.JoinPath("/unmanageRequest")
 	payload := ServerUnmanageRequest{
-		IPAddresses: []string{ip.String()},
-		Type:        lenovoRackTowerServerType,
-		UUID:        serverUUID,
+		Endpoints: []ServerUnmanageEndpoint{
+			{
+				IPAddresses: []string{ip.String()},
+				Type:        lenovoRackTowerServerType,
+				UUID:        serverUUID,
+			},
+		},
+		ForceUnmanage: false,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -122,7 +134,7 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 	if err != nil {
 		return fmt.Errorf("error creating unmanage request: %w", err)
 	}
-	_, err = c.client.DoRequest(req, []int{202})
+	_, err = c.client.DoRequest(req, []int{http.StatusOK, http.StatusCreated, http.StatusAccepted})
 	if err != nil {
 		return fmt.Errorf("error executing unmanage request: %w", err)
 	}
@@ -132,7 +144,7 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 
 func (c *LenovoClient) ListServers() ([]Device, error) {
 	serversURL := c.client.parsedURL.JoinPath("/nodes")
-	serversURL.RawQuery = "status=managed&includeAttributes=uuid,fqdn"
+	serversURL.RawQuery = "status=managed&includeAttributes=uuid,FQDN,hostname,name"
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {
@@ -150,12 +162,15 @@ func (c *LenovoClient) ListServers() ([]Device, error) {
 	}
 	devices := make([]Device, 0, len(nodeListResp.NodeList))
 	for _, node := range nodeListResp.NodeList {
+		fqdn := node.FQDN
+		if !strings.Contains(fqdn, ".") {
+			fqdn = node.Name
+		}
 		device := Device{
 			UUID:     node.UUID,
 			Name:     node.Name,
-			Hostname: node.HostName,
+			Hostname: fqdn,
 			Model:    node.Type,
-			// HealthStatus mapping can be added based on HealthState
 		}
 		devices = append(devices, device)
 	}
@@ -189,7 +204,7 @@ func (c *LenovoClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, b
 	if err != nil {
 		return "", fmt.Errorf("error creating discovery request: %w", err)
 	}
-	body, err := c.client.DoRequest(req, []int{202})
+	body, err := c.client.DoRequest(req, []int{http.StatusOK, http.StatusCreated, http.StatusAccepted})
 	if err != nil {
 		return "", err
 	}
@@ -221,7 +236,7 @@ func (c *LenovoClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (
 func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
 	// For Lenovo, we poll the /nodes endpoint to check if the hostname appears
 	serversURL := c.client.parsedURL.JoinPath("/nodes")
-	serversURL.RawQuery = "status=managed&includeAttributes=uuid,fqdn"
+	serversURL.RawQuery = "status=managed&includeAttributes=uuid,FQDN,hostname,name"
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {
@@ -240,7 +255,7 @@ func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
 
 	// Check if the hostname (jobID) appears in the managed nodes
 	for _, node := range nodeListResp.NodeList {
-		if node.HostName == jobID {
+		if node.FQDN == jobID {
 			return &JobInfo{
 				JobID:    jobID,
 				Status:   jobStatusCompleted,

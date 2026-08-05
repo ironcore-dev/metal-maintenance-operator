@@ -313,6 +313,10 @@ func (r *ConsoleReconciler) delete(ctx context.Context, console *vendorconsolev1
 			continue
 		}
 		if err := cclient.RemoveServer(server.Spec.BMC.Address, metalBmc.Status.IP); err != nil {
+			if errors.Is(err, hwmgr.ErrServerHasActiveProfile) {
+				log.FromContext(ctx).Info("Skipping server removal: has active profile", "server", server.Name)
+				continue
+			}
 			log.FromContext(ctx).Error(err, "unable to remove server from console", "server", server.Name)
 			errs = append(errs, err)
 		}

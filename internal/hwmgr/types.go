@@ -4,9 +4,14 @@
 package hwmgr
 
 import (
+	"errors"
+
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 )
+
+// ErrServerHasActiveProfile is returned when a server cannot be removed because it has an active profile assigned.
+var ErrServerHasActiveProfile = errors.New("server has an active profile and cannot be removed")
 
 // Device represents a single device returned from the API
 type Device struct {

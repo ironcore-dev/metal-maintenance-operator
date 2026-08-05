@@ -27,11 +27,20 @@ type AuthRequest struct {
 	Password string `json:"Password"`
 }
 
+// dellDevice maps the OME device JSON fields to the shared Device struct.
+type dellDevice struct {
+	ID           int    `json:"Id"`
+	DeviceName   string `json:"DeviceName"`
+	Model        string `json:"Model"`
+	HealthStatus int    `json:"Status"`
+}
+
 // DevicesResponse is the top-level structure for the GET /Devices endpoint
 type DevicesResponse struct {
-	ODataContext string   `json:"@odata.context"`
-	ODataCount   int      `json:"@odata.count"`
-	Value        []Device `json:"value"`
+	ODataContext string       `json:"@odata.context"`
+	ODataCount   int          `json:"@odata.count"`
+	NextLink     string       `json:"@odata.nextLink"`
+	Value        []dellDevice `json:"value"`
 }
 
 // Credential is for the iDRAC login details
@@ -61,9 +70,6 @@ type DiscoveryJobRequest struct {
 	JobType            int          `json:"JobType"` // 1 for immediate discovery
 }
 
-type RemoveDeviceRequest struct {
-	DeviceIDs []int `json:"DeviceIDs"`
-}
 
 // DiscoveryJob represents a single discovery job in OpenManage Enterprise.
 type DiscoveryJob struct {
@@ -112,7 +118,21 @@ func NewDellClient(options ClientOptions) (*DellClient, error) {
 func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
 	discoveryURL := c.client.parsedURL.JoinPath("/api/DiscoveryConfigService/DiscoveryConfigGroups")
 
-	// Create ConnectionProfile as JSON string
+	credentialFields := map[string]any{
+		"username":               bmcUser,
+		"password":               bmcPassword,
+		"domain":                 nil,
+		"caCheck":                false,
+		"cnCheck":                false,
+		"certificateData":        nil,
+		"certificateDetail":      nil,
+		"port":                   443,
+		"retries":                3,
+		"timeout":                60,
+		"serviceCheckTimeoutSecs": 1,
+		"isHttp":                 false,
+		"keepAlive":              false,
+	}
 	connectionProfile := map[string]any{
 		"profileName":        "",
 		"profileDescription": "",
@@ -122,9 +142,26 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 				dellProfileTypeKey: "WSMAN",
 				"authType":         "Basic",
 				"modified":         false,
-				dellCredentialsKey: map[string]string{
-					"username": bmcUser,
-					"password": bmcPassword,
+				dellCredentialsKey: credentialFields,
+			},
+			{
+				dellProfileTypeKey: "REDFISH",
+				"authType":         "Basic",
+				"modified":         false,
+				dellCredentialsKey: map[string]any{
+					"username":               bmcUser,
+					"password":               bmcPassword,
+					"domain":                 nil,
+					"caCheck":                false,
+					"cnCheck":                false,
+					"certificateData":        nil,
+					"certificateDetail":      nil,
+					"port":                   443,
+					"retries":                3,
+					"timeout":                60,
+					"serviceCheckTimeoutSecs": 0,
+					"isHttp":                 false,
+					"keepAlive":              true,
 				},
 			},
 		},
@@ -141,12 +178,23 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 				"DiscoveryConfigTargets": []map[string]any{
 					{
 						"NetworkAddressDetail": IP.String(),
+						"AddressType":          3,
+						"Disabled":             false,
+						"Exclude":              false,
 					},
 				},
 				"ConnectionProfile": string(connectionProfileJSON),
-				"DeviceType":        []int{1000}, // Server device type
+				"DeviceType":        []int{1000},
 			},
 		},
+		"Schedule": map[string]any{
+			"RunNow":    true,
+			"RunLater":  false,
+			"Recurring": nil,
+			"Cron":      "startnow",
+		},
+		"CreateGroup":     true,
+		"TrapDestination": false,
 	}
 	payloadBytes, err := json.Marshal(discoveryPayload)
 	if err != nil {
@@ -165,7 +213,7 @@ func (c *DellClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser,
 }
 
 func (c *DellClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error {
-	servers, err := c.ListServers()
+	servers, err := c.listAllServers()
 	if err != nil {
 		return fmt.Errorf("error listing servers: %w", err)
 	}
@@ -179,15 +227,8 @@ func (c *DellClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error {
 	if serverID == 0 {
 		return fmt.Errorf("server with hostname %s not found", hostname)
 	}
-	removeURL := c.client.parsedURL.JoinPath("/api/DeviceService/Actions/DeviceService.RemoveDevices")
-	removePayload := RemoveDeviceRequest{
-		DeviceIDs: []int{serverID},
-	}
-	payloadBytes, err := json.Marshal(removePayload)
-	if err != nil {
-		return fmt.Errorf("error marshalling remove payload: %w", err)
-	}
-	req, err := http.NewRequest("POST", removeURL.String(), bytes.NewBuffer(payloadBytes))
+	removeURL := c.client.parsedURL.JoinPath(fmt.Sprintf("/api/DeviceService/Devices(%d)", serverID))
+	req, err := http.NewRequest("DELETE", removeURL.String(), nil)
 	if err != nil {
 		return fmt.Errorf("error creating remove request: %w", err)
 	}
@@ -196,6 +237,42 @@ func (c *DellClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error {
 		return fmt.Errorf("error executing remove request: %w", err)
 	}
 	return nil
+}
+
+func (c *DellClient) listAllServers() ([]Device, error) {
+	var all []Device
+	nextURL := c.client.parsedURL.JoinPath("/api/DeviceService/Devices").String()
+	for nextURL != "" {
+		req, err := http.NewRequest("GET", nextURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating get servers request: %w", err)
+		}
+		body, err := c.client.DoRequest(req, []int{http.StatusOK})
+		if err != nil {
+			return nil, fmt.Errorf("error executing get servers request: %w", err)
+		}
+		var page struct {
+			NextLink string       `json:"@odata.nextLink"`
+			Value    []dellDevice `json:"value"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("error parsing get servers response: %w", err)
+		}
+		for _, d := range page.Value {
+			all = append(all, Device{
+				ID:           d.ID,
+				Hostname:     d.DeviceName,
+				Model:        d.Model,
+				HealthStatus: d.HealthStatus,
+			})
+		}
+		if page.NextLink != "" {
+			nextURL = c.client.parsedURL.Scheme + "://" + c.client.parsedURL.Host + page.NextLink
+		} else {
+			nextURL = ""
+		}
+	}
+	return all, nil
 }
 
 func (c *DellClient) ListServers() ([]Device, error) {
@@ -213,7 +290,16 @@ func (c *DellClient) ListServers() ([]Device, error) {
 	if err := json.Unmarshal(body, &devicesResp); err != nil {
 		return nil, fmt.Errorf("error parsing get servers response: %w", err)
 	}
-	return devicesResp.Value, nil
+	devices := make([]Device, 0, len(devicesResp.Value))
+	for _, d := range devicesResp.Value {
+		devices = append(devices, Device{
+			ID:           d.ID,
+			Hostname:     d.DeviceName,
+			Model:        d.Model,
+			HealthStatus: d.HealthStatus,
+		})
+	}
+	return devices, nil
 }
 
 func (c *DellClient) GetAuthToken() (string, error) {
