@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
@@ -226,10 +227,14 @@ func (r *ConsoleReconciler) startNewOperations(
 		pendingMap[op.ServerName] = true
 	}
 
-	// Build map of managed hostnames
+	// Build map of managed hostnames — index both FQDN and short name to handle
+	// management consoles that return inconsistent hostname formats.
 	managedMap := make(map[string]bool)
 	for _, device := range managedServers {
 		managedMap[device.Hostname] = true
+		if i := strings.IndexByte(device.Hostname, '.'); i > 0 {
+			managedMap[device.Hostname[:i]] = true
+		}
 	}
 
 	newOperations := []vendorconsolev1alpha1.PendingOperation{}
@@ -451,6 +456,9 @@ func (r *ConsoleReconciler) updateStatus(
 		}
 		for _, device := range managedDevices {
 			managedMap[device.Hostname] = true
+			if i := strings.IndexByte(device.Hostname, '.'); i > 0 {
+				managedMap[device.Hostname[:i]] = true
+			}
 		}
 	}
 
