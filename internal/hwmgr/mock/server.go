@@ -99,6 +99,9 @@ func (s *MockServer) handleRedfishPOST(w http.ResponseWriter, r *http.Request) {
 	if hasOverride {
 		resp, _ := json.MarshalIndent(cached, "", "  ")
 		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(urlPath, "SessionService/Sessions") {
+			w.Header().Set("X-Auth-Token", "mock-token")
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, err := w.Write(resp)
 		if err != nil {
@@ -123,6 +126,9 @@ func (s *MockServer) handleRedfishPOST(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	resp, _ := json.MarshalIndent(existing, "", "  ")
 	w.Header().Set("Content-Type", "application/json")
+	if strings.Contains(urlPath, "SessionService/Sessions") {
+		w.Header().Set("X-Auth-Token", "mock-token")
+	}
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write(resp)
 	if err != nil {
