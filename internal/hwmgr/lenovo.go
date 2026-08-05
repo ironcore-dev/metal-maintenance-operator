@@ -52,6 +52,7 @@ type ServerNode struct {
 	Type        string `json:"type"`
 	HostName    string `json:"hostname"`
 	FQDN        string `json:"FQDN"`
+	DomainName  string `json:"domainName"`
 	HealthState string `json:"overallHealthState"`
 }
 
@@ -144,7 +145,7 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 
 func (c *LenovoClient) ListServers() ([]Device, error) {
 	serversURL := c.client.parsedURL.JoinPath("/nodes")
-	serversURL.RawQuery = "status=managed&includeAttributes=uuid,FQDN,hostname,name"
+	serversURL.RawQuery = "status=managed&includeAttributes=uuid,FQDN,hostname,name,domainName"
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {
@@ -164,7 +165,11 @@ func (c *LenovoClient) ListServers() ([]Device, error) {
 	for _, node := range nodeListResp.NodeList {
 		fqdn := node.FQDN
 		if !strings.Contains(fqdn, ".") {
-			fqdn = node.Name
+			if node.DomainName != "" {
+				fqdn = node.HostName + "." + node.DomainName
+			} else {
+				fqdn = node.Name
+			}
 		}
 		device := Device{
 			UUID:     node.UUID,
@@ -236,7 +241,7 @@ func (c *LenovoClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (
 func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
 	// For Lenovo, we poll the /nodes endpoint to check if the hostname appears
 	serversURL := c.client.parsedURL.JoinPath("/nodes")
-	serversURL.RawQuery = "status=managed&includeAttributes=uuid,FQDN,hostname,name"
+	serversURL.RawQuery = "status=managed&includeAttributes=uuid,FQDN,hostname,name,domainName"
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {
