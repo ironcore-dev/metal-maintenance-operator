@@ -48,27 +48,6 @@ type ServerNode struct {
 	HealthState string `json:"healthState"` // e.g., "Normal", "Warning", "Critical"
 }
 
-type SessionResponse struct {
-	Response struct {
-		Session struct {
-			ID                string `json:"id"`
-			CSRF              string `json:"csrf"`
-			UserId            string `json:"UserId"`
-			InactivityTimeout string `json:"inactivityTimeout"`
-		} `json:"session"`
-	} `json:"response"`
-	Result   string `json:"result"`
-	Messages []struct {
-		Explanation string `json:"explanation"`
-		ID          string `json:"id"`
-		Recovery    struct {
-			Text string `json:"text"`
-			URL  string `json:"URL"`
-		} `json:"recovery"`
-		Text string `json:"text"`
-	} `json:"messages"`
-}
-
 type LenovoClient struct {
 	client *client
 }
@@ -79,11 +58,13 @@ func NewLenovoClient(options ClientOptions) (c *LenovoClient, err error) {
 	if err != nil {
 		return nil, err
 	}
+	c.client.basicAuth = true
 	return c, nil
 }
 
 func (c *LenovoClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
-	discoveryURL := c.client.parsedURL.JoinPath("/manageRequest?discovery=true")
+	discoveryURL := c.client.parsedURL.JoinPath("/manageRequest")
+	discoveryURL.RawQuery = "discovery=true"
 	discoveryPayload := ServerManageRequest{
 		IPAddresses: []string{IP.String()},
 		Username:    bmcUser,
@@ -150,7 +131,8 @@ func (c *LenovoClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error 
 }
 
 func (c *LenovoClient) ListServers() ([]Device, error) {
-	serversURL := c.client.parsedURL.JoinPath("/nodes?status=managed&includeAttributes=uuid,fqdn")
+	serversURL := c.client.parsedURL.JoinPath("/nodes")
+	serversURL.RawQuery = "status=managed&includeAttributes=uuid,fqdn"
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {
@@ -181,59 +163,14 @@ func (c *LenovoClient) ListServers() ([]Device, error) {
 	return devices, nil
 }
 
-// LoginRequest defines the JSON structure for the login payload.
-type LoginRequest struct {
-	UserID   string `json:"userID"`
-	Password string `json:"password"`
-}
-
 func (c *LenovoClient) GetAuthToken() (string, error) {
-	url := c.client.parsedURL.JoinPath("/sessions")
-	if c.client.token != "" {
-		// check token still valid
-		req, err := http.NewRequest("GET", url.String(), nil)
-		if err != nil {
-			return "", fmt.Errorf("error creating login validation request: %w", err)
-		}
-		_, err = c.client.DoRequest(req, []int{http.StatusOK})
-		if err != nil {
-			return c.createToken()
-		}
-		return c.client.token, nil
-	}
-	return c.createToken()
-}
-
-func (c *LenovoClient) createToken() (string, error) {
-	url := c.client.parsedURL.JoinPath("/sessions")
-	loginPayload := LoginRequest{
-		UserID:   c.client.username,
-		Password: c.client.password,
-	}
-	payloadBytes, err := json.Marshal(loginPayload)
-	if err != nil {
-		return "", fmt.Errorf("error marshalling login payload: %w", err)
-	}
-	req, err := http.NewRequest("POST", url.String(), bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return "", fmt.Errorf("error creating login request: %w", err)
-	}
-	body, err := c.client.DoRequest(req, []int{http.StatusOK})
-	if err != nil {
-		return "", fmt.Errorf("error executing login request: %w", err)
-	}
-	var resp SessionResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", fmt.Errorf("error parsing login response: %w", err)
-	}
-	c.client.token = resp.Response.Session.CSRF
-
-	return c.client.token, nil
+	return "", nil
 }
 
 // ImportServerAsync initiates an asynchronous import and returns a job identifier.
 func (c *LenovoClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) (string, error) {
-	discoveryURL := c.client.parsedURL.JoinPath("/manageRequest?discovery=true")
+	discoveryURL := c.client.parsedURL.JoinPath("/manageRequest")
+	discoveryURL.RawQuery = "discovery=true"
 	discoveryPayload := ServerManageRequest{
 		IPAddresses: []string{IP.String()},
 		Username:    bmcUser,
@@ -283,7 +220,8 @@ func (c *LenovoClient) RemoveServerAsync(hostname string, ip metalv1alpha1.IP) (
 // GetJobStatus retrieves the status of a Lenovo import job by polling managed nodes.
 func (c *LenovoClient) GetJobStatus(jobID string) (*JobInfo, error) {
 	// For Lenovo, we poll the /nodes endpoint to check if the hostname appears
-	serversURL := c.client.parsedURL.JoinPath("/nodes?status=managed&includeAttributes=uuid,fqdn")
+	serversURL := c.client.parsedURL.JoinPath("/nodes")
+	serversURL.RawQuery = "status=managed&includeAttributes=uuid,fqdn"
 
 	req, err := http.NewRequest("GET", serversURL.String(), nil)
 	if err != nil {

@@ -24,6 +24,7 @@ type client struct {
 	password    string
 	token       string
 	tokenHeader string // header name to carry the auth token; empty means "Authorization: Bearer"
+	basicAuth   bool   // send HTTP Basic Auth on every request instead of token-based auth
 }
 
 // ClientOptions represents the options for the client.
@@ -76,18 +77,23 @@ func (c *client) DoRequest(req *http.Request, okCodes []int) ([]byte, error) {
 	if c.parsedURL == nil {
 		return nil, errors.New("the URL is mandatory")
 	}
-	if c.token == "" {
-		if err := c.getAuthToken(); err != nil {
-			return nil, err
-		}
-	}
-	req.Header = http.Header{
-		"Content-Type": []string{"application/json"},
-	}
-	if c.tokenHeader != "" {
-		req.Header.Set(c.tokenHeader, c.token)
+	if c.basicAuth {
+		req.Header = http.Header{"Content-Type": []string{"application/json"}}
+		req.SetBasicAuth(c.username, c.password)
 	} else {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		if c.token == "" {
+			if err := c.getAuthToken(); err != nil {
+				return nil, err
+			}
+		}
+		req.Header = http.Header{
+			"Content-Type": []string{"application/json"},
+		}
+		if c.tokenHeader != "" {
+			req.Header.Set(c.tokenHeader, c.token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
 	}
 	res, err := c.httpClient.Do(req)
 	if err != nil {
