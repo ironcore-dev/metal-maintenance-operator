@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -341,6 +342,10 @@ func (c *DellClient) createToken() (string, error) {
 		return "", fmt.Errorf("error executing auth request: %w", err)
 	}
 	defer res.Body.Close() //nolint:errcheck
+	// Drain the body so the underlying TCP connection (shared with DoRequest via the same
+	// httpClient transport pool) can be returned to the pool and reused for subsequent
+	// API calls to the same host, saving a TCP handshake on first reconcile.
+	_, _ = io.ReadAll(res.Body)
 	if res.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("error executing auth request: unexpected status %d", res.StatusCode)
 	}
