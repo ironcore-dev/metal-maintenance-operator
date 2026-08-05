@@ -23,7 +23,7 @@ const (
 )
 
 var _ = Describe("ServerMaintenance Controller", func() {
-	ns := SetupServerMaintenanceNamespace()
+	ns := SetupTest(WithServerMaintenanceController())
 
 	var server *metalv1alpha1.Server
 

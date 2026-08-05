@@ -105,7 +105,51 @@ var _ = BeforeSuite(func() {
 	}()
 })
 
-func SetupNamespace() *corev1.Namespace {
+// Option configures a manager during SetupTest.
+type Option func(ctx SpecContext, mgr ctrl.Manager) error
+
+// WithServerMaintenanceController registers the ServerMaintenanceReconciler and its field index.
+func WithServerMaintenanceController() Option {
+	return func(ctx SpecContext, mgr ctrl.Manager) error {
+		if err := mgr.GetFieldIndexer().IndexField(ctx, &serverMaintenancev1alpha1.ServerMaintenance{}, serverRefField, func(rawObj client.Object) []string {
+			m, ok := rawObj.(*serverMaintenancev1alpha1.ServerMaintenance)
+			if !ok {
+				return nil
+			}
+			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
+				return []string{m.Spec.ServerRef.Name}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		return (&ServerMaintenanceReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr)
+	}
+}
+
+// WithServerSanitizationController registers the ServerSanitizationReconciler.
+func WithServerSanitizationController() Option {
+	return func(_ SpecContext, mgr ctrl.Manager) error {
+		return (&ServerSanitizationReconciler{
+			Client:                mgr.GetClient(),
+			Scheme:                mgr.GetScheme(),
+			SanitizationNamespace: sanitizationNamespace,
+			SanitizationImage:     sanitizationImage,
+			SanitizationIgnitionProvider: func(
+				ctx context.Context,
+				server *metalv1alpha1.Server,
+				sanitizationUID string,
+			) ([]byte, error) {
+				return fmt.Appendf(nil, "%s/%s", server.UID, sanitizationUID), nil
+			},
+		}).SetupWithManager(mgr)
+	}
+}
+
+func SetupTest(opts ...Option) *corev1.Namespace {
 	ns := &corev1.Namespace{}
 	BeforeEach(func(ctx SpecContext) {
 		mgrCtx, cancel := context.WithCancel(context.Background())
@@ -126,66 +170,9 @@ func SetupNamespace() *corev1.Namespace {
 		})
 		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
-		Expect((&ServerSanitizationReconciler{
-			Client:                k8sManager.GetClient(),
-			Scheme:                k8sManager.GetScheme(),
-			SanitizationNamespace: sanitizationNamespace,
-			SanitizationImage:     sanitizationImage,
-			SanitizationIgnitionProvider: func(
-				ctx context.Context,
-				server *metalv1alpha1.Server,
-				sanitizationUID string,
-			) ([]byte, error) {
-				return fmt.Appendf(nil, "%s/%s", server.UID, sanitizationUID), nil
-			},
-		}).SetupWithManager(k8sManager)).To(Succeed())
-
-		go func() {
-			defer GinkgoRecover()
-			Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start manager")
-		}()
-	})
-	return ns
-}
-
-// SetupServerMaintenanceNamespace creates a test namespace and starts a manager with the
-// ServerMaintenance controller for each test. Returns the namespace.
-func SetupServerMaintenanceNamespace() *corev1.Namespace {
-	ns := &corev1.Namespace{}
-	BeforeEach(func(ctx SpecContext) {
-		mgrCtx, cancel := context.WithCancel(context.Background())
-		DeferCleanup(cancel)
-
-		*ns = corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{GenerateName: testGenerateName},
+		for _, opt := range opts {
+			Expect(opt(ctx, k8sManager)).To(Succeed())
 		}
-		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
-		DeferCleanup(k8sClient.Delete, ns)
-
-		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme: k8sClient.Scheme(),
-			Controller: config.Controller{
-				SkipNameValidation: new(true),
-			},
-			Metrics: metricsserver.Options{BindAddress: "0"},
-		})
-		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
-
-		Expect(k8sManager.GetFieldIndexer().IndexField(ctx, &serverMaintenancev1alpha1.ServerMaintenance{}, serverRefField, func(rawObj client.Object) []string {
-			m, ok := rawObj.(*serverMaintenancev1alpha1.ServerMaintenance)
-			if !ok {
-				return nil
-			}
-			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
-				return []string{m.Spec.ServerRef.Name}
-			}
-			return nil
-		})).To(Succeed())
-
-		Expect((&ServerMaintenanceReconciler{
-			Client: k8sManager.GetClient(),
-			Scheme: k8sManager.GetScheme(),
-		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		go func() {
 			defer GinkgoRecover()
