@@ -343,8 +343,8 @@ func (c *DellClient) createToken() (string, error) {
 	}
 	defer res.Body.Close() //nolint:errcheck
 	// Drain the body so the underlying TCP connection (shared with DoRequest via the same
-	// httpClient transport pool) can be returned to the pool and reused for subsequent
-	// API calls to the same host, saving a TCP handshake on first reconcile.
+	// httpClient transport pool) can be returned to the pool and reused for the next
+	// API call to the same host, saving a TCP handshake on each token refresh.
 	_, _ = io.ReadAll(res.Body)
 	if res.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("error executing auth request: unexpected status %d", res.StatusCode)
