@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
@@ -226,10 +227,14 @@ func (r *ConsoleReconciler) startNewOperations(
 		pendingMap[op.ServerName] = true
 	}
 
-	// Build map of managed hostnames
+	// Build map of managed hostnames — index both FQDN and short name to handle
+	// management consoles that return inconsistent hostname formats.
 	managedMap := make(map[string]bool)
 	for _, device := range managedServers {
 		managedMap[device.Hostname] = true
+		if i := strings.IndexByte(device.Hostname, '.'); i > 0 {
+			managedMap[device.Hostname[:i]] = true
+		}
 	}
 
 	newOperations := []vendorconsolev1alpha1.PendingOperation{}
@@ -296,6 +301,7 @@ func (r *ConsoleReconciler) startNewOperations(
 }
 
 func (r *ConsoleReconciler) delete(ctx context.Context, console *vendorconsolev1alpha1.Console) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	serverList, err := r.getServerList(ctx, console)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -308,12 +314,16 @@ func (r *ConsoleReconciler) delete(ctx context.Context, console *vendorconsolev1
 	for _, server := range serverList.Items {
 		metalBmc := metalv1alpha1.BMC{}
 		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name, Namespace: server.Namespace}, &metalBmc); err != nil {
-			log.FromContext(ctx).Error(err, "unable to get BMC for server", "server", server.Name)
+			logger.Error(err, "unable to get BMC for server", "server", server.Name)
 			errs = append(errs, err)
 			continue
 		}
 		if err := cclient.RemoveServer(server.Spec.BMC.Address, metalBmc.Status.IP); err != nil {
-			log.FromContext(ctx).Error(err, "unable to remove server from console", "server", server.Name)
+			if errors.Is(err, hwmgr.ErrServerHasActiveProfile) {
+				logger.Info("Skipped Server removal because the server had an active profile", "server", server.Name)
+				continue
+			}
+			logger.Error(err, "unable to remove server from console", "server", server.Name)
 			errs = append(errs, err)
 		}
 	}
@@ -447,6 +457,9 @@ func (r *ConsoleReconciler) updateStatus(
 		}
 		for _, device := range managedDevices {
 			managedMap[device.Hostname] = true
+			if i := strings.IndexByte(device.Hostname, '.'); i > 0 {
+				managedMap[device.Hostname[:i]] = true
+			}
 		}
 	}
 

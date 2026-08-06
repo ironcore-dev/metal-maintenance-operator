@@ -5,9 +5,9 @@ package hwmgr
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/HewlettPackard/oneview-golang/ov" // This is a common SDK path
-	"github.com/HewlettPackard/oneview-golang/utils"
+	"github.com/HewlettPackard/oneview-golang/ov"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
@@ -35,20 +35,18 @@ func NewHPEClient(options ClientOptions) (c *HPEClient, err error) {
 }
 
 func (c *HPEClient) ImportServer(hostname string, IP metalv1alpha1.IP, bmcUser, bmcPassword string) error {
-	scp, err := c.client.GetScopeByName("ScopeHardware")
-	if err != nil {
-		return fmt.Errorf("error getting scope: %w", err)
-	}
 	rackServer := ov.ServerHardware{
-		Name:               hostname,
+		Hostname:           IP.String(),
 		Username:           bmcUser,
 		Password:           bmcPassword,
 		Force:              false,
-		LicensingIntent:    "OneView", // OneView or OneViewNoiLO for Managed
+		LicensingIntent:    "OneView",
 		ConfigurationState: "Managed",
-		InitialScopeUris:   []utils.Nstring{scp.URI},
 	}
-	_, err = c.client.AddRackServer(rackServer)
+	_, err := c.client.AddRackServer(rackServer)
+	if err != nil && strings.Contains(err.Error(), "has already been added") {
+		return nil
+	}
 	return err
 }
 
@@ -57,24 +55,40 @@ func (c *HPEClient) RemoveServer(hostname string, ip metalv1alpha1.IP) error {
 	if err != nil {
 		return err
 	}
-	return c.client.DeleteServerHardware(server.URI)
+	if err := c.client.DeleteServerHardware(server.URI); err != nil {
+		if strings.Contains(err.Error(), "has an active profile") {
+			return ErrServerHasActiveProfile
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *HPEClient) ListServers() ([]Device, error) {
-	filters := []string{""}
-	hpeServers, err := c.client.GetServerHardwareList(filters, "", "", "", "")
-	if err != nil {
-		return []Device{}, err
-	}
-	devices := make([]Device, 0, len(hpeServers.Members))
-	for _, srv := range hpeServers.Members {
-		device := Device{
-			// ID:       srv.UUID.String(),
-			Hostname: srv.Hostname,
-			Name:     srv.Name,
-			Model:    srv.Model,
+	var devices []Device
+	start := 0
+	pageSize := 100
+	for {
+		hpeServers, err := c.client.GetServerHardwareList([]string{""}, "", fmt.Sprintf("%d", start), fmt.Sprintf("%d", pageSize), "")
+		if err != nil {
+			return nil, err
 		}
-		devices = append(devices, device)
+		for _, srv := range hpeServers.Members {
+			devices = append(devices, Device{
+				Hostname: srv.Name,
+				Name:     srv.Name,
+				Model:    srv.Model,
+			})
+		}
+		// use Total if available, otherwise fall back to member count heuristic
+		if hpeServers.Total > 0 {
+			if len(devices) >= hpeServers.Total {
+				break
+			}
+		} else if len(hpeServers.Members) < pageSize {
+			break
+		}
+		start += pageSize
 	}
 	return devices, nil
 }
