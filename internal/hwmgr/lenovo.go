@@ -201,7 +201,7 @@ func (c *LenovoClient) ImportServerAsync(hostname string, IP metalv1alpha1.IP, b
 			ManagedAuthSupported: false,
 		},
 	}
-	payloadBytes, err := json.Marshal(discoveryPayload)
+	payloadBytes, err := json.Marshal([]ServerManageRequest{discoveryPayload})
 	if err != nil {
 		return "", fmt.Errorf("error marshalling discovery payload: %w", err)
 	}

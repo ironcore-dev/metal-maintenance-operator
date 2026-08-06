@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -70,7 +71,6 @@ type DiscoveryJobRequest struct {
 	TargetTypes        []TargetType `json:"TargetTypes"`
 	JobType            int          `json:"JobType"` // 1 for immediate discovery
 }
-
 
 // DiscoveryJob represents a single discovery job in OpenManage Enterprise.
 type DiscoveryJob struct {
@@ -268,7 +268,11 @@ func (c *DellClient) listAllServers() ([]Device, error) {
 			})
 		}
 		if page.NextLink != "" {
-			nextURL = c.client.parsedURL.Scheme + "://" + c.client.parsedURL.Host + page.NextLink
+			next, err := url.Parse(page.NextLink)
+			if err != nil || (next.Host != "" && next.Host != c.client.parsedURL.Host) {
+				break
+			}
+			nextURL = c.client.parsedURL.ResolveReference(next).String()
 		} else {
 			nextURL = ""
 		}
@@ -277,30 +281,7 @@ func (c *DellClient) listAllServers() ([]Device, error) {
 }
 
 func (c *DellClient) ListServers() ([]Device, error) {
-	serversURL := c.client.parsedURL.JoinPath("/api/DeviceService/Devices")
-
-	req, err := http.NewRequest("GET", serversURL.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("error creating get servers request: %w", err)
-	}
-	body, err := c.client.DoRequest(req, []int{http.StatusOK})
-	if err != nil {
-		return nil, fmt.Errorf("error executing get servers request: %w", err)
-	}
-	var devicesResp DevicesResponse
-	if err := json.Unmarshal(body, &devicesResp); err != nil {
-		return nil, fmt.Errorf("error parsing get servers response: %w", err)
-	}
-	devices := make([]Device, 0, len(devicesResp.Value))
-	for _, d := range devicesResp.Value {
-		devices = append(devices, Device{
-			ID:           d.ID,
-			Hostname:     d.DeviceName,
-			Model:        d.Model,
-			HealthStatus: d.HealthStatus,
-		})
-	}
-	return devices, nil
+	return c.listAllServers()
 }
 
 func (c *DellClient) GetAuthToken() (string, error) {
