@@ -88,21 +88,25 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		return fmt.Errorf("init test-event sink: %w", err)
 	}
 
+	// Register the Server-by-BMCRef index unconditionally: the subscription
+	// reconciler uses it to look up Server.status.manufacturer/model when
+	// BMC.status.manufacturer is empty (e.g. Dell BMCs).
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&metalv1alpha1.Server{},
+		criticalevent.BMCRefField,
+		func(obj client.Object) []string {
+			s := obj.(*metalv1alpha1.Server)
+			if s.Spec.BMCRef == nil {
+				return nil
+			}
+			return []string{s.Spec.BMCRef.Name}
+		},
+	); err != nil {
+		return fmt.Errorf("index Server by %s: %w", criticalevent.BMCRefField, err)
+	}
+
 	if opts.EnableCriticalEventHandler {
-		if err := mgr.GetFieldIndexer().IndexField(
-			context.Background(),
-			&metalv1alpha1.Server{},
-			criticalevent.BMCRefField,
-			func(obj client.Object) []string {
-				s := obj.(*metalv1alpha1.Server)
-				if s.Spec.BMCRef == nil {
-					return nil
-				}
-				return []string{s.Spec.BMCRef.Name}
-			},
-		); err != nil {
-			return fmt.Errorf("index Server by %s: %w", criticalevent.BMCRefField, err)
-		}
 		handler := &criticalevent.ConditionHandler{
 			Client: mgr.GetClient(),
 			Log:    ctrl.Log.WithName("telemetry").WithName("readiness"),

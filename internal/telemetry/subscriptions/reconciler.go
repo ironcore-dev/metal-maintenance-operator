@@ -41,7 +41,7 @@ const bmcSubscriptionFinalizer = "telemetry.metal.ironcore.dev/subscriptions"
 // subscriptions converged with the operator's policy. Implements
 // controller-runtime's reconcile.Reconciler.
 type BMCReconciler struct {
-	// Client is the controller-runtime client used to fetch BMCs.
+	// Client is the controller-runtime client used to fetch BMCs and Servers.
 	Client client.Client
 
 	// Config returns the live operator policy ConfigMap. Refreshed by
@@ -242,7 +242,7 @@ func (r *BMCReconciler) perBMCTimeout() time.Duration {
 }
 
 func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC) {
-	ref := bmcRefFromObject(bmc)
+	ref := r.bmcRefWithServerFallback(ctx, bmc)
 	cfg := r.Config()
 	wantSubscribed := SubscribeToBMC(ref, cfg)
 
@@ -525,6 +525,29 @@ func bmcRefFromObject(bmc *metalv1alpha1.BMC) BMCRef {
 		Model:           bmc.Status.Model,
 		FirmwareVersion: bmc.Status.FirmwareVersion,
 	}
+}
+
+// bmcRefWithServerFallback builds a BMCRef, preferring Server.status fields
+// for Vendor and Model when BMC.status.manufacturer is empty. Dell BMCs, for
+// example, do not populate BMC.status.manufacturer, whereas the associated
+// Server always has status.manufacturer and status.model set by metal-operator.
+func (r *BMCReconciler) bmcRefWithServerFallback(ctx context.Context, bmc *metalv1alpha1.BMC) BMCRef {
+	ref := bmcRefFromObject(bmc)
+	if ref.Vendor != "" {
+		return ref
+	}
+	serverList := &metalv1alpha1.ServerList{}
+	if err := r.Client.List(ctx, serverList, client.MatchingFields{"spec.bmcRef.name": bmc.Name}); err != nil {
+		r.Log.V(1).Info("Could not list Servers for BMC vendor/model lookup", "bmc", bmc.Name, "err", err.Error())
+		return ref
+	}
+	if len(serverList.Items) == 0 {
+		return ref
+	}
+	srv := serverList.Items[0]
+	ref.Vendor = srv.Status.Manufacturer
+	ref.Model = srv.Status.Model
+	return ref
 }
 
 // testEntry holds the correlation state for one in-flight SubmitTestEvent.
