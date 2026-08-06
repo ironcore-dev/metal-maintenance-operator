@@ -27,14 +27,12 @@ the lifecycle of a maintenance task, ensuring servers are properly taken offline
    stays in `Pending`. The `Server` also remains unchanged.
 4. If `policy` is `OwnerApproval` and the `metal.ironcore.dev/maintenance-approved: "true"` label is present, or if the policy is `Enforced`, the
    `metal-operator` transitions the `Server` into `Maintenance` and updates the `ServerMaintenance` state accordingly.
-5. The `ServerMaintenanceReconciler` creates a `ServerBootConfiguration` out of the `ServerMaintenance`'s
-   `ServerBootConfigurationTemplate` and applies it to the `Server`. The power state of the `Server` can be set by
-   providing the `ServerPower` field in the `ServerMaintenance` object.
-6. (optional) In case no `ServerBootConfigurationTemplate` is provided, the maintenance operator powers off the `Server`,
-   applies a `ServerBootConfiguration` (if needed), and performs the maintenance.
-7. Once the maintenance task is complete, the external operator **deletes** the `ServerMaintenance` resource.
-   The controller removes the finalizer, cleans up labels on the `Server` and `ServerClaim`, and releases the `Server`.
-8. The `metal-operator` transitions the `Server` back to its prior state. If additional `ServerMaintenance` objects are
+5. (optional) If `locatorLED` is set, the `ServerMaintenanceReconciler` sets the `Server`'s locator LED to the
+   requested state so the physical server can be identified in the data center.
+6. Once the maintenance task is complete, the external operator **deletes** the `ServerMaintenance` resource.
+   The controller removes the finalizer, clears the locator LED (if it was set), cleans up labels on the `Server` and
+   `ServerClaim`, and releases the `Server`.
+7. The `metal-operator` transitions the `Server` back to its prior state. If additional `ServerMaintenance` objects are
    pending, the next one is processed.
 
 ## Example
@@ -52,15 +50,7 @@ spec:
   policy: OwnerApproval
   serverRef:
     name: server-foo
-  serverPower: On # or Off
-  serverBootConfigurationTemplate:
-    name: bios-update-config
-    spec:
-      image: "bios-update-image"
-      serverRef:
-        name: server-foo
-      ignitionSecretRef:
-        name: bios-update-ignition
+  locatorLED: Lit # or Blinking/Off
 ```
 
 If `policy: OwnerApproval` and no `metal.ironcore.dev/maintenance-approved` label exists on the `ServerClaim`, this

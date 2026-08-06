@@ -4,10 +4,9 @@
 package v1alpha1
 
 import (
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
 const (
@@ -21,17 +20,6 @@ const (
 	ServerMaintenanceRequestedLabelKey = "metal.ironcore.dev/maintenance-requested"
 )
 
-// ServerBootConfigurationTemplate defines the parameters to be used for rendering a boot configuration.
-type ServerBootConfigurationTemplate struct {
-	// Name specifies the name of the boot configuration.
-	// +required
-	Name string `json:"name"`
-
-	// Spec specifies the boot configuration to be rendered.
-	// +required
-	Spec metalv1alpha1.ServerBootConfigurationSpec `json:"spec"`
-}
-
 // ServerMaintenanceSpec defines the desired state of a ServerMaintenance.
 type ServerMaintenanceSpec struct {
 	// Policy specifies the maintenance policy to be enforced on the server.
@@ -41,10 +29,6 @@ type ServerMaintenanceSpec struct {
 	// ServerRef is a reference to the server that is to be maintained.
 	// +required
 	ServerRef *corev1.LocalObjectReference `json:"serverRef"`
-
-	// ServerPower specifies the power state of the server during maintenance.
-	// +optional
-	ServerPower metalv1alpha1.Power `json:"serverPower,omitempty"`
 
 	// LocatorLED specifies the desired state of the server's locator LED during maintenance.
 	// When maintenance ends, the locator LED is turned off.
@@ -57,10 +41,6 @@ type ServerMaintenanceSpec struct {
 	// +kubebuilder:default=0
 	// +optional
 	Priority int32 `json:"priority,omitempty"`
-
-	// ServerBootConfigurationTemplate specifies the boot configuration to be applied to the server during maintenance.
-	// +optional
-	ServerBootConfigurationTemplate *ServerBootConfigurationTemplate `json:"serverBootConfigurationTemplate,omitempty"`
 }
 
 // ServerMaintenancePolicy specifies the maintenance policy to be enforced on the server.
@@ -96,7 +76,6 @@ const (
 // +kubebuilder:resource:shortName=sm
 // +kubebuilder:printcolumn:name="Server",type="string",JSONPath=".spec.serverRef.name"
 // +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=`.spec.policy`
-// +kubebuilder:printcolumn:name="BootConfiguration",type="string",JSONPath=`.spec.serverBootConfigurationTemplate.name`
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.metadata.annotations.metal\.ironcore\.dev\/maintenance-reason`
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="Priority",type="integer",JSONPath=`.spec.priority`

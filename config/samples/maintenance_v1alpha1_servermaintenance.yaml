@@ -10,4 +10,4 @@ spec:
     name: endpoint-sample-system-0
   policy: Enforced
   priority: 100
-  serverPower: "Off"
+  locatorLED: Lit

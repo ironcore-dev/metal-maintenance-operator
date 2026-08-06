@@ -23,9 +23,6 @@ spec:
     - jsonPath: .spec.policy
       name: Policy
       type: string
-    - jsonPath: .spec.serverBootConfigurationTemplate.name
-      name: BootConfiguration
-      type: string
     - jsonPath: .metadata.annotations.metal\.ironcore\.dev\/maintenance-reason
       name: Reason
       type: string
@@ -80,62 +77,6 @@ spec:
                   If omitted, priority is treated as 0.
                 format: int32
                 type: integer
-              serverBootConfigurationTemplate:
-                description: ServerBootConfigurationTemplate specifies the boot configuration
-                  to be applied to the server during maintenance.
-                properties:
-                  name:
-                    description: Name specifies the name of the boot configuration.
-                    type: string
-                  spec:
-                    description: Spec specifies the boot configuration to be rendered.
-                    properties:
-                      ignitionSecretRef:
-                        description: |-
-                          IgnitionSecretRef is a reference to the Secret object that contains
-                          the ignition configuration for the server.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                      image:
-                        description: Image specifies the boot image to be used for
-                          the server.
-                        type: string
-                      serverRef:
-                        description: ServerRef is a reference to the server for which
-                          this boot configuration is intended.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                    required:
-                    - serverRef
-                    type: object
-                required:
-                - name
-                - spec
-                type: object
-              serverPower:
-                description: ServerPower specifies the power state of the server during
-                  maintenance.
-                type: string
               serverRef:
                 description: ServerRef is a reference to the server that is to be
                   maintained.

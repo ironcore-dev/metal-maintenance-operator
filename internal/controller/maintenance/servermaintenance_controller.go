@@ -245,88 +245,27 @@ func shouldRunBefore(a, b *serverMaintenancev1alpha1.ServerMaintenance) bool {
 
 func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-	server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 
-	config, err := r.applyServerBootConfiguration(ctx, maintenance, server)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	log.V(1).Info("Applied ServerBootConfiguration for Server")
-
-	if config == nil {
-		if err := r.setAndPatchServerState(ctx, server, maintenance); err != nil {
-			return ctrl.Result{}, err
+	if maintenance.Spec.LocatorLED != "" {
+		server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return ctrl.Result{}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("failed to get Server: %w", err)
 		}
-		log.V(1).Info("Patched server power state", "Server", server.Name, "Power", maintenance.Spec.ServerPower)
-		return ctrl.Result{}, nil
-	}
-
-	if config.Status.State == metalv1alpha1.ServerBootConfigurationStatePending || config.Status.State == "" {
-		log.V(1).Info("ServerBootConfiguration is in Pending state", "Server", server.Name)
-		return ctrl.Result{}, nil
-	}
-
-	if config.Status.State == metalv1alpha1.ServerBootConfigurationStateError {
-		if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateFailed); err != nil || modified {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
-	if config.Status.State == metalv1alpha1.ServerBootConfigurationStateReady {
-		log.V(1).Info("Server maintenance boot configuration is ready", "Server", server.Name)
-		if err := r.setAndPatchServerState(ctx, server, maintenance); err != nil {
-			return ctrl.Result{}, err
+		if server.Spec.IndicatorLED != maintenance.Spec.LocatorLED {
+			serverBase := server.DeepCopy()
+			server.Spec.IndicatorLED = maintenance.Spec.LocatorLED
+			if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to patch LocatorLED on Server: %w", err)
+			}
+			log.V(1).Info("Set LocatorLED on Server", "Server", server.Name, "LocatorLED", maintenance.Spec.LocatorLED)
 		}
 	}
 
 	log.V(1).Info("Reconciled ServerMaintenance in InMaintenance state")
 	return ctrl.Result{}, nil
-}
-
-func (r *ServerMaintenanceReconciler) applyServerBootConfiguration(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) (*metalv1alpha1.ServerBootConfiguration, error) {
-	log := ctrl.LoggerFrom(ctx)
-	if maintenance.Spec.ServerBootConfigurationTemplate == nil {
-		log.V(1).Info("No ServerBootConfigurationTemplate specified")
-		return nil, nil
-	}
-
-	log.V(1).Info("Creating/Patching server maintenance boot configuration", "Server", server.Name)
-	config := &metalv1alpha1.ServerBootConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      maintenance.Name,
-			Namespace: maintenance.Namespace,
-		},
-	}
-	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, config, func() error {
-		config.Spec = maintenance.Spec.ServerBootConfigurationTemplate.Spec
-		return controllerutil.SetControllerReference(maintenance, config, r.Scheme)
-	})
-	if err != nil {
-		return config, fmt.Errorf("failed to create server boot configuration: %w", err)
-	}
-	log.V(1).Info("Created or patched Config", "Config", config.Name, "Operation", opResult)
-	serverBase := server.DeepCopy()
-	server.Spec.MaintenanceBootConfigurationRef = &metalv1alpha1.ObjectReference{
-		Namespace: config.Namespace,
-		Name:      config.Name,
-	}
-	if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-		return config, fmt.Errorf("failed to patch server maintenance boot configuration ref: %w", err)
-	}
-	return config, nil
-}
-
-func (r *ServerMaintenanceReconciler) setAndPatchServerState(ctx context.Context, server *metalv1alpha1.Server, maintenance *serverMaintenancev1alpha1.ServerMaintenance) error {
-	serverBase := server.DeepCopy()
-	server.Spec.Power = maintenance.Spec.ServerPower
-	if maintenance.Spec.LocatorLED != "" {
-		server.Spec.IndicatorLED = maintenance.Spec.LocatorLED
-	}
-	return r.Patch(ctx, server, client.MergeFrom(serverBase))
 }
 
 func (r *ServerMaintenanceReconciler) updateServerRef(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) error {
@@ -390,6 +329,15 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 	}
 
 	if ref := server.Spec.ServerMaintenanceRef; ref != nil && ref.Name == maintenance.Name && ref.Namespace == maintenance.Namespace {
+		if maintenance.Spec.LocatorLED != "" {
+			serverBase := server.DeepCopy()
+			server.Spec.IndicatorLED = metalv1alpha1.OffIndicatorLED
+			if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to clear LocatorLED on Server: %w", err)
+			}
+			log.V(1).Info("Cleared LocatorLED on Server", "Server", server.Name)
+		}
+
 		if maintenance.Spec.LocatorLED != "" {
 			serverBase := server.DeepCopy()
 			server.Spec.IndicatorLED = metalv1alpha1.OffIndicatorLED
