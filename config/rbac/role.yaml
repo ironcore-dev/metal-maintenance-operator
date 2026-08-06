@@ -25,10 +25,35 @@ rules:
   - update
   - watch
 - apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcs
-  - bmcsecrets
   verbs:
   - get
   - list
@@ -42,6 +67,7 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - bmcsecrets
   - serverclaims
   verbs:
   - create

@@ -25,4 +25,7 @@ resources:
 - console_admin_role.yaml
 - console_editor_role.yaml
 - console_viewer_role.yaml
+- bmcuser_admin_role.yaml
+- bmcuser_editor_role.yaml
+- bmcuser_viewer_role.yaml
 

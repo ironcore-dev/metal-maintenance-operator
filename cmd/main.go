@@ -8,6 +8,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/discovery"
@@ -34,12 +35,15 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
+	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -53,6 +57,7 @@ func init() {
 
 	utilruntime.Must(vendorconsolev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(baseboardv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -73,6 +78,10 @@ func main() {
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
+	var bmcProtocol string
+	var bmcSkipCertValidation bool
+	var bmcPowerPollingInterval time.Duration
+	var bmcPowerPollingTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -104,6 +113,14 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
+	flag.StringVar(&bmcProtocol, "bmc-protocol", "https",
+		"Default protocol used to talk to BMCs when a BMC resource does not pin one. One of 'http' or 'https'.")
+	flag.BoolVar(&bmcSkipCertValidation, "bmc-skip-cert-validation", false,
+		"Skip TLS certificate validation when talking to BMCs over HTTPS.")
+	flag.DurationVar(&bmcPowerPollingInterval, "bmc-power-polling-interval", 5*time.Second,
+		"Interval for polling BMC power state.")
+	flag.DurationVar(&bmcPowerPollingTimeout, "bmc-power-polling-timeout", 2*time.Minute,
+		"Timeout for polling BMC power state.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -174,6 +191,17 @@ func main() {
 				"Telemetry ConfigMap namespace resolution failed: neither --telemetry-config-namespace nor POD_NAMESPACE is set")
 			os.Exit(1)
 		}
+	}
+
+	var bmcProtocolScheme metalv1alpha1.ProtocolScheme
+	switch bmcProtocol {
+	case "http":
+		bmcProtocolScheme = metalv1alpha1.HTTPProtocolScheme
+	case "https":
+		bmcProtocolScheme = metalv1alpha1.HTTPSProtocolScheme
+	default:
+		setupLog.Error(nil, "Invalid --bmc-protocol value. Must be 'http' or 'https'", "bmc-protocol", bmcProtocol)
+		os.Exit(1)
 	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
@@ -328,6 +356,20 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerWiring controller")
+		os.Exit(1)
+	}
+	if err = (&baseboardctrl.BMCUserReconciler{
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		DefaultProtocol:    bmcProtocolScheme,
+		SkipCertValidation: bmcSkipCertValidation,
+		BMCOptions: bmc.Options{
+			BasicAuth:            true,
+			PowerPollingInterval: bmcPowerPollingInterval,
+			PowerPollingTimeout:  bmcPowerPollingTimeout,
+		},
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BMCUser controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

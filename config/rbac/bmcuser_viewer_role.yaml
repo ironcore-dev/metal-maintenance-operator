@@ -1,0 +1,29 @@
+# This rule is not used by the project metal-maintenance-operator itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to baseboard.metal.ironcore.dev resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bmcuser-viewer-role
+rules:
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers/status
+  verbs:
+  - get
