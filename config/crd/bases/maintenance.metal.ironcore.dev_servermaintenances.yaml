@@ -68,6 +68,9 @@ spec:
               policy:
                 description: Policy specifies the maintenance policy to be enforced
                   on the server.
+                enum:
+                - OwnerApproval
+                - Enforced
                 type: string
               priority:
                 default: 0
@@ -92,7 +95,11 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverRef.name must not be empty
+                  rule: self.name != ''
             required:
+            - policy
             - serverRef
             type: object
           status:

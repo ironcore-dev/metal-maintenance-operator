@@ -483,7 +483,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Deleting the first ServerMaintenance to release the server")
 		Expect(k8sClient.Delete(ctx, serverMaintenance01)).To(Succeed())
-		Eventually(Get(serverMaintenance01)).ShouldNot(Succeed())
+		Eventually(Get(serverMaintenance01)).Should(Satisfy(apierrors.IsNotFound))
 
 		By("Verifying the second maintenance can now proceed to InMaintenance")
 		Eventually(Object(serverMaintenance02)).Should(
@@ -492,7 +492,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Deleting the second ServerMaintenance")
 		Expect(k8sClient.Delete(ctx, serverMaintenance02)).To(Succeed())
-		Eventually(Get(serverMaintenance02)).ShouldNot(Succeed())
+		Eventually(Get(serverMaintenance02)).Should(Satisfy(apierrors.IsNotFound))
 	})
 
 	It("should keep server in Maintenance throughout all queued Enforced maintenances without state bounce", func(ctx SpecContext) {

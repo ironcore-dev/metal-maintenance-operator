@@ -23,11 +23,13 @@ const (
 // ServerMaintenanceSpec defines the desired state of a ServerMaintenance.
 type ServerMaintenanceSpec struct {
 	// Policy specifies the maintenance policy to be enforced on the server.
-	// +optional
-	Policy ServerMaintenancePolicy `json:"policy,omitempty"`
+	// +required
+	// +kubebuilder:validation:Enum=OwnerApproval;Enforced
+	Policy ServerMaintenancePolicy `json:"policy"`
 
 	// ServerRef is a reference to the server that is to be maintained.
 	// +required
+	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="serverRef.name must not be empty"
 	ServerRef *corev1.LocalObjectReference `json:"serverRef"`
 
 	// LocatorLED specifies the desired state of the server's locator LED during maintenance.
@@ -73,7 +75,7 @@ const (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=sm
+// +kubebuilder:resource:scope=Namespaced,shortName=sm
 // +kubebuilder:printcolumn:name="Server",type="string",JSONPath=".spec.serverRef.name"
 // +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=`.spec.policy`
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.metadata.annotations.metal\.ironcore\.dev\/maintenance-reason`

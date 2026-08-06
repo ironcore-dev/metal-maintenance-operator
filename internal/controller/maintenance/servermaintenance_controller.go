@@ -113,7 +113,7 @@ func (r *ServerMaintenanceReconciler) ensureServerMaintenanceStateTransition(ctx
 	case serverMaintenancev1alpha1.ServerMaintenanceStatePending:
 		return r.handlePendingState(ctx, maintenance)
 	case serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance:
-		return r.handleInMaintenanceState(ctx, maintenance)
+		return r.handleInMaintenanceState(ctx)
 	case serverMaintenancev1alpha1.ServerMaintenanceStateFailed:
 		return r.handleFailedState(ctx, maintenance)
 	default:
@@ -140,7 +140,7 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 	if server.Spec.ServerClaimRef == nil {
 		log.V(1).Info("Server has no ServerClaim, move to maintenance state right away", "Server", server.Name)
-		if err = r.updateServerRef(ctx, maintenance, server); err != nil {
+		if claimed, err := r.updateServerRef(ctx, maintenance, server); err != nil || !claimed {
 			return ctrl.Result{}, err
 		}
 		_, err = r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance)
@@ -174,7 +174,7 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 		if hasLabel {
 			log.V(1).Info("Server approved for maintenance", "Server", server.Name)
-			if err = r.updateServerRef(ctx, maintenance, server); err != nil {
+			if claimed, err := r.updateServerRef(ctx, maintenance, server); err != nil || !claimed {
 				return ctrl.Result{}, err
 			}
 			_, err = r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance)
@@ -186,7 +186,7 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 	if maintenance.Spec.Policy == serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced {
 		log.V(1).Info("Enforcing maintenance", "Server", server.Name)
-		if err := r.updateServerRef(ctx, maintenance, server); err != nil {
+		if claimed, err := r.updateServerRef(ctx, maintenance, server); err != nil || !claimed {
 			return ctrl.Result{}, err
 		}
 		if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance); err != nil || modified {
@@ -243,47 +243,50 @@ func shouldRunBefore(a, b *serverMaintenancev1alpha1.ServerMaintenance) bool {
 	return a.Name < b.Name
 }
 
-func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
+func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-
-	if maintenance.Spec.LocatorLED != "" {
-		server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return ctrl.Result{}, nil
-			}
-			return ctrl.Result{}, fmt.Errorf("failed to get Server: %w", err)
-		}
-		if server.Spec.IndicatorLED != maintenance.Spec.LocatorLED {
-			serverBase := server.DeepCopy()
-			server.Spec.IndicatorLED = maintenance.Spec.LocatorLED
-			if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to patch LocatorLED on Server: %w", err)
-			}
-			log.V(1).Info("Set LocatorLED on Server", "Server", server.Name, "LocatorLED", maintenance.Spec.LocatorLED)
-		}
-	}
 
 	log.V(1).Info("Reconciled ServerMaintenance in InMaintenance state")
 	return ctrl.Result{}, nil
 }
 
-func (r *ServerMaintenanceReconciler) updateServerRef(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) error {
+// updateServerRef claims the ServerMaintenanceRef on the given Server for maintenance.
+// It re-fetches the latest Server state to avoid acting on a stale copy, and returns whether
+// this ServerMaintenance owns (or successfully claimed) the ref. Callers must only transition
+// to InMaintenance when the returned bool is true.
+func (r *ServerMaintenanceReconciler) updateServerRef(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if server.Spec.ServerMaintenanceRef != nil {
-		log.V(1).Info("Server is already in Maintenance", "Server", server.Name, "Maintenance", server.Spec.ServerMaintenanceRef.Name)
-		return nil
+
+	latest := &metalv1alpha1.Server{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(server), latest); err != nil {
+		return false, fmt.Errorf("failed to get latest Server: %w", err)
 	}
-	server.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
+
+	if ref := latest.Spec.ServerMaintenanceRef; ref != nil {
+		*server = *latest
+		if ref.Name == maintenance.Name && ref.Namespace == maintenance.Namespace {
+			log.V(1).Info("Server is already in Maintenance", "Server", latest.Name, "Maintenance", ref.Name)
+			return true, nil
+		}
+		log.V(1).Info("Server is already claimed by another ServerMaintenance", "Server", latest.Name, "Maintenance", ref.Name)
+		return false, nil
+	}
+
+	latest.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
 		Namespace: maintenance.Namespace,
 		Name:      maintenance.Name,
 	}
 	// use update to not overwrite ServerMaintenanceRef if another maintenance was quicker
-	if err := r.Update(ctx, server); err != nil {
-		return fmt.Errorf("failed to patch maintenance ref for server: %w", err)
+	if err := r.Update(ctx, latest); err != nil {
+		if apierrors.IsConflict(err) {
+			log.V(1).Info("Conflict while claiming Server, will retry", "Server", latest.Name)
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to patch maintenance ref for server: %w", err)
 	}
-	log.V(1).Info("Updated ServerMaintenance reference on Server", "Server", server.Name)
-	return nil
+	*server = *latest
+	log.V(1).Info("Updated ServerMaintenance reference on Server", "Server", latest.Name)
+	return true, nil
 }
 
 func (r *ServerMaintenanceReconciler) handleFailedState(ctx context.Context, _ *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
@@ -329,24 +332,6 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 	}
 
 	if ref := server.Spec.ServerMaintenanceRef; ref != nil && ref.Name == maintenance.Name && ref.Namespace == maintenance.Namespace {
-		if maintenance.Spec.LocatorLED != "" {
-			serverBase := server.DeepCopy()
-			server.Spec.IndicatorLED = metalv1alpha1.OffIndicatorLED
-			if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("failed to clear LocatorLED on Server: %w", err)
-			}
-			log.V(1).Info("Cleared LocatorLED on Server", "Server", server.Name)
-		}
-
-		if maintenance.Spec.LocatorLED != "" {
-			serverBase := server.DeepCopy()
-			server.Spec.IndicatorLED = metalv1alpha1.OffIndicatorLED
-			if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("failed to clear LocatorLED on Server: %w", err)
-			}
-			log.V(1).Info("Cleared LocatorLED on Server", "Server", server.Name)
-		}
-
 		if err := r.removeMaintenanceRefFromServer(ctx, server); err != nil {
 			return fmt.Errorf("failed to remove ServerMaintenance ref from Server: %w", err)
 		}
