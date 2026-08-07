@@ -49,8 +49,7 @@ type Options struct {
 	SubscriberID string
 
 	// EnableCriticalEventHandler turns on the Critical-event → Server
-	// condition writer: registers a Server field indexer on
-	// spec.bmcRef.name.
+	// condition writer
 	EnableCriticalEventHandler bool
 }
 
