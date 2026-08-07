@@ -179,7 +179,7 @@ func (r *BMCUserReconciler) handleRotatingPassword(ctx context.Context, user *ba
 		}
 	}
 	if user.Status.PasswordExpiration != nil {
-		if user.Status.PasswordExpiration.Time.Before(metav1.Now().Time) {
+		if user.Status.PasswordExpiration.Before(&metav1.Time{Time: time.Now()}) {
 			log.V(1).Info("BMC user password has expired, rotating password")
 			forceRotation = true
 		}
@@ -190,10 +190,10 @@ func (r *BMCUserReconciler) handleRotatingPassword(ctx context.Context, user *ba
 	}
 	if user.Spec.RotationPeriod != nil &&
 		user.Status.LastRotation != nil &&
-		user.Status.LastRotation.Time.Add(user.Spec.RotationPeriod.Duration).After(time.Now()) &&
+		user.Status.LastRotation.Add(user.Spec.RotationPeriod.Duration).After(time.Now()) &&
 		!forceRotation {
 		log.V(1).Info("BMC user password rotation is not needed yet")
-		remaining := time.Until(user.Status.LastRotation.Time.Add(user.Spec.RotationPeriod.Duration))
+		remaining := time.Until(user.Status.LastRotation.Add(user.Spec.RotationPeriod.Duration))
 		return ctrl.Result{RequeueAfter: remaining}, nil
 	}
 	log.V(1).Info("Rotating BMC user password")
