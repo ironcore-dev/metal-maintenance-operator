@@ -28,6 +28,7 @@ rules:
   - baseboard.metal.ironcore.dev
   resources:
   - bmcusers
+  - bmcusersets
   verbs:
   - create
   - delete
@@ -40,12 +41,14 @@ rules:
   - baseboard.metal.ironcore.dev
   resources:
   - bmcusers/finalizers
+  - bmcusersets/finalizers
   verbs:
   - update
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
   - bmcusers/status
+  - bmcusersets/status
   verbs:
   - get
   - patch
