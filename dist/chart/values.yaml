@@ -62,17 +62,17 @@ manager:
       cpu: 10m
       memory: 64Mi
 
-  ## Container ports exposed on the manager Pod.
+  ## Additional environment variables for the manager container.
   ##
-  ## The event-receiver port is listed by default so a Service targeting
-  ## :9092 routes the moment --enable-telemetry is on; remove or override
-  ## if you don't run the telemetry pipeline at all. Each entry follows
-  ## the Kubernetes ContainerPort schema.
+  ## POD_NAMESPACE is always injected so the telemetry pipeline and
+  ## leader-election can locate their ConfigMap in-cluster without
+  ## requiring explicit flag overrides.
   ##
-  ports:
-    - name: events
-      containerPort: 9092
-      protocol: TCP
+  env:
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
 
   ## Manager pod's affinity
   ##

@@ -114,10 +114,7 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
         name: manager
-        ports:
-        - containerPort: 9092
-          name: events
-          protocol: TCP
+        ports: []
         readinessProbe:
           httpGet:
             path: /readyz
