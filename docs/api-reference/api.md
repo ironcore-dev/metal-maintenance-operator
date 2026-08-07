@@ -1,8 +1,108 @@
 # API Reference
 
 ## Packages
+- [maintenance.metal.ironcore.dev/v1alpha1](#maintenancemetalironcoredevv1alpha1)
 - [readiness.metal.ironcore.dev/v1alpha1](#readinessmetalironcoredevv1alpha1)
 - [vendorconsole.metal.ironcore.dev/v1alpha1](#vendorconsolemetalironcoredevv1alpha1)
+
+
+## maintenance.metal.ironcore.dev/v1alpha1
+
+Package v1alpha1 contains API Schema definitions for the maintenance.metal.ironcore.dev v1alpha1 API group.
+
+### Resource Types
+- [ServerMaintenance](#servermaintenance)
+
+
+
+#### ServerMaintenance
+
+
+
+ServerMaintenance is the Schema for the ServerMaintenance API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `maintenance.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `ServerMaintenance` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[ServerMaintenanceSpec](#servermaintenancespec)_ |  |  |  |
+| `status` _[ServerMaintenanceStatus](#servermaintenancestatus)_ |  |  |  |
+
+
+#### ServerMaintenancePolicy
+
+_Underlying type:_ _string_
+
+ServerMaintenancePolicy specifies the maintenance policy to be enforced on the server.
+
+
+
+_Appears in:_
+- [ServerMaintenanceSpec](#servermaintenancespec)
+
+| Field | Description |
+| --- | --- |
+| `OwnerApproval` | ServerMaintenancePolicyOwnerApproval specifies that the maintenance policy requires owner approval.<br /> |
+| `Enforced` | ServerMaintenancePolicyEnforced specifies that the maintenance policy is enforced.<br /> |
+
+
+#### ServerMaintenanceSpec
+
+
+
+ServerMaintenanceSpec defines the desired state of a ServerMaintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenance](#servermaintenance)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `policy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | Policy specifies the maintenance policy to be enforced on the server. |  | Enum: [OwnerApproval Enforced] <br /> |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to the server that is to be maintained. |  |  |
+| `locatorLED` _[IndicatorLED](https://github.com/ironcore-dev/metal-operator/blob/main/docs/api-reference/api.md#indicatorled)_ | LocatorLED specifies the desired state of the server's locator LED during maintenance.<br />When maintenance ends, the locator LED is turned off. |  |  |
+| `priority` _integer_ | Priority determines ordering when multiple ServerMaintenance resources target the same server.<br />Higher values are processed first. If priorities are equal, older resources are processed first.<br />If omitted, priority is treated as 0. | 0 |  |
+
+
+#### ServerMaintenanceState
+
+_Underlying type:_ _string_
+
+ServerMaintenanceState specifies the current state of the server maintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenanceStatus](#servermaintenancestatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | ServerMaintenanceStatePending specifies that the server maintenance is pending.<br /> |
+| `InMaintenance` | ServerMaintenanceStateInMaintenance specifies that the server is in maintenance.<br /> |
+| `Failed` | ServerMaintenanceStateFailed specifies that the server maintenance has failed.<br /> |
+
+
+#### ServerMaintenanceStatus
+
+
+
+ServerMaintenanceStatus defines the observed state of a ServerMaintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenance](#servermaintenance)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[ServerMaintenanceState](#servermaintenancestate)_ | State specifies the current state of the server maintenance. |  |  |
+
 
 
 ## readiness.metal.ironcore.dev/v1alpha1
@@ -165,6 +265,23 @@ Console is the Schema for the consoles API.
 | `status` _[ConsoleStatus](#consolestatus)_ |  |  |  |
 
 
+#### ConsoleConnection
+
+
+
+ConsoleConnection describes how to reach the server management console.
+
+
+
+_Appears in:_
+- [ConsoleSpec](#consolespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `url` _string_ | URL is the URL of the server management console. |  |  |
+| `insecureSkipTLSVerify` _boolean_ | InsecureSkipTLSVerify disables TLS certificate verification when<br />communicating with the management console. This should only be used for<br />consoles that present self-signed or otherwise untrusted certificates. | false |  |
+
+
 #### ConsoleSpec
 
 
@@ -179,7 +296,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
-| `consoleURL` _string_ | ConsoleURL is the URL of the server management console. |  |  |
+| `connection` _[ConsoleConnection](#consoleconnection)_ | Connection contains the console endpoint and transport-security settings. |  |  |
 | `manufacturer` _[Manufacturer](#manufacturer)_ | Manufacturer is the manufacturer of the server management console (e.g., "Dell", "HPE", "Lenovo"). |  |  |
 | `bmcCredentialSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCCredentialSecretRef references the secret containing BMC credentials. |  |  |
 

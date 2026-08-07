@@ -25,6 +25,32 @@ rules:
   - update
   - watch
 - apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcs
@@ -42,6 +68,7 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - serverbootconfigurations
   - serverclaims
   verbs:
   - create

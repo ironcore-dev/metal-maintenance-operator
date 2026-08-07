@@ -13,6 +13,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
@@ -23,9 +31,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - consoles
+  - servermaintenances
   verbs:
   - create
   - delete
@@ -35,15 +43,15 @@ rules:
   - update
   - watch
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - consoles/finalizers
+  - servermaintenances/finalizers
   verbs:
   - update
 - apiGroups:
-  - vendorconsole.metal.ironcore.dev
+  - maintenance.metal.ironcore.dev
   resources:
-  - consoles/status
+  - servermaintenances/status
   verbs:
   - get
   - patch
@@ -60,8 +68,17 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - servers
+  - bmcs/finalizers
   verbs:
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - serverbootconfigurations
+  - serverclaims
+  verbs:
+  - create
+  - delete
   - get
   - list
   - patch
@@ -70,10 +87,8 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - serverclaims
+  - servers
   verbs:
-  - create
-  - delete
   - get
   - list
   - patch
@@ -109,6 +124,32 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - vendorconsole.metal.ironcore.dev
+  resources:
+  - consoles/status
   verbs:
   - get
   - patch
