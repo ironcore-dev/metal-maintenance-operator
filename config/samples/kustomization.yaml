@@ -3,4 +3,5 @@ resources:
 - vendorconsole_v1alpha1_console.yaml
 - readiness_v1alpha1_serverwiring.yaml
 - baseboard_v1alpha1_bmcuser.yaml
+- baseboard_v1alpha1_bmcuserset.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

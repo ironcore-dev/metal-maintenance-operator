@@ -28,4 +28,7 @@ resources:
 - bmcuser_admin_role.yaml
 - bmcuser_editor_role.yaml
 - bmcuser_viewer_role.yaml
+- bmcuserset_admin_role.yaml
+- bmcuserset_editor_role.yaml
+- bmcuserset_viewer_role.yaml
 

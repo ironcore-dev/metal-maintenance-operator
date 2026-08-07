@@ -372,6 +372,13 @@ func main() {
 		setupLog.Error(err, "Unable to create BMCUser controller")
 		os.Exit(1)
 	}
+	if err = (&baseboardctrl.BMCUserSetReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BMCUserSet controller")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if enableTelemetry {
