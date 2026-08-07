@@ -45,11 +45,15 @@ type BMCUserStatus struct {
 
 	// ID is the identifier of the user in the BMC system.
 	ID string `json:"id,omitempty"`
+
+	// Conditions reflects the current state of the BMCUser.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=bmcu
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="ID",type=string,JSONPath=`.status.id`
 // +kubebuilder:printcolumn:name="UserName",type=string,JSONPath=`.spec.userName`
 // +kubebuilder:printcolumn:name="RoleID",type=string,JSONPath=`.spec.roleID`

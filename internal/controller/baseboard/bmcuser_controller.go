@@ -12,9 +12,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
@@ -26,7 +29,19 @@ import (
 
 const (
 	bmcUserFinalizer = "baseboard.metal.ironcore.dev/bmcuser"
+	// defaultPasswordLength is used when the BMC's AccountService does not report
+	// a MaxPasswordLength (i.e. the field is zero).
+	defaultPasswordLength = 20
 )
+
+// passwordLength returns maxLen as int, falling back to defaultPasswordLength
+// when the BMC firmware omits the field (value is zero).
+func passwordLength(maxLen uint) int {
+	if maxLen == 0 {
+		return defaultPasswordLength
+	}
+	return int(maxLen)
+}
 
 // BMCUserReconciler reconciles a BMCUser object
 type BMCUserReconciler struct {
@@ -40,6 +55,7 @@ type BMCUserReconciler struct {
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/finalizers,verbs=update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -177,14 +193,15 @@ func (r *BMCUserReconciler) handleRotatingPassword(ctx context.Context, user *ba
 		user.Status.LastRotation.Time.Add(user.Spec.RotationPeriod.Duration).After(time.Now()) &&
 		!forceRotation {
 		log.V(1).Info("BMC user password rotation is not needed yet")
-		return ctrl.Result{RequeueAfter: user.Spec.RotationPeriod.Duration}, nil
+		remaining := time.Until(user.Status.LastRotation.Time.Add(user.Spec.RotationPeriod.Duration))
+		return ctrl.Result{RequeueAfter: remaining}, nil
 	}
 	log.V(1).Info("Rotating BMC user password")
 	accountService, err := bmcClient.GetAccountService()
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
 	}
-	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), int(accountService.MaxPasswordLength))
+	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), passwordLength(accountService.MaxPasswordLength))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to generate new password for BMC user %s: %w", user.Name, err)
 	}
@@ -216,7 +233,7 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	if err != nil {
 		return fmt.Errorf("failed to get account service: %w", err)
 	}
-	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), int(accountService.MaxPasswordLength))
+	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), passwordLength(accountService.MaxPasswordLength))
 	if err != nil {
 		return fmt.Errorf("failed to generate new password for BMC account %s: %w", user.Name, err)
 	}
@@ -256,16 +273,13 @@ func (r *BMCUserReconciler) createBMCSecretForUser(ctx context.Context, user *ba
 		},
 		Immutable: new(true),
 	}
-	op, err := controllerutil.CreateOrPatch(ctx, r.Client, secret, func() error {
-		if err := controllerutil.SetControllerReference(user, secret, r.Scheme); err != nil {
-			return fmt.Errorf("failed to set controller reference for BMCSecret: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create or patch BMCSecret: %w", err)
+	if err := controllerutil.SetControllerReference(user, secret, r.Scheme); err != nil {
+		return nil, fmt.Errorf("failed to set controller reference for BMCSecret: %w", err)
 	}
-	log.V(1).Info("BMCSecret created or patched", "BMCSecret", secret.Name, "Operation", op)
+	if err := r.Create(ctx, secret); err != nil {
+		return nil, fmt.Errorf("failed to create BMCSecret: %w", err)
+	}
+	log.V(1).Info("BMCSecret created", "BMCSecret", secret.Name)
 	return secret, nil
 }
 
@@ -425,6 +439,25 @@ func (r *BMCUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&baseboardv1alpha1.BMCUser{}).
 		Owns(&metalv1alpha1.BMCSecret{}).
+		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.findBMCUsersForBMC)).
 		Named("bmcuser").
 		Complete(r)
+}
+
+// findBMCUsersForBMC enqueues all BMCUser objects whose Spec.BMCRef.Name matches
+// the name of the changed BMC, so address or protocol changes trigger reconciliation.
+func (r *BMCUserReconciler) findBMCUsersForBMC(ctx context.Context, obj client.Object) []reconcile.Request {
+	userList := &baseboardv1alpha1.BMCUserList{}
+	if err := r.List(ctx, userList); err != nil {
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, u := range userList.Items {
+		if u.Spec.BMCRef != nil && u.Spec.BMCRef.Name == obj.GetName() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: u.Name},
+			})
+		}
+	}
+	return requests
 }
