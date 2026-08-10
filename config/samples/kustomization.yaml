@@ -3,4 +3,12 @@ resources:
 - vendorconsole_v1alpha1_console.yaml
 - readiness_v1alpha1_serverwiring.yaml
 - maintenance_v1alpha1_servermaintenance.yaml
+- baseboard_v1alpha1_bmcsettings.yaml
+- baseboard_v1alpha1_bmcsettingsset.yaml
+- baseboard_v1alpha1_bmcversion.yaml
+- baseboard_v1alpha1_bmcversionset.yaml
+- system_v1alpha1_biossettings.yaml
+- system_v1alpha1_biossettingsset.yaml
+- system_v1alpha1_biosversion.yaml
+- system_v1alpha1_biosversionset.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

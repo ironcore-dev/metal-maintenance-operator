@@ -38,15 +38,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
-	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
-	bmcmaintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/bmcmaintenance"
+	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
-	servermaintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/servermaintenance"
+	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	maintenancewebhook "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -65,8 +65,8 @@ func init() {
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
-	utilruntime.Must(bmcmaintenancev1alpha1.AddToScheme(scheme))
-	utilruntime.Must(servermaintenancev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(baseboardv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(systemv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -91,6 +91,7 @@ func main() {
 	var skipCertValidation bool
 	var resyncInterval time.Duration
 	var biosSettingsTimeoutExpiry time.Duration
+	var rebootTimeoutExpiry time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -135,6 +136,8 @@ func main() {
 		"Number of automatic retries before a maintenance task is marked failed.")
 	flag.DurationVar(&biosSettingsTimeoutExpiry, "bios-settings-timeout-expiry", 30*time.Minute,
 		"Timeout for BIOS settings application before the task is considered expired.")
+	flag.DurationVar(&rebootTimeoutExpiry, "reboot-timeout-expiry", 10*time.Minute,
+		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -395,7 +398,7 @@ func main() {
 	}
 	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
 
-	if err = (&bmcmaintenancectrl.BMCSettingsReconciler{
+	if err = (&baseboardctrl.BMCSettingsReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
 		DefaultProtocol:             protocol,
@@ -410,7 +413,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&bmcmaintenancectrl.BMCVersionReconciler{
+	if err = (&baseboardctrl.BMCVersionReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
 		DefaultProtocol:             protocol,
@@ -425,7 +428,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&bmcmaintenancectrl.BMCSettingsSetReconciler{
+	if err = (&baseboardctrl.BMCSettingsSetReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ResyncInterval: resyncInterval,
@@ -434,7 +437,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&bmcmaintenancectrl.BMCVersionSetReconciler{
+	if err = (&baseboardctrl.BMCVersionSetReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ResyncInterval: resyncInterval,
@@ -443,15 +446,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&servermaintenancectrl.ServerMaintenanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create ServerMaintenance controller")
-		os.Exit(1)
-	}
-
-	if err = (&servermaintenancectrl.BIOSSettingsReconciler{
+	if err = (&systemctrl.BIOSSettingsReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
 		DefaultProtocol:             protocol,
@@ -462,12 +457,13 @@ func main() {
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		TimeoutExpiry:               biosSettingsTimeoutExpiry,
+		RebootTimeoutExpiry:         rebootTimeoutExpiry,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BIOSSettings controller")
 		os.Exit(1)
 	}
 
-	if err = (&servermaintenancectrl.BIOSVersionReconciler{
+	if err = (&systemctrl.BIOSVersionReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
 		DefaultProtocol:             protocol,
@@ -477,12 +473,13 @@ func main() {
 		Conditions:                  accessor,
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		RebootTimeoutExpiry:         rebootTimeoutExpiry,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BIOSVersion controller")
 		os.Exit(1)
 	}
 
-	if err = (&servermaintenancectrl.BIOSSettingsSetReconciler{
+	if err = (&systemctrl.BIOSSettingsSetReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ResyncInterval: resyncInterval,
@@ -491,7 +488,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&servermaintenancectrl.BIOSVersionSetReconciler{
+	if err = (&systemctrl.BIOSVersionSetReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		ResyncInterval: resyncInterval,

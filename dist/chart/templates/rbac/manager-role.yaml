@@ -31,6 +31,53 @@ rules:
   - update
   - watch
 - apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcsettings
+  - bmcsettingssets
+  - bmcversions
+  - bmcversionsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcsettings/finalizers
+  - bmcsettingssets/finalizers
+  - bmcversions/finalizers
+  - bmcversionsets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcsettings/status
+  - bmcsettingssets/status
+  - bmcversions/status
+  - bmcversionsets/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
   - servermaintenances
@@ -60,10 +107,10 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcs
-  - bmcsecrets
   verbs:
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - metal.ironcore.dev
@@ -71,6 +118,14 @@ rules:
   - bmcs/finalizers
   verbs:
   - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - bmcsecrets
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - metal.ironcore.dev
   resources:
@@ -124,6 +179,41 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings
+  - biossettingssets
+  - biosversions
+  - biosversionsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings/finalizers
+  - biossettingssets/finalizers
+  - biosversions/finalizers
+  - biosversionsets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings/status
+  - biossettingssets/status
+  - biosversions/status
+  - biosversionsets/status
   verbs:
   - get
   - patch

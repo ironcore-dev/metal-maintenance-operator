@@ -12,8 +12,8 @@
 // creates them, mirroring metal-operator's BMCReconciler.discoverServers), and cleans up
 // the Server objects it created when the owning BMC is deleted.
 //
-// It is imported by both internal/controller/bmcmaintenance and
-// internal/controller/servermaintenance test suites so BMC/Server simulation stays
+// It is imported by both internal/controller/baseboard and
+// internal/controller/system test suites so BMC/Server simulation stays
 // consistent across both packages, while every other controller under test is the real,
 // production reconciler from this repository.
 //
@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -425,7 +425,7 @@ func (r *ServerReconciler) syncMaintenanceState(ctx context.Context, server *met
 // this server would still require it to be in Maintenance: either an Enforced
 // policy, or an OwnerApproval policy whose ServerClaim has been approved.
 func (r *ServerReconciler) hasPendingMaintenance(ctx context.Context, serverName string) (bool, error) {
-	maintenanceList := &servermaintenancev1alpha1.ServerMaintenanceList{}
+	maintenanceList := &maintenancev1alpha1.ServerMaintenanceList{}
 	if err := r.List(ctx, maintenanceList, client.MatchingFields{constants.ServerRefField: serverName}); err != nil {
 		return false, err
 	}
@@ -435,9 +435,9 @@ func (r *ServerReconciler) hasPendingMaintenance(ctx context.Context, serverName
 			continue
 		}
 		switch m.Spec.Policy {
-		case servermaintenancev1alpha1.ServerMaintenancePolicyEnforced:
+		case maintenancev1alpha1.ServerMaintenancePolicyEnforced:
 			return true, nil
-		case servermaintenancev1alpha1.ServerMaintenancePolicyOwnerApproval:
+		case maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval:
 			approved, err := r.claimApproved(ctx, serverName)
 			if err != nil {
 				return false, err
@@ -467,7 +467,7 @@ func (r *ServerReconciler) claimApproved(ctx context.Context, serverName string)
 		}
 		return false, err
 	}
-	_, ok := claim.Labels[servermaintenancev1alpha1.ServerMaintenanceApprovedLabelKey]
+	_, ok := claim.Labels[maintenancev1alpha1.ServerMaintenanceApprovedLabelKey]
 	return ok, nil
 }
 

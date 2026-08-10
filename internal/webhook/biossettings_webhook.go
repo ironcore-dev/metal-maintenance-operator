@@ -15,7 +15,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -25,14 +25,14 @@ var settingsLog = logf.Log.WithName("biossettings-resource")
 
 // SetupBIOSSettingsWebhookWithManager registers the webhook for BIOSSettings in the manager.
 func SetupBIOSSettingsWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &servermaintenancev1alpha1.BIOSSettings{}).
+	return ctrl.NewWebhookManagedBy(mgr, &systemv1alpha1.BIOSSettings{}).
 		WithValidator(&BIOSSettingsCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-servermaintenance-metal-ironcore-dev-v1alpha1-biossettings,mutating=false,failurePolicy=fail,sideEffects=None,groups=servermaintenance.metal.ironcore.dev,resources=biossettings,verbs=create;update;delete,versions=v1alpha1,name=vbiossettings-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-system-metal-ironcore-dev-v1alpha1-biossettings,mutating=false,failurePolicy=fail,sideEffects=None,groups=system.metal.ironcore.dev,resources=biossettings,verbs=create;update;delete,versions=v1alpha1,name=vbiossettings-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // BIOSSettingsCustomValidator struct is responsible for validating the BIOSSettings resource
 // when it is created, updated, or deleted.
@@ -41,10 +41,10 @@ type BIOSSettingsCustomValidator struct {
 }
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BIOSSettings.
-func (v *BIOSSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *servermaintenancev1alpha1.BIOSSettings) (admission.Warnings, error) {
+func (v *BIOSSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	settingsLog.Info("Validation for BIOSSettings upon creation", "name", obj.GetName())
 
-	settingsList := &servermaintenancev1alpha1.BIOSSettingsList{}
+	settingsList := &systemv1alpha1.BIOSSettingsList{}
 	if err := v.List(ctx, settingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BIOSSettings: %w", err)
 	}
@@ -53,7 +53,7 @@ func (v *BIOSSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *s
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type BIOSSettings.
-func (v *BIOSSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *servermaintenancev1alpha1.BIOSSettings) (admission.Warnings, error) {
+func (v *BIOSSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	settingsLog.Info("Validation for BIOSSettings upon update", "name", newObj.GetName())
 
 	// Block updates while the referenced ServerMaintenance is InMaintenance.
@@ -70,7 +70,7 @@ func (v *BIOSSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj
 		}
 	}
 
-	settingsList := &servermaintenancev1alpha1.BIOSSettingsList{}
+	settingsList := &systemv1alpha1.BIOSSettingsList{}
 	if err := v.List(ctx, settingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BIOSSettings: %w", err)
 	}
@@ -79,7 +79,7 @@ func (v *BIOSSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type BIOSSettings.
-func (v *BIOSSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *servermaintenancev1alpha1.BIOSSettings) (admission.Warnings, error) {
+func (v *BIOSSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	settingsLog.Info("Validation for BIOSSettings upon deletion", "name", obj.GetName())
 
 	// Block deletion while the referenced ServerMaintenance is InMaintenance.
@@ -96,7 +96,7 @@ func (v *BIOSSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *s
 	return nil, nil
 }
 
-func checkForDuplicateBIOSSettingsRefToServer(settingsList *servermaintenancev1alpha1.BIOSSettingsList, settings *servermaintenancev1alpha1.BIOSSettings) (admission.Warnings, error) {
+func checkForDuplicateBIOSSettingsRefToServer(settingsList *systemv1alpha1.BIOSSettingsList, settings *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	for _, bs := range settingsList.Items {
 		if settings.Name == bs.Name {
 			continue

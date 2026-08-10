@@ -1,0 +1,19 @@
+apiVersion: system.metal.ironcore.dev/v1alpha1
+kind: BIOSSettingsSet
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: biossettingsset-sample
+spec:
+  serverSelector:
+    matchLabels:
+      metal.ironcore.dev/vendor: dell
+  biosSettingsTemplate:
+    version: P79 v1.45 (12/06/2017)
+    serverMaintenancePolicy: OwnerApproval
+    settingsFlow:
+      - name: boot-settings
+        priority: 10
+        settings:
+          bootMode: "Uefi"

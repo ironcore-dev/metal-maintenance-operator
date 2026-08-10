@@ -11,29 +11,30 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
 var _ = Describe("BIOSVersion Webhook", func() {
 	var (
-		biosVersionV1 *servermaintenancev1alpha1.BIOSVersion
+		biosVersionV1 *systemv1alpha1.BIOSVersion
 		validator     BIOSVersionCustomValidator
 	)
 
 	BeforeEach(func() {
 		validator = BIOSVersionCustomValidator{Client: k8sClient}
 		By("Creating a BIOSVersion")
-		biosVersionV1 = &servermaintenancev1alpha1.BIOSVersion{
+		biosVersionV1 = &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
-				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
 					Image:                   api.ImageSpec{URI: "one"},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -43,20 +44,20 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	AfterEach(func() {
 		By("Deleting the BIOSVersion resources")
-		Expect(k8sClient.DeleteAllOf(ctx, &servermaintenancev1alpha1.BIOSVersion{})).To(Succeed())
+		Expect(k8sClient.DeleteAllOf(ctx, &systemv1alpha1.BIOSVersion{})).To(Succeed())
 	})
 
 	It("should deny creation if spec.serverRef is duplicate", func(ctx SpecContext) {
 		By("Creating another BIOSVersion with existing ServerRef")
-		biosVersionV2 := &servermaintenancev1alpha1.BIOSVersion{
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
-				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
 					Image:                   api.ImageSpec{URI: "two"},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -66,15 +67,15 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	It("should create if a spec.serverRef field is not a duplicate", func() {
 		By("Creating another BIOSVersion with different ServerRef")
-		biosVersionV2 := &servermaintenancev1alpha1.BIOSVersion{
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
-				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
 					Image:                   api.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -84,15 +85,15 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	It("should deny update if spec.serverRef is duplicate", func() {
 		By("Creating a BIOSVersion with different ServerRef")
-		biosVersionV2 := &servermaintenancev1alpha1.BIOSVersion{
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
-				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
 					Image:                   api.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -107,15 +108,15 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	It("should allow update if a different field is duplicate", func() {
 		By("Creating a BIOSVersion with different ServerRef")
-		biosVersionV2 := &servermaintenancev1alpha1.BIOSVersion{
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
-				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
 					Image:                   api.ImageSpec{URI: "two"},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -130,15 +131,15 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	It("should allow update if a ServerRef field is not a duplicate", func() {
 		By("Creating a BIOSVersion with different ServerRef")
-		biosVersionV2 := &servermaintenancev1alpha1.BIOSVersion{
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSVersionSpec{
-				BIOSVersionTemplate: servermaintenancev1alpha1.BIOSVersionTemplate{
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
 					Version:                 "P71 v1.45 (12/06/2017)",
 					Image:                   api.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -153,24 +154,24 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 	It("should not allow update when BIOSVersion is in progress, but should allow force update", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &servermaintenancev1alpha1.ServerMaintenance{
+		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
-				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Patching the BIOSVersion V1 to in-progress state")
 		Eventually(UpdateStatus(biosVersionV1, func() {
-			biosVersionV1.Status.State = servermaintenancev1alpha1.BIOSVersionStateInProgress
+			biosVersionV1.Status.State = systemv1alpha1.BIOSVersionStateInProgress
 		})).Should(Succeed())
 
 		By("Adding ServerMaintenance reference")
@@ -189,29 +190,29 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 		By("Patching the BIOSVersion V1 to Completed state")
 		Eventually(UpdateStatus(biosVersionV1, func() {
-			biosVersionV1.Status.State = servermaintenancev1alpha1.BIOSVersionStateCompleted
+			biosVersionV1.Status.State = systemv1alpha1.BIOSVersionStateCompleted
 		})).Should(Succeed())
 
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 	})
 
 	It("should refuse to delete while ServerMaintenance is active", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &servermaintenancev1alpha1.ServerMaintenance{
+		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
-				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Setting ServerMaintenanceRef on BIOSVersion V1")
@@ -224,7 +225,7 @@ var _ = Describe("BIOSVersion Webhook", func() {
 
 		By("Deactivating the ServerMaintenance")
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 
 		By("Validating deletion of BIOSVersion V1 should succeed once maintenance is inactive")

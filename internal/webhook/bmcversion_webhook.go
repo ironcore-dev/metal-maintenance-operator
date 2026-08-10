@@ -15,7 +15,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 )
 
@@ -24,12 +24,12 @@ var bmcversionlog = logf.Log.WithName("bmcversion-resource")
 
 // SetupBMCVersionWebhookWithManager registers the webhook for BMCVersion in the manager.
 func SetupBMCVersionWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &bmcmaintenancev1alpha1.BMCVersion{}).
+	return ctrl.NewWebhookManagedBy(mgr, &baseboardv1alpha1.BMCVersion{}).
 		WithValidator(&BMCVersionCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-bmcmaintenance-metal-ironcore-dev-v1alpha1-bmcversion,mutating=false,failurePolicy=fail,sideEffects=None,groups=bmcmaintenance.metal.ironcore.dev,resources=bmcversions,verbs=create;update;delete,versions=v1alpha1,name=vbmcversion-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-baseboard-metal-ironcore-dev-v1alpha1-bmcversion,mutating=false,failurePolicy=fail,sideEffects=None,groups=baseboard.metal.ironcore.dev,resources=bmcversions,verbs=create;update;delete,versions=v1alpha1,name=vbmcversion-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // BMCVersionCustomValidator struct is responsible for validating the BMCVersion resource
 // when it is created, updated, or deleted.
@@ -41,9 +41,9 @@ type BMCVersionCustomValidator struct {
 }
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BMCVersion.
-func (v *BMCVersionCustomValidator) ValidateCreate(ctx context.Context, obj *bmcmaintenancev1alpha1.BMCVersion) (admission.Warnings, error) {
+func (v *BMCVersionCustomValidator) ValidateCreate(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon creation", "name", obj.GetName())
-	bmcVersionList := &bmcmaintenancev1alpha1.BMCVersionList{}
+	bmcVersionList := &baseboardv1alpha1.BMCVersionList{}
 	if err := v.Client.List(ctx, bmcVersionList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCVersions: %w", err)
 	}
@@ -51,7 +51,7 @@ func (v *BMCVersionCustomValidator) ValidateCreate(ctx context.Context, obj *bmc
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type BMCVersion.
-func (v *BMCVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *bmcmaintenancev1alpha1.BMCVersion) (admission.Warnings, error) {
+func (v *BMCVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon update", "name", newObj.GetName())
 
 	// Block updates while any referenced ServerMaintenance is InMaintenance.
@@ -68,7 +68,7 @@ func (v *BMCVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, 
 		}
 	}
 
-	bmcVersionList := &bmcmaintenancev1alpha1.BMCVersionList{}
+	bmcVersionList := &baseboardv1alpha1.BMCVersionList{}
 	if err := v.Client.List(ctx, bmcVersionList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCVersions: %w", err)
 	}
@@ -77,7 +77,7 @@ func (v *BMCVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, 
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type BMCVersion.
-func (v *BMCVersionCustomValidator) ValidateDelete(ctx context.Context, obj *bmcmaintenancev1alpha1.BMCVersion) (admission.Warnings, error) {
+func (v *BMCVersionCustomValidator) ValidateDelete(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon deletion", "name", obj.GetName())
 
 	// Block deletion while any referenced ServerMaintenance is InMaintenance.
@@ -94,7 +94,7 @@ func (v *BMCVersionCustomValidator) ValidateDelete(ctx context.Context, obj *bmc
 	return nil, nil
 }
 
-func checkForDuplicateBMCVersionsRefToBMC(versionList *bmcmaintenancev1alpha1.BMCVersionList, version *bmcmaintenancev1alpha1.BMCVersion) (admission.Warnings, error) {
+func checkForDuplicateBMCVersionsRefToBMC(versionList *baseboardv1alpha1.BMCVersionList, version *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	for _, v := range versionList.Items {
 		if version.Name == v.Name {
 			continue

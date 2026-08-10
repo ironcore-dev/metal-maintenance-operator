@@ -10,12 +10,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-servermaintenance-metal-ironcore-dev-v1alpha1-biossettings
+      path: /validate-system-metal-ironcore-dev-v1alpha1-biossettings
   failurePolicy: Fail
   name: vbiossettings-v1alpha1.kb.io
   rules:
   - apiGroups:
-    - servermaintenance.metal.ironcore.dev
+    - system.metal.ironcore.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -31,12 +31,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-servermaintenance-metal-ironcore-dev-v1alpha1-biosversion
+      path: /validate-system-metal-ironcore-dev-v1alpha1-biosversion
   failurePolicy: Fail
   name: vbiosversion-v1alpha1.kb.io
   rules:
   - apiGroups:
-    - servermaintenance.metal.ironcore.dev
+    - system.metal.ironcore.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -52,12 +52,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-bmcmaintenance-metal-ironcore-dev-v1alpha1-bmcsettings
+      path: /validate-baseboard-metal-ironcore-dev-v1alpha1-bmcsettings
   failurePolicy: Fail
   name: vbmcsettings-v1alpha1.kb.io
   rules:
   - apiGroups:
-    - bmcmaintenance.metal.ironcore.dev
+    - baseboard.metal.ironcore.dev
     apiVersions:
     - v1alpha1
     operations:
@@ -73,12 +73,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-bmcmaintenance-metal-ironcore-dev-v1alpha1-bmcversion
+      path: /validate-baseboard-metal-ironcore-dev-v1alpha1-bmcversion
   failurePolicy: Fail
   name: vbmcversion-v1alpha1.kb.io
   rules:
   - apiGroups:
-    - bmcmaintenance.metal.ironcore.dev
+    - baseboard.metal.ironcore.dev
     apiVersions:
     - v1alpha1
     operations:

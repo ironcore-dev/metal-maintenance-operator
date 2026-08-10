@@ -1,15 +1,16 @@
 # API Reference
 
 ## Packages
-- [bmcmaintenance.metal.ironcore.dev/v1alpha1](#bmcmaintenancemetalironcoredevv1alpha1)
+- [baseboard.metal.ironcore.dev/v1alpha1](#baseboardmetalironcoredevv1alpha1)
+- [maintenance.metal.ironcore.dev/v1alpha1](#maintenancemetalironcoredevv1alpha1)
 - [readiness.metal.ironcore.dev/v1alpha1](#readinessmetalironcoredevv1alpha1)
-- [servermaintenance.metal.ironcore.dev/v1alpha1](#servermaintenancemetalironcoredevv1alpha1)
+- [system.metal.ironcore.dev/v1alpha1](#systemmetalironcoredevv1alpha1)
 - [vendorconsole.metal.ironcore.dev/v1alpha1](#vendorconsolemetalironcoredevv1alpha1)
 
 
-## bmcmaintenance.metal.ironcore.dev/v1alpha1
+## baseboard.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the bmcmaintenance.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the baseboard.metal.ironcore.dev v1alpha1 API group.
 
 ### Resource Types
 - [BMCSettings](#bmcsettings)
@@ -31,7 +32,7 @@ BMCSettings is the Schema for the BMCSettings API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `bmcmaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BMCSettings` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BMCSettingsSpec](#bmcsettingsspec)_ |  |  |  |
@@ -50,7 +51,7 @@ BMCSettingsSet is the Schema for the bmcsettingssets API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `bmcmaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BMCSettingsSet` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BMCSettingsSetSpec](#bmcsettingssetspec)_ |  |  |  |
@@ -112,9 +113,9 @@ _Appears in:_
 | `settings` _object (keys:string, values:string)_ | SettingsMap contains BMC settings as a map. |  |  |
 | `variables` _Variable array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each<br />server that needs to be updated with the BMC settings. |  |  |
-| `BMCRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
+| `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
 
 
 #### BMCSettingsState
@@ -173,7 +174,7 @@ _Appears in:_
 | `settings` _object (keys:string, values:string)_ | SettingsMap contains BMC settings as a map. |  |  |
 | `variables` _Variable array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 
 
 #### BMCVersion
@@ -188,7 +189,7 @@ BMCVersion is the Schema for the bmcversions API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `bmcmaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BMCVersion` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BMCVersionSpec](#bmcversionspec)_ |  |  |  |
@@ -207,7 +208,7 @@ BMCVersionSet is the Schema for the bmcversionsets API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `bmcmaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BMCVersionSet` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BMCVersionSetSpec](#bmcversionsetspec)_ |  |  |  |
@@ -269,7 +270,7 @@ _Appears in:_
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
 | `serverMaintenanceRefs` _ObjectReference array_ | ServerMaintenanceRefs are references to ServerMaintenance objects that the controller has requested for the related servers. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply BMC upgrade on. |  |  |
 
@@ -331,7 +332,114 @@ _Appears in:_
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+
+
+
+## maintenance.metal.ironcore.dev/v1alpha1
+
+Package v1alpha1 contains API Schema definitions for the maintenance.metal.ironcore.dev v1alpha1 API group.
+
+### Resource Types
+- [ServerMaintenance](#servermaintenance)
+
+
+
+#### ServerMaintenance
+
+
+
+ServerMaintenance is the Schema for the ServerMaintenance API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `maintenance.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `ServerMaintenance` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[ServerMaintenanceSpec](#servermaintenancespec)_ |  |  |  |
+| `status` _[ServerMaintenanceStatus](#servermaintenancestatus)_ |  |  |  |
+
+
+#### ServerMaintenancePolicy
+
+_Underlying type:_ _string_
+
+ServerMaintenancePolicy specifies the maintenance policy to be enforced on the server.
+
+
+
+_Appears in:_
+- [BIOSSettingsSpec](#biossettingsspec)
+- [BIOSSettingsTemplate](#biossettingstemplate)
+- [BIOSVersionSpec](#biosversionspec)
+- [BIOSVersionTemplate](#biosversiontemplate)
+- [BMCSettingsSpec](#bmcsettingsspec)
+- [BMCSettingsTemplate](#bmcsettingstemplate)
+- [BMCVersionSpec](#bmcversionspec)
+- [BMCVersionTemplate](#bmcversiontemplate)
+- [ServerMaintenanceSpec](#servermaintenancespec)
+
+| Field | Description |
+| --- | --- |
+| `OwnerApproval` | ServerMaintenancePolicyOwnerApproval specifies that the maintenance policy requires owner approval.<br /> |
+| `Enforced` | ServerMaintenancePolicyEnforced specifies that the maintenance policy is enforced.<br /> |
+
+
+#### ServerMaintenanceSpec
+
+
+
+ServerMaintenanceSpec defines the desired state of a ServerMaintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenance](#servermaintenance)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `policy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | Policy specifies the maintenance policy to be enforced on the server. |  | Enum: [OwnerApproval Enforced] <br /> |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to the server that is to be maintained. |  |  |
+| `locatorLED` _[IndicatorLED](https://github.com/ironcore-dev/metal-operator/blob/main/docs/api-reference/api.md#indicatorled)_ | LocatorLED specifies the desired state of the server's locator LED during maintenance.<br />When maintenance ends, the locator LED is turned off. |  |  |
+| `priority` _integer_ | Priority determines ordering when multiple ServerMaintenance resources target the same server.<br />Higher values are processed first. If priorities are equal, older resources are processed first.<br />If omitted, priority is treated as 0. | 0 |  |
+
+
+#### ServerMaintenanceState
+
+_Underlying type:_ _string_
+
+ServerMaintenanceState specifies the current state of the server maintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenanceStatus](#servermaintenancestatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | ServerMaintenanceStatePending specifies that the server maintenance is pending.<br /> |
+| `InMaintenance` | ServerMaintenanceStateInMaintenance specifies that the server is in maintenance.<br /> |
+| `Failed` | ServerMaintenanceStateFailed specifies that the server maintenance has failed.<br /> |
+
+
+#### ServerMaintenanceStatus
+
+
+
+ServerMaintenanceStatus defines the observed state of a ServerMaintenance.
+
+
+
+_Appears in:_
+- [ServerMaintenance](#servermaintenance)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[ServerMaintenanceState](#servermaintenancestate)_ | State specifies the current state of the server maintenance. |  |  |
 
 
 
@@ -467,9 +575,9 @@ _Appears in:_
 
 
 
-## servermaintenance.metal.ironcore.dev/v1alpha1
+## system.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the servermaintenance.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the system.metal.ironcore.dev v1alpha1 API group.
 
 ### Resource Types
 - [BIOSSettings](#biossettings)
@@ -491,7 +599,7 @@ BIOSSettings is the Schema for the biossettings API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `servermaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BIOSSettings` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BIOSSettingsSpec](#biossettingsspec)_ |  |  |  |
@@ -549,7 +657,7 @@ BIOSSettingsSet is the Schema for the biossettingssets API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `servermaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BIOSSettingsSet` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BIOSSettingsSetSpec](#biossettingssetspec)_ |  |  |  |
@@ -610,7 +718,7 @@ _Appears in:_
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
 | `settingsFlow` _SettingsFlowItem array_ | SettingsFlow contains the BIOS settings sequence to apply in the given order. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to a ServerMaintenance object that BIOSSettings has requested for the referred server. |  |  |
 | `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the BIOS settings on. |  |  |
 
@@ -672,7 +780,7 @@ _Appears in:_
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
 | `settingsFlow` _SettingsFlowItem array_ | SettingsFlow contains the BIOS settings sequence to apply in the given order. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 
 
 #### BIOSVersion
@@ -687,7 +795,7 @@ BIOSVersion is the Schema for the biosversions API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `servermaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BIOSVersion` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BIOSVersionSpec](#biosversionspec)_ |  |  |  |
@@ -706,7 +814,7 @@ BIOSVersionSet is the Schema for the biosversionsets API.
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `apiVersion` _string_ | `servermaintenance.metal.ironcore.dev/v1alpha1` | | |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
 | `kind` _string_ | `BIOSVersionSet` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BIOSVersionSetSpec](#biosversionsetspec)_ |  |  |  |
@@ -767,7 +875,7 @@ _Appears in:_
 | `version` _string_ | Version specifies the BIOS version to upgrade to. |  |  |
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BIOS version. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to a ServerMaintenance object that the controller has requested for the referred server. |  |  |
 | `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the BIOS upgrade on. |  |  |
@@ -829,7 +937,7 @@ _Appears in:_
 | `version` _string_ | Version specifies the BIOS version to upgrade to. |  |  |
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BIOS version. |  |  |
-| `serverMaintenancePolicy` _invalid type_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 
 
@@ -862,6 +970,23 @@ Console is the Schema for the consoles API.
 | `status` _[ConsoleStatus](#consolestatus)_ |  |  |  |
 
 
+#### ConsoleConnection
+
+
+
+ConsoleConnection describes how to reach the server management console.
+
+
+
+_Appears in:_
+- [ConsoleSpec](#consolespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `url` _string_ | URL is the URL of the server management console. |  |  |
+| `insecureSkipTLSVerify` _boolean_ | InsecureSkipTLSVerify disables TLS certificate verification when<br />communicating with the management console. This should only be used for<br />consoles that present self-signed or otherwise untrusted certificates. | false |  |
+
+
 #### ConsoleSpec
 
 
@@ -876,7 +1001,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
-| `consoleURL` _string_ | ConsoleURL is the URL of the server management console. |  |  |
+| `connection` _[ConsoleConnection](#consoleconnection)_ | Connection contains the console endpoint and transport-security settings. |  |  |
 | `manufacturer` _[Manufacturer](#manufacturer)_ | Manufacturer is the manufacturer of the server management console (e.g., "Dell", "HPE", "Lenovo"). |  |  |
 | `bmcCredentialSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCCredentialSecretRef references the secret containing BMC credentials. |  |  |
 

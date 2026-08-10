@@ -11,7 +11,8 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -19,7 +20,7 @@ import (
 
 var _ = Describe("BIOSSettings Webhook", func() {
 	var (
-		biosSettingsV1                 *servermaintenancev1alpha1.BIOSSettings
+		biosSettingsV1                 *systemv1alpha1.BIOSSettings
 		validator                      BIOSSettingsCustomValidator
 		defaultMockUpServerBiosVersion = "P79 v1.45 (12/06/2017)"
 		anotherMockUpServerBiosVersion = "P71 v1.45 (12/06/2017)"
@@ -28,20 +29,20 @@ var _ = Describe("BIOSSettings Webhook", func() {
 	BeforeEach(func(ctx SpecContext) {
 		validator = BIOSSettingsCustomValidator{Client: k8sClient}
 		By("Creating a BIOSSettings")
-		biosSettingsV1 = &servermaintenancev1alpha1.BIOSSettings{
+		biosSettingsV1 = &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
+			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
-				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
 					Version: defaultMockUpServerBiosVersion,
 					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -50,29 +51,29 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	AfterEach(func(ctx SpecContext) {
 		By("Deleting the BIOSSettings and Server resources")
-		Expect(k8sClient.DeleteAllOf(ctx, &servermaintenancev1alpha1.BIOSSettings{})).To(Succeed())
+		Expect(k8sClient.DeleteAllOf(ctx, &systemv1alpha1.BIOSSettings{})).To(Succeed())
 		By("Deleting Server resources if created")
 		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &metalv1alpha1.Server{}))).To(Succeed())
 		By("Deleting ServerMaintenance resources if created")
-		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &servermaintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &maintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
 	})
 
 	It("should deny creation if a Server already has a BIOSSettings", func(ctx SpecContext) {
 		By("Creating another BIOSSettings targeting the same Server")
-		biosSettingsV2 := &servermaintenancev1alpha1.BIOSSettings{
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
+			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
-				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
 					Version: defaultMockUpServerBiosVersion,
 					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -81,20 +82,20 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	It("should allow creating a BIOSSettings for a Server without one", func() {
 		By("Creating a BIOSSettings targeting a new Server")
-		biosSettingsV2 := &servermaintenancev1alpha1.BIOSSettings{
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
+			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
-				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
 					Version: defaultMockUpServerBiosVersion,
 					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -103,20 +104,20 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	It("should deny update if spec.serverRef is duplicate", func() {
 		By("Creating a BIOSSettings with different ServerRef")
-		biosSettingsV2 := &servermaintenancev1alpha1.BIOSSettings{
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
+			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
-				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
 					Version: anotherMockUpServerBiosVersion,
 					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -130,20 +131,20 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	It("should allow update if a different field is duplicate", func() {
 		By("Creating a BIOSSetting with different ServerRef")
-		biosSettingsV2 := &servermaintenancev1alpha1.BIOSSettings{
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
+			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
-				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
 					Version: anotherMockUpServerBiosVersion,
 					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -157,20 +158,20 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	It("should allow update if a ServerRef field is not duplicate", func() {
 		By("Creating a BIOSSetting with different ServerRef")
-		biosSettingsV2 := &servermaintenancev1alpha1.BIOSSettings{
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: servermaintenancev1alpha1.BIOSSettingsSpec{
+			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
-				BIOSSettingsTemplate: servermaintenancev1alpha1.BIOSSettingsTemplate{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
 					Version: anotherMockUpServerBiosVersion,
 					SettingsFlow: []api.SettingsFlowItem{{
 						Settings: map[string]string{},
 						Priority: 1,
 						Name:     "one",
 					}},
-					ServerMaintenancePolicy: ptr.To(servermaintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 			},
 		}
@@ -184,24 +185,24 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 	It("should not allow update of BIOSSettings which are in-progress, but should allow forcefully deleting it", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &servermaintenancev1alpha1.ServerMaintenance{
+		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
-				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Patching the BIOSSettings V1 to InProgress state")
 		Eventually(UpdateStatus(biosSettingsV1, func() {
-			biosSettingsV1.Status.State = servermaintenancev1alpha1.BIOSSettingsStateInProgress
+			biosSettingsV1.Status.State = systemv1alpha1.BIOSSettingsStateInProgress
 		})).Should(Succeed())
 
 		By("Mocking a corresponding ServerMaintenance for the BIOSSettings V1")
@@ -220,34 +221,34 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 		By("Ensuring the BIOSSettings V1 is back to Applied state")
 		Eventually(UpdateStatus(biosSettingsV1, func() {
-			biosSettingsV1.Status.State = servermaintenancev1alpha1.BIOSSettingsStateApplied
+			biosSettingsV1.Status.State = systemv1alpha1.BIOSSettingsStateApplied
 		})).Should(Succeed())
 
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 	})
 
 	It("should deny deletion of an in-progress BIOSSettings", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
-		sm := &servermaintenancev1alpha1.ServerMaintenance{
+		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-sm-",
 				Namespace:    metav1.NamespaceDefault,
 			},
-			Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
-				Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 		})).Should(Succeed())
 
 		By("Patching the BIOSSettings V1 to InProgress state")
 		Eventually(UpdateStatus(biosSettingsV1, func() {
-			biosSettingsV1.Status.State = servermaintenancev1alpha1.BIOSSettingsStateInProgress
+			biosSettingsV1.Status.State = systemv1alpha1.BIOSSettingsStateInProgress
 		})).Should(Succeed())
 
 		By("Setting ServerMaintenanceRef on BIOSSettings V1")
@@ -260,11 +261,11 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 		By("Ensuring the BIOSSettings V1 is back to Applied state")
 		Eventually(UpdateStatus(biosSettingsV1, func() {
-			biosSettingsV1.Status.State = servermaintenancev1alpha1.BIOSSettingsStateApplied
+			biosSettingsV1.Status.State = systemv1alpha1.BIOSSettingsStateApplied
 		})).Should(Succeed())
 
 		Eventually(UpdateStatus(sm, func() {
-			sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
 	})
 })

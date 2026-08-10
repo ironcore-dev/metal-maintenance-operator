@@ -1,0 +1,17 @@
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCSettingsSet
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bmcsettingsset-sample
+spec:
+  bmcSelector:
+    matchLabels:
+      metal.ironcore.dev/vendor: lenovo
+  bmcSettingsTemplate:
+    version: 1.45.455b66-rev4
+    serverMaintenancePolicy: Enforced
+    settings:
+      bootMode: "UEFI"
+      hyperThreading: "Enabled"

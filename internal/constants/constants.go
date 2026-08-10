@@ -12,7 +12,7 @@ const (
 	BMCRefField    = "spec.bmcRef.name"
 )
 
-// Shared condition types used across bmcmaintenance and servermaintenance controllers.
+// Shared condition types used across baseboard and system controllers.
 const (
 	ConditionServerMaintenanceCreated    = "ServerMaintenanceCreated"
 	ConditionServerMaintenanceDeleted    = "ServerMaintenanceDeleted"
@@ -29,7 +29,7 @@ const (
 	ConditionRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
 )
 
-// Shared reason strings used across bmcmaintenance and servermaintenance controllers.
+// Shared reason strings used across baseboard and system controllers.
 const (
 	ReasonUpgradeIssued               = "UpgradeIssued"
 	ReasonUpgradeTaskFailed           = "UpgradeTaskFailed"

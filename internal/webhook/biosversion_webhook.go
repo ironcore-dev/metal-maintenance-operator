@@ -15,7 +15,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -26,14 +26,14 @@ var versionLog = logf.Log.WithName("biosversion-resource")
 
 // SetupBIOSVersionWebhookWithManager registers the webhook for BIOSVersion in the manager.
 func SetupBIOSVersionWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &servermaintenancev1alpha1.BIOSVersion{}).
+	return ctrl.NewWebhookManagedBy(mgr, &systemv1alpha1.BIOSVersion{}).
 		WithValidator(&BIOSVersionCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-servermaintenance-metal-ironcore-dev-v1alpha1-biosversion,mutating=false,failurePolicy=fail,sideEffects=None,groups=servermaintenance.metal.ironcore.dev,resources=biosversions,verbs=create;update;delete,versions=v1alpha1,name=vbiosversion-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-system-metal-ironcore-dev-v1alpha1-biosversion,mutating=false,failurePolicy=fail,sideEffects=None,groups=system.metal.ironcore.dev,resources=biosversions,verbs=create;update;delete,versions=v1alpha1,name=vbiosversion-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // BIOSVersionCustomValidator struct is responsible for validating the BIOSVersion resource
 // when it is created, updated, or deleted.
@@ -42,10 +42,10 @@ type BIOSVersionCustomValidator struct {
 }
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BIOSVersion.
-func (v *BIOSVersionCustomValidator) ValidateCreate(ctx context.Context, obj *servermaintenancev1alpha1.BIOSVersion) (admission.Warnings, error) {
+func (v *BIOSVersionCustomValidator) ValidateCreate(ctx context.Context, obj *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	versionLog.Info("Validation for BIOSVersion upon creation", "name", obj.GetName())
 
-	versions := &servermaintenancev1alpha1.BIOSVersionList{}
+	versions := &systemv1alpha1.BIOSVersionList{}
 	if err := v.List(ctx, versions); err != nil {
 		return nil, fmt.Errorf("failed to list BIOSVersion: %w", err)
 	}
@@ -53,7 +53,7 @@ func (v *BIOSVersionCustomValidator) ValidateCreate(ctx context.Context, obj *se
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type BIOSVersion.
-func (v *BIOSVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *servermaintenancev1alpha1.BIOSVersion) (admission.Warnings, error) {
+func (v *BIOSVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	versionLog.Info("Validation for BIOSVersion upon update", "name", newObj.GetName())
 
 	// Block updates while the referenced ServerMaintenance is InMaintenance.
@@ -70,7 +70,7 @@ func (v *BIOSVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj,
 		}
 	}
 
-	versions := &servermaintenancev1alpha1.BIOSVersionList{}
+	versions := &systemv1alpha1.BIOSVersionList{}
 	if err := v.List(ctx, versions); err != nil {
 		return nil, fmt.Errorf("failed to list BIOSVersion: %w", err)
 	}
@@ -79,7 +79,7 @@ func (v *BIOSVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj,
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type BIOSVersion.
-func (v *BIOSVersionCustomValidator) ValidateDelete(ctx context.Context, obj *servermaintenancev1alpha1.BIOSVersion) (admission.Warnings, error) {
+func (v *BIOSVersionCustomValidator) ValidateDelete(ctx context.Context, obj *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	versionLog.Info("Validation for BIOSVersion upon deletion", "name", obj.GetName())
 
 	// Block deletion while the referenced ServerMaintenance is InMaintenance.
@@ -95,7 +95,7 @@ func (v *BIOSVersionCustomValidator) ValidateDelete(ctx context.Context, obj *se
 	return nil, nil
 }
 
-func checkForDuplicateBIOSVersionRefToServer(versions *servermaintenancev1alpha1.BIOSVersionList, version *servermaintenancev1alpha1.BIOSVersion) (admission.Warnings, error) {
+func checkForDuplicateBIOSVersionRefToServer(versions *systemv1alpha1.BIOSVersionList, version *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	if version.Spec.ServerRef == nil {
 		return nil, nil
 	}

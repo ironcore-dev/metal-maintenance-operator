@@ -1,0 +1,715 @@
+// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
+package baseboard
+
+import (
+	"fmt"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
+
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/ironcore-dev/controller-utils/conditionutils"
+	"github.com/ironcore-dev/controller-utils/metautils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
+)
+
+var _ = Describe("BMCVersion Controller", func() {
+	ns := SetupTest(nil)
+
+	var (
+		server                  *metalv1alpha1.Server
+		bmcObj                  *metalv1alpha1.BMC
+		bmcSecret               *metalv1alpha1.BMCSecret
+		upgradeServerBMCVersion = "1.46.455b66-rev4"
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		By("Creating a BMCSecret")
+		bmcSecret = &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-secret-",
+			},
+			Data: map[string][]byte{
+				metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+				metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcSecret)).To(Succeed())
+
+		By("Creating a BMC resource")
+		bmcObj = &metalv1alpha1.BMC{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-",
+			},
+			Spec: metalv1alpha1.BMCSpec{
+				Endpoint: &metalv1alpha1.InlineEndpoint{
+					IP:         metalv1alpha1.MustParseIP(MockServerIP),
+					MACAddress: "23:11:8A:33:CF:EA",
+				},
+				Protocol: metalv1alpha1.Protocol{
+					Name: metalv1alpha1.ProtocolRedfishLocal,
+					Port: MockServerPort,
+				},
+				BMCSecretRef: v1.LocalObjectReference{
+					Name: bmcSecret.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcObj)).To(Succeed())
+
+		By("Ensuring that the Server resource will be created")
+		server = &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmcObj),
+			},
+		}
+		Eventually(Get(server)).Should(Succeed())
+
+		By("Ensuring that the Server is in an available state")
+		Eventually(UpdateStatus(server, func() {
+			server.Status.State = metalv1alpha1.ServerStateAvailable
+		})).Should(Succeed())
+
+		By("Ensuring that the BMC has right state: enabled")
+		Eventually(Object(bmcObj)).Should(SatisfyAll(
+			HaveField("Status.State", metalv1alpha1.BMCStateEnabled),
+		))
+	})
+
+	AfterEach(func(ctx SpecContext) {
+		Expect(k8sClient.Delete(ctx, bmcObj)).To(Succeed())
+		// The simulated BMC controller deletes its discovered Server on BMC
+		// deletion, so the Server may already be gone by the time we get here.
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server))).To(Succeed())
+		Expect(k8sClient.Delete(ctx, bmcSecret)).To(Succeed())
+		EnsureCleanState()
+		mockServers[0].ResetUpgradeTask("/redfish/v1/Managers/BMC")
+	})
+
+	It("should successfully mark completed if no BMC version change", func(ctx SpecContext) {
+		By("Creating a BMCVersion")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 mockUpServerBMCVersion,
+					Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that BMC upgrade has completed")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring that BMC upgrade Conditions has not created")
+		Consistently(Object(bmcVersion)).Should(
+			HaveField("Status.Conditions", BeNil()),
+		)
+
+		By("Ensuring that the Maintenance resource has NOT been created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the BMCVersion has been removed")
+		Eventually(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
+		Consistently(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+		)
+	})
+
+	It("should successfully start and monitor upgrade task to completion", func(ctx SpecContext) {
+		// mocked at
+		// metal-operator/bmc/redfish_local.go mockedBIOS*
+		// note: ImageURI need to have the version string.
+
+		acc := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
+
+		By("Update the server state to Available state")
+		Eventually(UpdateStatus(server, func() {
+			server.Status.State = metalv1alpha1.ServerStateAvailable
+			server.Status.PowerState = metalv1alpha1.ServerOffPowerState
+		})).Should(Succeed())
+
+		By("Creating a BMCVersion")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 upgradeServerBMCVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the bmcVersion has entered Inprogress state")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateInProgress),
+		)
+
+		By("Ensuring that the Maintenance resource has been created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
+
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      serverMaintenanceList.Items[0].Name,
+			},
+		}
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		By("Ensuring that the Maintenance resource has been referenced by bmcVersion")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs",
+				[]metalv1alpha1.ObjectReference{
+					{
+						Namespace: serverMaintenance.Namespace,
+						Name:      serverMaintenance.Name,
+					},
+				},
+			),
+		)
+
+		By("Ensuring that Server in Maintenance state")
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
+
+		ensureBMCVersionConditionTransition(acc, bmcVersion)
+
+		By("Ensuring that BMC upgrade has completed")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring that BMCVersion has removed Maintenance")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+		)
+		Consistently(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+		)
+
+		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+
+		By("Ensuring that Server has left Maintenance state")
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+		)
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the BMCVersion has been removed")
+		Eventually(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
+		Consistently(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
+	})
+
+	It("should upgrade servers BMC when server in reserved state", func(ctx SpecContext) {
+		// mocked at
+		// metal-operator/bmc/redfish_local.go mockedBIOS*
+		// note: ImageURI need to have the version string.
+
+		acc := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
+		By("Creating an Ignition secret")
+		ignitionSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:    ns.Name,
+				GenerateName: "test-",
+			},
+			Data: nil,
+		}
+		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
+
+		By("Creating a ServerClaim")
+		serverClaim := &metalv1alpha1.ServerClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:    ns.Name,
+				GenerateName: "test-",
+			},
+			Spec: metalv1alpha1.ServerClaimSpec{
+				Power:             metalv1alpha1.PowerOn,
+				ServerRef:         &v1.LocalObjectReference{Name: server.Name},
+				IgnitionSecretRef: &v1.LocalObjectReference{Name: ignitionSecret.Name},
+				Image:             "foo:bar",
+			},
+		}
+		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
+
+		By("Ensuring that the Server has been claimed")
+		Eventually(Update(server, func() {
+			server.Spec.ServerClaimRef = &metalv1alpha1.ImmutableObjectReference{
+				Name:      serverClaim.Name,
+				Namespace: serverClaim.Namespace,
+			}
+		})).Should(Succeed())
+		Eventually(UpdateStatus(server, func() {
+			server.Status.State = metalv1alpha1.ServerStateReserved
+		})).Should(Succeed())
+
+		By("Creating a BMCVersion")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 upgradeServerBMCVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the bmcVersion has entered Inprogress state")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateInProgress),
+		)
+
+		By("Ensuring that the Maintenance resource has been created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
+
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      serverMaintenanceList.Items[0].Name,
+			},
+		}
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		By("Ensuring that the Maintenance resource has been referenced by bmcVersion")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs",
+				[]metalv1alpha1.ObjectReference{
+					{
+						Namespace: serverMaintenance.Namespace,
+						Name:      serverMaintenance.Name,
+					},
+				},
+			))
+
+		By("Ensuring that the bmcVersion has Inprogress state and waiting")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateInProgress),
+		)
+
+		By("Approving the maintenance")
+		Eventually(Update(serverClaim, func() {
+			metautils.SetLabel(serverClaim, maintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
+		})).Should(Succeed())
+
+		By("Ensuring that Server in Maintenance state")
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
+
+		ensureBMCVersionConditionTransition(acc, bmcVersion)
+
+		By("Ensuring that BMC upgrade has completed")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring that BMCVersion has removed Maintenance")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+		)
+		Consistently(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+		)
+
+		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the BiosVersion has been removed")
+		Eventually(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
+		Consistently(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
+
+		// cleanup
+		Expect(k8sClient.Delete(ctx, serverClaim)).To(Succeed())
+		Eventually(Update(server, func() {
+			server.Spec.ServerClaimRef = nil
+		})).Should(Succeed())
+		Eventually(Object(server)).Should(SatisfyAll(
+			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
+		))
+	})
+
+	It("should allow retry using annotation", func(ctx SpecContext) {
+		failedAutoRetryCount := 2
+		By("Creating a BMCVersion")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+				Annotations: map[string]string{
+					metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetry,
+				},
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 upgradeServerBMCVersion + " fail",
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the BMC Version has started retry and FailedAttempts is set")
+		Eventually(func(g Gomega) bool {
+			g.Expect(Get(bmcVersion)()).To(Succeed())
+			return bmcVersion.Status.FailedAttempts > int32(0)
+		}).WithPolling((1 * time.Millisecond)).Should(BeTrue())
+
+		Eventually(Object(bmcVersion)).Should(SatisfyAll(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateFailed),
+			HaveField("Status.FailedAttempts", Equal(int32(failedAutoRetryCount))),
+		))
+
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+		)
+
+		By("Ensuring that the BIOS setting has not been changed")
+		Consistently(Object(bmcVersion), "250ms").Should(SatisfyAll(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateFailed),
+			HaveField("Status.FailedAttempts", Equal(int32(failedAutoRetryCount))),
+		))
+
+		// cleanup
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+		// clean up maintenance if any, as the test not auto delete child objects
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Expect(k8sClient.List(ctx, &serverMaintenanceList)).To(Succeed())
+		for _, maintenance := range serverMaintenanceList.Items {
+			if metav1.IsControlledBy(&maintenance, bmcVersion) {
+				Expect(k8sClient.Delete(ctx, &maintenance)).To(Succeed())
+			}
+		}
+		Eventually(UpdateStatus(server, func() {
+			server.Status.State = metalv1alpha1.ServerStateAvailable
+		})).Should(Succeed())
+	})
+
+	It("should cleanup ServerMaintenance when references are cleared", func(ctx SpecContext) {
+		By("Creating a BMCVersion with maintenance upgrade")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 upgradeServerBMCVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the Maintenance resource has been created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
+
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      serverMaintenanceList.Items[0].Name,
+			},
+		}
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
+
+		By("Manually clearing spec.serverMaintenanceRefs while keeping the object alive")
+		Eventually(Update(bmcVersion, func() {
+			bmcVersion.Spec.ServerMaintenanceRefs = nil
+		})).Should(Succeed())
+
+		By("Ensuring that the orphaned ServerMaintenance is eventually cleaned up")
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Verifying no ServerMaintenance objects remain")
+		Expect(ObjectList(&serverMaintenanceList)()).Should(HaveField("Items", BeEmpty()))
+
+		// cleanup
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+
+		// Wait for garbage collection to delete owned ServerMaintenance objects
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+	})
+
+	It("should maintain cleanup functionality with populated spec.serverMaintenanceRefs", func(ctx SpecContext) {
+		By("Creating a BMCVersion with maintenance upgrade")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 upgradeServerBMCVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the bmcVersion has entered Inprogress state")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateInProgress),
+		)
+
+		By("Ensuring that the Maintenance resource has been created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
+
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      serverMaintenanceList.Items[0].Name,
+			},
+		}
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
+
+		By("Ensuring that spec.serverMaintenanceRefs is populated")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs", ContainElement(
+				HaveField("Name", serverMaintenance.Name),
+			)),
+		)
+
+		By("Simulating cleanup by mocking upgrade completion")
+		Eventually(UpdateStatus(bmcVersion, func() {
+			bmcVersion.Status.State = baseboardv1alpha1.BMCVersionStateCompleted
+		})).Should(Succeed())
+
+		By("Triggering reconciliation to cleanup references")
+		Eventually(Update(bmcVersion, func() {
+			metautils.SetAnnotation(bmcVersion, "cleanup-trigger", "true")
+		})).Should(Succeed())
+
+		By("Ensuring that ServerMaintenance objects are cleaned up")
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+
+		By("Verifying spec.serverMaintenanceRefs is cleared")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+		)
+		// cleanup
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+	})
+
+	It("should not delete ServerMaintenance objects not owned by BMCVersion", func(ctx SpecContext) {
+		By("Creating a standalone ServerMaintenance without owner reference")
+		orphanMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:    ns.Name,
+				GenerateName: "orphan-",
+			},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+			},
+		}
+		Expect(k8sClient.Create(ctx, orphanMaintenance)).To(Succeed())
+
+		By("Creating a BMCVersion with orphaned state")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 mockUpServerBMCVersion,
+					Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Setting spec.serverMaintenanceRefs to nil")
+		Eventually(Update(bmcVersion, func() {
+			bmcVersion.Spec.ServerMaintenanceRefs = nil
+		})).Should(Succeed())
+
+		By("Recording the non-owned ServerMaintenance for later verification")
+		nonOwnedMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      orphanMaintenance.Name,
+			},
+		}
+		Expect(Get(nonOwnedMaintenance)()).To(Succeed())
+
+		By("Triggering reconciliation")
+		Eventually(Update(bmcVersion, func() {
+			metautils.SetAnnotation(bmcVersion, "test", "verify-ownership")
+		})).Should(Succeed())
+
+		By("Verifying that the non-owned ServerMaintenance still exists")
+		Consistently(Get(nonOwnedMaintenance)).Should(Succeed())
+
+		By("Verifying no other ServerMaintenance objects were created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Expect(ObjectList(&serverMaintenanceList)()).To(HaveField("Items", HaveLen(1)))
+		Expect(serverMaintenanceList.Items[0].Name).To(Equal(orphanMaintenance.Name))
+
+		// cleanup
+		Expect(k8sClient.Delete(ctx, nonOwnedMaintenance)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+	})
+
+	It("should be idempotent when cleaning up orphaned ServerMaintenance", func(ctx SpecContext) {
+		By("Creating a BMCVersion with maintenance upgrade")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					Version:                 upgradeServerBMCVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the Maintenance resource has been created")
+		var serverMaintenanceList maintenancev1alpha1.ServerMaintenanceList
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", HaveLen(1)))
+
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      serverMaintenanceList.Items[0].Name,
+			},
+		}
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		Eventually(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
+		)
+
+		By("Clearing spec.serverMaintenanceRefs")
+		Eventually(Update(bmcVersion, func() {
+			bmcVersion.Spec.ServerMaintenanceRefs = nil
+		})).Should(Succeed())
+
+		By("Triggering reconciliation multiple times")
+		for i := range 3 {
+			Eventually(Update(bmcVersion, func() {
+				metautils.SetAnnotation(bmcVersion, "iteration", fmt.Sprintf("%d", i))
+			})).Should(Succeed())
+		}
+
+		By("Ensuring that cleanup is successful and idempotent")
+		Eventually(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+
+		By("Verifying no errors occurred during reconciliation")
+		Expect(Get(bmcVersion)()).To(Succeed())
+		// If reconciliation failed, Status would have error conditions
+		// This is a simplified check; detailed error checking would depend on status fields
+
+		// cleanup
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+	})
+})
+
+func ensureBMCVersionConditionTransition(acc *conditionutils.Accessor, bmcVersion *baseboardv1alpha1.BMCVersion) {
+	GinkgoHelper()
+	By("Ensuring that BMC Conditions have reached expected state 'biosVersionUpgradeIssued'")
+	condIssue := &metav1.Condition{}
+	Eventually(func(g Gomega) int {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		return len(bmcVersion.Status.Conditions)
+	}).Should(BeNumerically(">=", 1))
+	Eventually(func(g Gomega) bool {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		g.Expect(acc.FindSlice(bmcVersion.Status.Conditions, constants.ConditionVersionUpgradeIssued, condIssue)).To(BeTrue())
+		return condIssue.Status == metav1.ConditionTrue
+	}).Should(BeTrue())
+
+	By("Ensuring that BMCVersion has updated the task Status with task URI")
+	Eventually(func(g Gomega) {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		g.Expect(bmcVersion.Status.UpgradeTask).NotTo(BeNil())
+		g.Expect(bmcVersion.Status.UpgradeTask.URI).To(Equal(bmc.DummyMockTaskForUpgrade))
+	}).Should(Succeed())
+
+	By("Ensuring that BMC Conditions have reached expected state 'biosVersionUpgradeCompleted'")
+	condComplete := &metav1.Condition{}
+	Eventually(func(g Gomega) int {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		return len(bmcVersion.Status.Conditions)
+	}).Should(BeNumerically(">=", 2))
+	Eventually(func(g Gomega) bool {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		g.Expect(acc.FindSlice(bmcVersion.Status.Conditions, constants.ConditionVersionUpgradeCompleted, condComplete)).To(BeTrue())
+		return condComplete.Status == metav1.ConditionTrue
+	}).Should(BeTrue())
+
+	By("Ensuring that BMC Conditions have reached expected state 'biosVersionUpgradeVerificationCondition'")
+	verificationComplete := &metav1.Condition{}
+	Eventually(func(g Gomega) int {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		return len(bmcVersion.Status.Conditions)
+	}).Should(BeNumerically(">=", 4))
+	Eventually(func(g Gomega) bool {
+		g.Expect(Get(bmcVersion)()).To(Succeed())
+		g.Expect(acc.FindSlice(bmcVersion.Status.Conditions, constants.ConditionVersionUpgradeVerification, verificationComplete)).To(BeTrue())
+		return verificationComplete.Status == metav1.ConditionTrue
+	}).Should(BeTrue())
+}

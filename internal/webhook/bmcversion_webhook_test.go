@@ -12,8 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -21,19 +21,19 @@ import (
 
 var _ = Describe("BMCVersion Webhook", func() {
 	var (
-		BMCVersionV1 *bmcmaintenancev1alpha1.BMCVersion
+		BMCVersionV1 *baseboardv1alpha1.BMCVersion
 		validator    BMCVersionCustomValidator
 	)
 
 	BeforeEach(func() {
 		validator = BMCVersionCustomValidator{Client: k8sClient}
 
-		BMCVersionV1 = &bmcmaintenancev1alpha1.BMCVersion{
+		BMCVersionV1 = &baseboardv1alpha1.BMCVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-bmc-ver",
 			},
-			Spec: bmcmaintenancev1alpha1.BMCVersionSpec{
-				BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
 					Version: "P70 v1.45 (12/06/2017)",
 					Image:   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
 				},
@@ -48,23 +48,23 @@ var _ = Describe("BMCVersion Webhook", func() {
 
 	AfterEach(func() {
 		By("Deleting BMCVersion resources")
-		Expect(k8sClient.DeleteAllOf(ctx, &bmcmaintenancev1alpha1.BMCVersion{})).To(Succeed())
+		Expect(k8sClient.DeleteAllOf(ctx, &baseboardv1alpha1.BMCVersion{})).To(Succeed())
 		By("Deleting ServerMaintenance resources if created")
-		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &servermaintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &maintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
 	})
 
 	Context("When creating or updating BMCVersion under Validating Webhook", func() {
 		It("should deny creation if a BMC referred is already referred by another", func(ctx SpecContext) {
 			By("Creating another BMCVersion with reference to existing referred BMC")
-			BMCVersionV2 := &bmcmaintenancev1alpha1.BMCVersion{
+			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-bmc-ver",
 				},
-				Spec: bmcmaintenancev1alpha1.BMCVersionSpec{
-					BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
+				Spec: baseboardv1alpha1.BMCVersionSpec{
+					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
 						Version:                 "P71 v1.45 (12/06/2017)",
 						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "foo"},
 				},
@@ -74,15 +74,15 @@ var _ = Describe("BMCVersion Webhook", func() {
 
 		It("should create if a referenced BMC is NOT duplicate", func() {
 			By("Creating another BMCVersion for different BMCRef")
-			BMCVersionV2 := &bmcmaintenancev1alpha1.BMCVersion{
+			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-bmc-ver",
 				},
-				Spec: bmcmaintenancev1alpha1.BMCVersionSpec{
-					BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
+				Spec: baseboardv1alpha1.BMCVersionSpec{
+					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
 						Version:                 "P70 v1.45 (12/06/2017)",
 						Image:                   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -92,15 +92,15 @@ var _ = Describe("BMCVersion Webhook", func() {
 
 		It("should deny update if a BMC referred is already referred by another", func() {
 			By("Creating another BMCVersion with different BMCRef")
-			BMCVersionV2 := &bmcmaintenancev1alpha1.BMCVersion{
+			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-bmc-ver",
 				},
-				Spec: bmcmaintenancev1alpha1.BMCVersionSpec{
-					BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
+				Spec: baseboardv1alpha1.BMCVersionSpec{
+					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
 						Version:                 "P71 v1.45 (12/06/2017)",
 						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -115,15 +115,15 @@ var _ = Describe("BMCVersion Webhook", func() {
 
 		It("should update if a BMC referred is not referred by another", func() {
 			By("Creating another BMCVersion with different BMCref")
-			BMCVersionV2 := &bmcmaintenancev1alpha1.BMCVersion{
+			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-bmc-ver",
 				},
-				Spec: bmcmaintenancev1alpha1.BMCVersionSpec{
-					BMCVersionTemplate: bmcmaintenancev1alpha1.BMCVersionTemplate{
+				Spec: baseboardv1alpha1.BMCVersionSpec{
+					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
 						Version:                 "P71 v1.45 (12/06/2017)",
 						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -138,24 +138,24 @@ var _ = Describe("BMCVersion Webhook", func() {
 
 		It("should not allow update when settings are in progress, but should allow forcing it", func() {
 			By("Creating a ServerMaintenance in InMaintenance state")
-			sm := &servermaintenancev1alpha1.ServerMaintenance{
+			sm := &maintenancev1alpha1.ServerMaintenance{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-sm-",
 					Namespace:    metav1.NamespaceDefault,
 				},
-				Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
-					Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+					Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
+				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 			})).Should(Succeed())
 
 			By("Patching the BMCVersion V1 to InProgress state")
 			Eventually(UpdateStatus(BMCVersionV1, func() {
-				BMCVersionV1.Status.State = bmcmaintenancev1alpha1.BMCVersionStateInProgress
+				BMCVersionV1.Status.State = baseboardv1alpha1.BMCVersionStateInProgress
 			})).Should(Succeed())
 
 			By("Setting ServerMaintenance reference on BMCVersion V1")
@@ -173,30 +173,30 @@ var _ = Describe("BMCVersion Webhook", func() {
 			Expect(validator.ValidateUpdate(ctx, BMCVersionV1, BMCVersionV1Updated)).Error().ToNot(HaveOccurred())
 
 			Eventually(UpdateStatus(BMCVersionV1, func() {
-				BMCVersionV1.Status.State = bmcmaintenancev1alpha1.BMCVersionStateCompleted
+				BMCVersionV1.Status.State = baseboardv1alpha1.BMCVersionStateCompleted
 			})).Should(Succeed())
 
 			By("Deactivating the ServerMaintenance")
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
+				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 			})).Should(Succeed())
 		})
 
 		It("should refuse to delete while ServerMaintenance is active", func() {
 			By("Creating a ServerMaintenance in InMaintenance state")
-			sm := &servermaintenancev1alpha1.ServerMaintenance{
+			sm := &maintenancev1alpha1.ServerMaintenance{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "test-sm-",
 					Namespace:    metav1.NamespaceDefault,
 				},
-				Spec: servermaintenancev1alpha1.ServerMaintenanceSpec{
-					Policy:    servermaintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+					Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 					ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance
+				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 			})).Should(Succeed())
 
 			By("Setting ServerMaintenance reference on BMCVersion V1")
@@ -208,12 +208,12 @@ var _ = Describe("BMCVersion Webhook", func() {
 			Expect(k8sClient.Delete(ctx, BMCVersionV1)).ToNot(Succeed(), fmt.Sprintf("bmc version state %v", BMCVersionV1.Status.State))
 
 			Eventually(UpdateStatus(BMCVersionV1, func() {
-				BMCVersionV1.Status.State = bmcmaintenancev1alpha1.BMCVersionStateCompleted
+				BMCVersionV1.Status.State = baseboardv1alpha1.BMCVersionStateCompleted
 			})).Should(Succeed())
 
 			By("Deactivating the ServerMaintenance")
 			Eventually(UpdateStatus(sm, func() {
-				sm.Status.State = servermaintenancev1alpha1.ServerMaintenanceStatePending
+				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 			})).Should(Succeed())
 		})
 	})

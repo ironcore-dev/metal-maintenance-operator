@@ -15,7 +15,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	bmcmaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/bmcmaintenance/v1alpha1"
+	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -25,14 +25,14 @@ var bmcsettingslog = logf.Log.WithName("bmcsettings-resource")
 
 // SetupBMCSettingsWebhookWithManager registers the webhook for BMCSettings in the manager.
 func SetupBMCSettingsWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &bmcmaintenancev1alpha1.BMCSettings{}).
+	return ctrl.NewWebhookManagedBy(mgr, &baseboardv1alpha1.BMCSettings{}).
 		WithValidator(&BMCSettingsCustomValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-bmcmaintenance-metal-ironcore-dev-v1alpha1-bmcsettings,mutating=false,failurePolicy=fail,sideEffects=None,groups=bmcmaintenance.metal.ironcore.dev,resources=bmcsettings,verbs=create;update;delete,versions=v1alpha1,name=vbmcsettings-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-baseboard-metal-ironcore-dev-v1alpha1-bmcsettings,mutating=false,failurePolicy=fail,sideEffects=None,groups=baseboard.metal.ironcore.dev,resources=bmcsettings,verbs=create;update;delete,versions=v1alpha1,name=vbmcsettings-v1alpha1.kb.io,admissionReviewVersions=v1
 
 // BMCSettingsCustomValidator struct is responsible for validating the BMCSettings resource
 // when it is created, updated, or deleted.
@@ -44,10 +44,10 @@ type BMCSettingsCustomValidator struct {
 }
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BMCSettings.
-func (v *BMCSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *bmcmaintenancev1alpha1.BMCSettings) (admission.Warnings, error) {
+func (v *BMCSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	bmcsettingslog.Info("Validation for BMCSettings upon creation", "name", obj.GetName())
 
-	bmcSettingsList := &bmcmaintenancev1alpha1.BMCSettingsList{}
+	bmcSettingsList := &baseboardv1alpha1.BMCSettingsList{}
 	if err := v.Client.List(ctx, bmcSettingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCSettings: %w", err)
 	}
@@ -55,7 +55,7 @@ func (v *BMCSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *bm
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type BMCSettings.
-func (v *BMCSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *bmcmaintenancev1alpha1.BMCSettings) (admission.Warnings, error) {
+func (v *BMCSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	bmcsettingslog.Info("Validation for BMCSettings upon update", "name", newObj.GetName())
 
 	// Block updates while any referenced ServerMaintenance is InMaintenance.
@@ -78,7 +78,7 @@ func (v *BMCSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj,
 		}
 	}
 
-	bmcSettingsList := &bmcmaintenancev1alpha1.BMCSettingsList{}
+	bmcSettingsList := &baseboardv1alpha1.BMCSettingsList{}
 	if err := v.Client.List(ctx, bmcSettingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCSettings: %w", err)
 	}
@@ -86,7 +86,7 @@ func (v *BMCSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj,
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type BMCSettings.
-func (v *BMCSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *bmcmaintenancev1alpha1.BMCSettings) (admission.Warnings, error) {
+func (v *BMCSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	bmcsettingslog.Info("Validation for BMCSettings upon deletion", "name", obj.GetName())
 
 	// Block deletion while any referenced ServerMaintenance is InMaintenance.
@@ -109,7 +109,7 @@ func (v *BMCSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *bm
 	return nil, nil
 }
 
-func checkForDuplicateBMCSettingsRefToBMC(settingsList *bmcmaintenancev1alpha1.BMCSettingsList, settings *bmcmaintenancev1alpha1.BMCSettings) (admission.Warnings, error) {
+func checkForDuplicateBMCSettingsRefToBMC(settingsList *baseboardv1alpha1.BMCSettingsList, settings *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	for _, bs := range settingsList.Items {
 		if settings.Name == bs.Name {
 			continue

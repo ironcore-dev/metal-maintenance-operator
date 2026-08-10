@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package utils provides shared helper functions for bmcmaintenance and servermaintenance controllers.
+// Package utils provides shared helper functions for baseboard and system controllers.
 // It consolidates utilities that were previously scattered across metal-operator's internal packages,
 // which are not importable from outside that module.
 package utils
@@ -17,7 +17,7 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	servermaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/servermaintenance/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/third_party/expansion"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -62,7 +62,7 @@ func (e MultiErrorTracker) Error() string {
 // IsAnyServerMaintenanceActive returns true if any referenced ServerMaintenance is in InMaintenance state.
 func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []metalv1alpha1.ObjectReference) (bool, error) {
 	for _, ref := range refs {
-		sm := &servermaintenancev1alpha1.ServerMaintenance{}
+		sm := &maintenancev1alpha1.ServerMaintenance{}
 		if err := c.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: ref.Namespace}, sm); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
@@ -72,7 +72,7 @@ func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []m
 		if !sm.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if sm.Status.State == servermaintenancev1alpha1.ServerMaintenanceStateInMaintenance {
+		if sm.Status.State == maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 			return true, nil
 		}
 	}
@@ -80,11 +80,11 @@ func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []m
 }
 
 // GetServerMaintenanceForObjectReference fetches a ServerMaintenance by ObjectReference.
-func GetServerMaintenanceForObjectReference(ctx context.Context, c client.Client, ref *metalv1alpha1.ObjectReference) (*servermaintenancev1alpha1.ServerMaintenance, error) {
+func GetServerMaintenanceForObjectReference(ctx context.Context, c client.Client, ref *metalv1alpha1.ObjectReference) (*maintenancev1alpha1.ServerMaintenance, error) {
 	if ref == nil {
 		return nil, fmt.Errorf("got nil reference")
 	}
-	maintenance := &servermaintenancev1alpha1.ServerMaintenance{}
+	maintenance := &maintenancev1alpha1.ServerMaintenance{}
 	if err := c.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: ref.Namespace}, maintenance); err != nil {
 		return nil, fmt.Errorf("failed to get ServerMaintenance: %w", err)
 	}
@@ -189,7 +189,7 @@ func ShouldRetryReconciliation(obj client.Object) bool {
 	if !found {
 		return false
 	}
-	return val == metalv1alpha1.OperationAnnotationRetryFailed || val == metalv1alpha1.OperationAnnotationRetryFailedPropagated
+	return val == metalv1alpha1.OperationAnnotationRetry || val == metalv1alpha1.OperationAnnotationRetryPropagated
 }
 
 // ShouldChildRetryReconciliation checks if the parent's annotation requests child retry.
@@ -208,7 +208,7 @@ func IsChildRetryThroughSets(childObj client.Object) bool {
 	if !found {
 		return false
 	}
-	return valChildRetry == metalv1alpha1.OperationAnnotationRetryFailedPropagated
+	return valChildRetry == metalv1alpha1.OperationAnnotationRetryPropagated
 }
 
 // --- Annotation propagation helpers ---
@@ -289,7 +289,7 @@ func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, pare
 						retriedCondition, err := GetCondition(acc, conditions, constants.ConditionRetryOfFailedResourceIssued)
 						if err == nil && retriedCondition != nil &&
 							retriedCondition.Status == metav1.ConditionTrue &&
-							retriedCondition.Message == metalv1alpha1.OperationAnnotationRetryFailedPropagated {
+							retriedCondition.Message == metalv1alpha1.OperationAnnotationRetryPropagated {
 							return nil
 						}
 					}
@@ -300,7 +300,7 @@ func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, pare
 				if annotations == nil {
 					annotations = make(map[string]string)
 				}
-				annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.OperationAnnotationRetryFailedPropagated
+				annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.OperationAnnotationRetryPropagated
 				childObj.SetAnnotations(annotations)
 			}
 			return nil

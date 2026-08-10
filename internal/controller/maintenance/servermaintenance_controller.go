@@ -113,7 +113,7 @@ func (r *ServerMaintenanceReconciler) ensureServerMaintenanceStateTransition(ctx
 	case serverMaintenancev1alpha1.ServerMaintenanceStatePending:
 		return r.handlePendingState(ctx, maintenance)
 	case serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance:
-		return r.handleInMaintenanceState(ctx)
+		return r.handleInMaintenanceState(ctx, maintenance)
 	case serverMaintenancev1alpha1.ServerMaintenanceStateFailed:
 		return r.handleFailedState(ctx, maintenance)
 	default:
@@ -243,8 +243,27 @@ func shouldRunBefore(a, b *serverMaintenancev1alpha1.ServerMaintenance) bool {
 	return a.Name < b.Name
 }
 
-func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context) (ctrl.Result, error) {
+func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+
+	server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// TEMPORARY: clear the desired power directive while a Server is InMaintenance so that no
+	// other controller (e.g. the Server controller reconciling Spec.Power) keeps forcing it back
+	// to a fixed power state and fighting with BIOS controllers that need to power-cycle the
+	// Server on their own. Remove this once the Server has a proper "Parked" state transition
+	// that natively suspends power-state enforcement during maintenance.
+	if server.Spec.Power != "" {
+		serverBase := server.DeepCopy()
+		server.Spec.Power = ""
+		if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to clear Server power directive: %w", err)
+		}
+		log.V(1).Info("Cleared Server power directive while InMaintenance", "Server", server.Name)
+	}
 
 	log.V(1).Info("Reconciled ServerMaintenance in InMaintenance state")
 	return ctrl.Result{}, nil
