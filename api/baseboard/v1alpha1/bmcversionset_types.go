@@ -8,13 +8,15 @@ import (
 )
 
 // BMCVersionSetSpec defines the desired state of BMCVersionSet.
+// +kubebuilder:validation:XValidation:rule="size(self.bmcVersionTemplate.version) > 0",message="version is required"
 type BMCVersionSetSpec struct {
 	// BMCSelector specifies a label selector to identify the BMCs to be selected.
 	// +required
 	BMCSelector metav1.LabelSelector `json:"bmcSelector"`
 
 	// BMCVersionTemplate defines the template for the BMCVersion resource to be applied to the BMCs.
-	BMCVersionTemplate BMCVersionTemplate `json:"bmcVersionTemplate,omitempty"`
+	// +required
+	BMCVersionTemplate BMCVersionTemplate `json:"bmcVersionTemplate"`
 }
 
 // BMCVersionSetStatus defines the observed state of BMCVersionSet.

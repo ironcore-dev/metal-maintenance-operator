@@ -8,13 +8,15 @@ import (
 )
 
 // BIOSVersionSetSpec defines the desired state of BIOSVersionSet.
+// +kubebuilder:validation:XValidation:rule="size(self.biosVersionTemplate.version) > 0",message="version is required"
 type BIOSVersionSetSpec struct {
 	// ServerSelector specifies a label selector to identify the servers that are to be selected.
 	// +required
 	ServerSelector metav1.LabelSelector `json:"serverSelector"`
 
 	// BIOSVersionTemplate defines the template for the BIOSVersion resource to be applied to the servers.
-	BIOSVersionTemplate BIOSVersionTemplate `json:"biosVersionTemplate,omitempty"`
+	// +required
+	BIOSVersionTemplate BIOSVersionTemplate `json:"biosVersionTemplate"`
 }
 
 // BIOSVersionSetStatus defines the observed state of BIOSVersionSet.

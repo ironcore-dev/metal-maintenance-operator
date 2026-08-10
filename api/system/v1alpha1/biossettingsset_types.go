@@ -8,9 +8,11 @@ import (
 )
 
 // BIOSSettingsSetSpec defines the desired state of BIOSSettingsSet.
+// +kubebuilder:validation:XValidation:rule="size(self.biosSettingsTemplate.version) > 0",message="version is required"
 type BIOSSettingsSetSpec struct {
 	// BIOSSettingsTemplate defines the template for the BIOSSettings resource to be applied to the servers.
-	BIOSSettingsTemplate BIOSSettingsTemplate `json:"biosSettingsTemplate,omitempty"`
+	// +required
+	BIOSSettingsTemplate BIOSSettingsTemplate `json:"biosSettingsTemplate"`
 
 	// ServerSelector specifies a label selector to identify the servers that are to be selected.
 	// +required

@@ -815,7 +815,7 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	if err != nil {
 		return diff, fmt.Errorf("failed to resolve BMCSettings variables: %w", err)
 	}
-	effectiveSettingsMap := utils.ApplyVariables(settings.Spec.SettingsMap, resolvedVars)
+	effectiveSettingsMap := utils.ApplyVariables(utils.MergeSettingsFlow(settings.Spec.SettingsFlow), resolvedVars)
 
 	currentSettings, err := bmcClient.GetBMCAttributeValues(ctx, bmc.GetBMCAttributeValuesRequest{
 		UUID:       bmcObj.Spec.BMCUUID,

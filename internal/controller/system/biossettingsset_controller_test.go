@@ -11,7 +11,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/utils/ptr"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
@@ -143,10 +142,12 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			// metal-operator/bmc/mock/server/data/Registries/BiosAttributeRegistry.v1_0_0.json
 			Spec: systemv1alpha1.BIOSSettingsSetSpec{
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version:                 mockUpServerBiosVersion,
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-					SettingsFlow: []api.SettingsFlowItem{
-						{Settings: map[string]string{"ProcCores": "2"}, Priority: 1, Name: "one"},
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 mockUpServerBiosVersion,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsFlow: []api.SettingsFlowItem{
+							{Settings: map[string]string{"ProcCores": "2"}, Priority: 1, Name: "one"},
+						},
 					},
 				},
 				ServerSelector: metav1.LabelSelector{
@@ -239,10 +240,12 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			// metal-operator/bmc/mock/server/data/Registries/BiosAttributeRegistry.v1_0_0.json
 			Spec: systemv1alpha1.BIOSSettingsSetSpec{
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version:                 mockUpServerBiosVersion,
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-					SettingsFlow: []api.SettingsFlowItem{
-						{Settings: map[string]string{"AdminPhone": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 mockUpServerBiosVersion,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsFlow: []api.SettingsFlowItem{
+							{Settings: map[string]string{"AdminPhone": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+						},
 					},
 				},
 				ServerSelector: metav1.LabelSelector{
@@ -418,10 +421,12 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			// metal-operator/bmc/mock/server/data/Registries/BiosAttributeRegistry.v1_0_0.json
 			Spec: systemv1alpha1.BIOSSettingsSetSpec{
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version:                 mockUpServerBiosVersion,
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-					SettingsFlow: []api.SettingsFlowItem{
-						{Settings: map[string]string{"AdminPhone": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 mockUpServerBiosVersion,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsFlow: []api.SettingsFlowItem{
+							{Settings: map[string]string{"AdminPhone": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+						},
 					},
 				},
 				ServerSelector: metav1.LabelSelector{
@@ -467,10 +472,12 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			// metal-operator/bmc/mock/server/data/Registries/BiosAttributeRegistry.v1_0_0.json
 			Spec: systemv1alpha1.BIOSSettingsSetSpec{
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version:                 mockUpServerBiosVersion,
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-					SettingsFlow: []api.SettingsFlowItem{
-						{Settings: map[string]string{"AdminPhone": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 mockUpServerBiosVersion,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsFlow: []api.SettingsFlowItem{
+							{Settings: map[string]string{"AdminPhone": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+						},
 					},
 				},
 				ServerSelector: metav1.LabelSelector{
@@ -628,12 +635,14 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			// metal-operator/bmc/mock/server/data/Registries/BiosAttributeRegistry.v1_0_0.json
 			Spec: systemv1alpha1.BIOSSettingsSetSpec{
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version:                 mockUpServerBiosVersion,
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-					SettingsFlow: []api.SettingsFlowItem{
-						{Settings: map[string]string{"UnknownSettings": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 mockUpServerBiosVersion,
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsFlow: []api.SettingsFlowItem{
+							{Settings: map[string]string{"UnknownSettings": "foo-bar"}, Priority: 10, Name: "foo-bar"},
+						},
+						RetryPolicy: &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 					},
-					RetryPolicy: &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 				ServerSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{

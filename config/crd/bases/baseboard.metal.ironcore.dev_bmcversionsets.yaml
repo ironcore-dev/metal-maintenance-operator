@@ -172,11 +172,14 @@ spec:
                     type: string
                 required:
                 - image
-                - version
                 type: object
             required:
             - bmcSelector
+            - bmcVersionTemplate
             type: object
+            x-kubernetes-validations:
+            - message: version is required
+              rule: size(self.bmcVersionTemplate.version) > 0
           status:
             description: BMCVersionSetStatus defines the observed state of BMCVersionSet.
             properties:

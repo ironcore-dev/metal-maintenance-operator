@@ -33,9 +33,10 @@ var _ = Describe("BMCSettings Webhook", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: "foo"},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "P70 v1.45 (12/06/2017)",
-					SettingsMap:             map[string]string{},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "P70 v1.45 (12/06/2017)",
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		By("Creating a BMCSettings")
@@ -63,9 +64,10 @@ var _ = Describe("BMCSettings Webhook", func() {
 				Spec: baseboardv1alpha1.BMCSettingsSpec{
 					BMCRef: &v1.LocalObjectReference{Name: "foo"},
 					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-						Version:                 "1.45.455b66-rev4",
-						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "1.45.455b66-rev4",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					}},
 			}
 			Expect(validator.ValidateCreate(ctx, BMCSettingsV2)).Error().To(HaveOccurred())
@@ -80,9 +82,10 @@ var _ = Describe("BMCSettings Webhook", func() {
 				Spec: baseboardv1alpha1.BMCSettingsSpec{
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-						Version:                 "P70 v1.45 (12/06/2017)",
-						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "P70 v1.45 (12/06/2017)",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					}},
 			}
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
@@ -97,9 +100,10 @@ var _ = Describe("BMCSettings Webhook", func() {
 				Spec: baseboardv1alpha1.BMCSettingsSpec{
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-						Version:                 "P70 v1.45 (12/06/2017)",
-						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "P70 v1.45 (12/06/2017)",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					}},
 			}
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
@@ -119,9 +123,10 @@ var _ = Describe("BMCSettings Webhook", func() {
 				Spec: baseboardv1alpha1.BMCSettingsSpec{
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-						Version:                 "P70 v1.45 (12/06/2017)",
-						SettingsMap:             map[string]string{},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "P70 v1.45 (12/06/2017)",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					}},
 			}
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
@@ -163,7 +168,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 
 			By("Updating an bmcSettings V1 spec, should fail to update when inProgress")
 			bmcSettingsV1Updated := BMCSettingsV1.DeepCopy()
-			bmcSettingsV1Updated.Spec.SettingsMap = map[string]string{"test": "value"}
+			bmcSettingsV1Updated.Spec.SettingsFlow = []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"test": "value"}}}
 			Expect(validator.ValidateUpdate(ctx, BMCSettingsV1, bmcSettingsV1Updated)).Error().To(HaveOccurred())
 
 			By("Updating an bmcSettings V1 spec, should pass to update when inProgress with ForceUpdateResource finalizer")

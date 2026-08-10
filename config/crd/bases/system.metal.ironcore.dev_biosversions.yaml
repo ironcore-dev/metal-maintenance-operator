@@ -156,8 +156,11 @@ spec:
                 type: string
             required:
             - image
-            - version
+            - serverRef
             type: object
+            x-kubernetes-validations:
+            - message: version is required
+              rule: size(self.version) > 0
           status:
             description: BIOSVersionStatus defines the observed state of BIOSVersion.
             properties:

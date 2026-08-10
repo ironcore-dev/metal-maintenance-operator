@@ -8,7 +8,6 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
@@ -36,13 +35,15 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version: defaultMockUpServerBiosVersion,
-					SettingsFlow: []api.SettingsFlowItem{{
-						Settings: map[string]string{},
-						Priority: 1,
-						Name:     "one",
-					}},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					SettingsTemplate: api.SettingsTemplate{
+						Version: defaultMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -67,13 +68,15 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version: defaultMockUpServerBiosVersion,
-					SettingsFlow: []api.SettingsFlowItem{{
-						Settings: map[string]string{},
-						Priority: 1,
-						Name:     "one",
-					}},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					SettingsTemplate: api.SettingsTemplate{
+						Version: defaultMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -89,13 +92,15 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version: defaultMockUpServerBiosVersion,
-					SettingsFlow: []api.SettingsFlowItem{{
-						Settings: map[string]string{},
-						Priority: 1,
-						Name:     "one",
-					}},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					SettingsTemplate: api.SettingsTemplate{
+						Version: defaultMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -111,13 +116,15 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version: anotherMockUpServerBiosVersion,
-					SettingsFlow: []api.SettingsFlowItem{{
-						Settings: map[string]string{},
-						Priority: 1,
-						Name:     "one",
-					}},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					SettingsTemplate: api.SettingsTemplate{
+						Version: anotherMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -138,13 +145,15 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version: anotherMockUpServerBiosVersion,
-					SettingsFlow: []api.SettingsFlowItem{{
-						Settings: map[string]string{},
-						Priority: 1,
-						Name:     "one",
-					}},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					SettingsTemplate: api.SettingsTemplate{
+						Version: anotherMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -165,13 +174,15 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			Spec: systemv1alpha1.BIOSSettingsSpec{
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
-					Version: anotherMockUpServerBiosVersion,
-					SettingsFlow: []api.SettingsFlowItem{{
-						Settings: map[string]string{},
-						Priority: 1,
-						Name:     "one",
-					}},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					SettingsTemplate: api.SettingsTemplate{
+						Version: anotherMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}

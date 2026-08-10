@@ -8,30 +8,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
 // BIOSSettingsTemplate defines the template for BIOS settings to be applied.
 type BIOSSettingsTemplate struct {
-	// Version specifies the software version (e.g. BIOS, BMC) these settings apply to.
-	// +required
-	Version string `json:"version"`
-
-	// SettingsFlow contains the BIOS settings sequence to apply in the given order.
-	// +optional
-	SettingsFlow []api.SettingsFlowItem `json:"settingsFlow,omitempty"`
-
-	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
-	// +optional
-	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
-
-	// ServerMaintenancePolicy is a maintenance policy to be enforced on the server.
-	// +optional
-	ServerMaintenancePolicy *maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+	api.SettingsTemplate `json:",inline"`
 }
 
 // BIOSSettingsSpec defines the desired state of BIOSSettings.
+// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
 type BIOSSettingsSpec struct {
 	// BIOSSettingsTemplate defines the template for BIOS Settings to be applied on the servers.
 	BIOSSettingsTemplate `json:",inline"`
@@ -42,6 +28,7 @@ type BIOSSettingsSpec struct {
 
 	// ServerRef is a reference to a specific server to apply the BIOS settings on.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="serverRef is immutable"
+	// +required
 	ServerRef *corev1.LocalObjectReference `json:"serverRef,omitempty"`
 }
 

@@ -125,7 +125,6 @@ spec:
                     type: string
                 required:
                 - image
-                - version
                 type: object
               serverSelector:
                 description: ServerSelector specifies a label selector to identify
@@ -175,8 +174,12 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
             required:
+            - biosVersionTemplate
             - serverSelector
             type: object
+            x-kubernetes-validations:
+            - message: version is required
+              rule: size(self.biosVersionTemplate.version) > 0
           status:
             description: BIOSVersionSetStatus defines the observed state of BIOSVersionSet.
             properties:

@@ -29,8 +29,8 @@ const (
 // BIOSVersionTemplate defines the desired BIOS firmware version and upgrade parameters.
 type BIOSVersionTemplate struct {
 	// Version specifies the BIOS version to upgrade to.
-	// +required
-	Version string `json:"version"`
+	// +optional
+	Version string `json:"version,omitempty"`
 
 	// UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies.
 	// +optional
@@ -50,6 +50,7 @@ type BIOSVersionTemplate struct {
 }
 
 // BIOSVersionSpec defines the desired state of BIOSVersion.
+// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
 type BIOSVersionSpec struct {
 	// BIOSVersionTemplate defines the template for Version to be applied on the servers.
 	BIOSVersionTemplate `json:",inline"`
@@ -60,8 +61,8 @@ type BIOSVersionSpec struct {
 
 	// ServerRef is a reference to a specific server to apply the BIOS upgrade on.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="serverRef is immutable"
-	// +optional
-	ServerRef *corev1.LocalObjectReference `json:"serverRef,omitempty"`
+	// +required
+	ServerRef *corev1.LocalObjectReference `json:"serverRef"`
 }
 
 // BIOSVersionStatus defines the observed state of BIOSVersion.

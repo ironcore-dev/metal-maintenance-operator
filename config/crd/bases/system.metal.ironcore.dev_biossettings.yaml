@@ -76,7 +76,7 @@ spec:
                 type: object
               serverMaintenancePolicy:
                 description: ServerMaintenancePolicy is a maintenance policy to be
-                  enforced on the server.
+                  applied on the server.
                 type: string
               serverMaintenanceRef:
                 description: ServerMaintenanceRef is a reference to a ServerMaintenance
@@ -111,7 +111,7 @@ spec:
                 - message: serverRef is immutable
                   rule: self == oldSelf
               settingsFlow:
-                description: SettingsFlow contains the BIOS settings sequence to apply
+                description: SettingsFlow contains the settings sequence to apply
                   in the given order.
                 items:
                   properties:
@@ -139,13 +139,142 @@ spec:
                   - priority
                   type: object
                 type: array
+              variables:
+                description: Variables is a list of variables that can be used in
+                  the settings for templating.
+                items:
+                  properties:
+                    key:
+                      description: Key is the name of the variable to be used in the
+                        BMCSettingsTemplate format.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                    valueFrom:
+                      description: ValueFrom defines a simple single source for the
+                        variable value.
+                      properties:
+                        configMapKeyRef:
+                          description: ConfigMapKeyRef points to a namespaced ConfigMap
+                            key.
+                          properties:
+                            key:
+                              description: Key is the key within the referenced object.
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name is the referenced object name.
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: Namespace is the referenced object namespace.
+                              maxLength: 63
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          - namespace
+                          type: object
+                        fieldRef:
+                          description: |-
+                            FieldRef sources the value from a field of the BMCSettings object itself (e.g. spec.bmcRef.name).
+                            Only string-typed fields are supported; integer, bool, or map fields will cause a resolution error.
+                          properties:
+                            fieldPath:
+                              description: |-
+                                FieldPath is the path of the field on the BMCSettings object to select (e.g. spec.bmcRef.name).
+                                Only string-typed fields are supported; integer, bool, or map fields will cause a resolution error.
+                              maxLength: 256
+                              minLength: 1
+                              type: string
+                          required:
+                          - fieldPath
+                          type: object
+                        objectFieldRef:
+                          description: |-
+                            ObjectFieldRef sources the value from a field of a named related object.
+                            The kind must be "BMC". Supports dot-path navigation and bracket notation for map keys
+                            containing dots or slashes (e.g. metadata.labels[kubernetes.metal.cloud.sap/nodename]).
+                          properties:
+                            fieldPath:
+                              description: |-
+                                FieldPath is the path of the field to select on the target object.
+                                Supports dot-path navigation (e.g. metadata.name) and bracket notation for map
+                                keys containing dots or slashes (e.g. metadata.labels[topology.kubernetes.io/region]).
+                              maxLength: 256
+                              minLength: 1
+                              type: string
+                            kind:
+                              description: Kind is the API kind of the object to read
+                                the field from (e.g. "BMC").
+                              maxLength: 63
+                              minLength: 1
+                              type: string
+                            name:
+                              description: |-
+                                Name is the name of the object to read the field from.
+                                Supports $(VAR) substitution using previously resolved variables in declaration order.
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                          required:
+                          - fieldPath
+                          - kind
+                          - name
+                          type: object
+                        secretKeyRef:
+                          description: SecretKeyRef points to a namespaced Secret
+                            key.
+                          properties:
+                            key:
+                              description: Key is the key within the referenced object.
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name is the referenced object name.
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: Namespace is the referenced object namespace.
+                              maxLength: 63
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          - namespace
+                          type: object
+                      type: object
+                      x-kubernetes-validations:
+                      - message: exactly one of fieldRef, objectFieldRef, configMapKeyRef,
+                          or secretKeyRef must be provided
+                        rule: '(has(self.fieldRef) ? 1 : 0) + (has(self.objectFieldRef)
+                          ? 1 : 0) + (has(self.configMapKeyRef) ? 1 : 0) + (has(self.secretKeyRef)
+                          ? 1 : 0) == 1'
+                      - message: objectFieldRef.kind must be 'BMC'
+                        rule: '!has(self.objectFieldRef) || self.objectFieldRef.kind
+                          == ''BMC'''
+                  required:
+                  - key
+                  - valueFrom
+                  type: object
+                maxItems: 64
+                type: array
               version:
                 description: Version specifies the software version (e.g. BIOS, BMC)
                   these settings apply to.
                 type: string
             required:
-            - version
+            - serverRef
             type: object
+            x-kubernetes-validations:
+            - message: version is required
+              rule: size(self.version) > 0
           status:
             description: BIOSSettingsStatus defines the observed state of BIOSSettings.
             properties:

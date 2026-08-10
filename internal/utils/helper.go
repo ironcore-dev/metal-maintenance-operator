@@ -458,6 +458,17 @@ func ResolveVariables(
 	return resolved, nil
 }
 
+// MergeSettingsFlow merges all SettingsFlow items into a single flat settings map.
+// It does not consider the item Priority; if the same setting key is present in
+// multiple items, the value from the later item in the list wins.
+func MergeSettingsFlow(flow []api.SettingsFlowItem) map[string]string {
+	merged := make(map[string]string)
+	for _, item := range flow {
+		maps.Copy(merged, item.Settings)
+	}
+	return merged
+}
+
 // ApplyVariables substitutes $(KEY) placeholders in settings map values.
 func ApplyVariables(settingsMap map[string]string, resolved map[string]string) map[string]string {
 	if len(resolved) == 0 {

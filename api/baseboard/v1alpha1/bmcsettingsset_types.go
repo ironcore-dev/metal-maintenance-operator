@@ -8,6 +8,7 @@ import (
 )
 
 // BMCSettingsSetSpec defines the desired state of BMCSettingsSet.
+// +kubebuilder:validation:XValidation:rule="size(self.bmcSettingsTemplate.version) > 0",message="version is required"
 type BMCSettingsSetSpec struct {
 	// BMCSettingsTemplate defines the template for the BMCSettings resource to be applied to the BMCs.
 	// +required

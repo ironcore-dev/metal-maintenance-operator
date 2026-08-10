@@ -3,10 +3,35 @@
 package api
 
 import (
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/stmcginnis/gofish/schemas"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// SettingsTemplate defines the fields shared by BIOS and BMC settings templates.
+type SettingsTemplate struct {
+	// Version specifies the software version (e.g. BIOS, BMC) these settings apply to.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// SettingsFlow contains the settings sequence to apply in the given order.
+	// +optional
+	SettingsFlow []SettingsFlowItem `json:"settingsFlow,omitempty"`
+
+	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
+	// +optional
+	RetryPolicy *RetryPolicy `json:"retryPolicy,omitempty"`
+
+	// Variables is a list of variables that can be used in the settings for templating.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Variables []Variable `json:"variables,omitempty"`
+
+	// ServerMaintenancePolicy is a maintenance policy to be applied on the server.
+	// +optional
+	ServerMaintenancePolicy maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+}
 
 // ServerMaintenanceRefItem is a reference to a ServerMaintenance object.
 type ServerMaintenanceRefItem struct {

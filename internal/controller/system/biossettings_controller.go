@@ -1358,9 +1358,7 @@ func (r *BIOSSettingsReconciler) requestMaintenanceForServer(ctx context.Context
 		}}
 
 	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {
-		if settings.Spec.ServerMaintenancePolicy != nil {
-			serverMaintenance.Spec.Policy = *settings.Spec.ServerMaintenancePolicy
-		}
+		serverMaintenance.Spec.Policy = settings.Spec.ServerMaintenancePolicy
 		serverMaintenance.Spec.ServerRef = &corev1.LocalObjectReference{Name: server.Name}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
 			serverMaintenance.Status.State = ""

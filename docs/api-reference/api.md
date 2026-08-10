@@ -109,10 +109,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ | Version specifies the BMC firmware version for which the settings should be applied. |  |  |
-| `settings` _object (keys:string, values:string)_ | SettingsMap contains BMC settings as a map. |  |  |
-| `variables` _Variable array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
+| `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each<br />server that needs to be updated with the BMC settings. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
@@ -170,10 +170,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ | Version specifies the BMC firmware version for which the settings should be applied. |  |  |
-| `settings` _object (keys:string, values:string)_ | SettingsMap contains BMC settings as a map. |  |  |
-| `variables` _Variable array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
+| `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 
 
@@ -382,6 +382,7 @@ _Appears in:_
 - [BMCVersionSpec](#bmcversionspec)
 - [BMCVersionTemplate](#bmcversiontemplate)
 - [ServerMaintenanceSpec](#servermaintenancespec)
+- [SettingsTemplate](#settingstemplate)
 
 | Field | Description |
 | --- | --- |
@@ -716,9 +717,10 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
-| `settingsFlow` _SettingsFlowItem array_ | SettingsFlow contains the BIOS settings sequence to apply in the given order. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to a ServerMaintenance object that BIOSSettings has requested for the referred server. |  |  |
 | `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the BIOS settings on. |  |  |
 
@@ -778,9 +780,10 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
-| `settingsFlow` _SettingsFlowItem array_ | SettingsFlow contains the BIOS settings sequence to apply in the given order. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 
 
 #### BIOSVersion

@@ -8,35 +8,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 )
 
 // BMCSettingsTemplate defines the template for BMC settings to be applied.
 // +kubebuilder:validation:XValidation:rule="!has(self.variables) || self.variables.all(v, self.variables.filter(w, w.key == v.key).size() == 1)",message="variable keys must be unique"
 type BMCSettingsTemplate struct {
-	// Version specifies the BMC firmware version for which the settings should be applied.
-	// +required
-	Version string `json:"version"`
-
-	// SettingsMap contains BMC settings as a map.
-	// +optional
-	SettingsMap map[string]string `json:"settings,omitempty"`
-
-	// Variables is a list of variables that can be used in the settings for templating.
-	// +kubebuilder:validation:MaxItems=64
-	// +optional
-	Variables []api.Variable `json:"variables,omitempty"`
-
-	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
-	// +optional
-	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
-
-	// ServerMaintenancePolicy is a maintenance policy to be applied on the server.
-	// +optional
-	ServerMaintenancePolicy maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+	api.SettingsTemplate `json:",inline"`
 }
 
 // BMCSettingsSpec defines the desired state of BMCSettings.
+// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
 type BMCSettingsSpec struct {
 	BMCSettingsTemplate `json:",inline"`
 

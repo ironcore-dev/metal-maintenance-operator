@@ -100,8 +100,6 @@ var _ = Describe("BMCSettings Controller", func() {
 	})
 
 	It("should successfully patch BMCSettings reference to referred BMC", func(ctx SpecContext) {
-		bmcSetting := make(map[string]string)
-
 		By("Creating a BMCSettings")
 		settings := &baseboardv1alpha1.BMCSettings{
 			ObjectMeta: metav1.ObjectMeta{
@@ -110,9 +108,10 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -131,8 +130,6 @@ var _ = Describe("BMCSettings Controller", func() {
 	})
 
 	It("should move to completed if no BMCSettings changes to referred BMC", func(ctx SpecContext) {
-		bmcSetting := make(map[string]string)
-
 		By("Creating a BMCSettings")
 		settings := &baseboardv1alpha1.BMCSettings{
 			ObjectMeta: metav1.ObjectMeta{
@@ -141,9 +138,10 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -167,8 +165,7 @@ var _ = Describe("BMCSettings Controller", func() {
 	})
 
 	It("should update the setting if BMCSettings changes requested in Available State", func(ctx SpecContext) {
-		bmcSetting := make(map[string]string)
-		bmcSetting["abc"] = "changed-bmc-setting"
+		bmcSetting := map[string]string{"abc": "changed-bmc-setting"}
 
 		By("update the server state to Available state")
 		Eventually(UpdateStatus(server, func() {
@@ -184,9 +181,11 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -228,8 +227,7 @@ var _ = Describe("BMCSettings Controller", func() {
 	})
 
 	It("should create maintenance and wait for its approval before applying settings", func(ctx SpecContext) {
-		bmcSetting := make(map[string]string)
-		bmcSetting["abc"] = "changed-to-req-server-maintenance-through-ownerapproved"
+		bmcSetting := map[string]string{"abc": "changed-to-req-server-maintenance-through-ownerapproved"}
 
 		// Put server in reserved state and create a BMC setting with OwnerApproved policy that needs reboot
 		By("Creating an Ignition secret")
@@ -276,9 +274,11 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -360,8 +360,7 @@ var _ = Describe("BMCSettings Controller", func() {
 	})
 
 	It("should wait for upgrade and reconcile when BMCSettings version is correct", func(ctx SpecContext) {
-		bmcSetting := make(map[string]string)
-		bmcSetting["fooreboot"] = "145"
+		bmcSetting := map[string]string{"fooreboot": "145"}
 
 		By("Updating the server state to Available")
 		Eventually(UpdateStatus(server, func() {
@@ -377,9 +376,11 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "2.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "2.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -457,8 +458,7 @@ var _ = Describe("BMCSettings Controller", func() {
 
 	It("should allow retry using annotation", func(ctx SpecContext) {
 		// Settings that do not require reboot (mocked in bmc/redfish_local.go)
-		bmcSetting := make(map[string]string)
-		bmcSetting["fooreboot"] = "145"
+		bmcSetting := map[string]string{"fooreboot": "145"}
 
 		By("Updating the server state to Available")
 		Eventually(UpdateStatus(server, func() {
@@ -474,9 +474,11 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -513,8 +515,7 @@ var _ = Describe("BMCSettings Controller", func() {
 
 	It("should replace missing BMCSettings ref in server", func(ctx SpecContext) {
 		// Settings that do not require reboot (mocked in bmc/redfish_local.go)
-		bmcSetting := make(map[string]string)
-		bmcSetting["fooreboot"] = "145"
+		bmcSetting := map[string]string{"fooreboot": "145"}
 
 		By("Updating the server state to Available")
 		Eventually(UpdateStatus(server, func() {
@@ -530,9 +531,11 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
@@ -610,9 +613,11 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, bmcSettings2)).To(Succeed())
@@ -645,8 +650,7 @@ var _ = Describe("BMCSettings Controller", func() {
 	It("Should allow retry using annotation", func(ctx SpecContext) {
 		// settings which does not reboot. mocked at
 		// metal-operator/bmc/redfish_local.go defaultMockedBMCSetting
-		bmcSetting := make(map[string]string)
-		bmcSetting["UnknownData"] = "145"
+		bmcSetting := map[string]string{"UnknownData": "145"}
 
 		failedAutoRetryCount := 2
 
@@ -668,10 +672,12 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:                 "1.45.455b66-rev4",
-					SettingsMap:             bmcSetting,
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					},
 				}},
 		}
 		Expect(k8sClient.Create(ctx, bmcSettings)).To(Succeed())
@@ -734,21 +740,23 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:     "1.45.455b66-rev4",
-					SettingsMap: map[string]string{"abc": "$(SETTING_VAL)"},
-					Variables: []api.Variable{
-						{
-							Key: "SETTING_VAL",
-							ValueFrom: &api.VariableSourceValueFrom{
-								SecretKeyRef: &api.NamespacedKeySelector{
-									Name:      varSecret.Name,
-									Namespace: ns.Name,
-									Key:       "bmc-setting",
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "$(SETTING_VAL)"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						Variables: []api.Variable{
+							{
+								Key: "SETTING_VAL",
+								ValueFrom: &api.VariableSourceValueFrom{
+									SecretKeyRef: &api.NamespacedKeySelector{
+										Name:      varSecret.Name,
+										Namespace: ns.Name,
+										Key:       "bmc-setting",
+									},
 								},
 							},
 						},
 					},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -791,21 +799,23 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:     "1.45.455b66-rev4",
-					SettingsMap: map[string]string{"abc": "$(SETTING_VAL)"},
-					Variables: []api.Variable{
-						{
-							Key: "SETTING_VAL",
-							ValueFrom: &api.VariableSourceValueFrom{
-								ConfigMapKeyRef: &api.NamespacedKeySelector{
-									Name:      varCM.Name,
-									Namespace: ns.Name,
-									Key:       "bmc-setting",
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "$(SETTING_VAL)"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						Variables: []api.Variable{
+							{
+								Key: "SETTING_VAL",
+								ValueFrom: &api.VariableSourceValueFrom{
+									ConfigMapKeyRef: &api.NamespacedKeySelector{
+										Name:      varCM.Name,
+										Namespace: ns.Name,
+										Key:       "bmc-setting",
+									},
 								},
 							},
 						},
 					},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -835,19 +845,21 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:     "1.45.455b66-rev4",
-					SettingsMap: map[string]string{"abc": "$(BMC_NAME)"},
-					Variables: []api.Variable{
-						{
-							Key: "BMC_NAME",
-							ValueFrom: &api.VariableSourceValueFrom{
-								FieldRef: &api.FieldRefSelector{
-									FieldPath: "spec.bmcRef.name",
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "$(BMC_NAME)"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						Variables: []api.Variable{
+							{
+								Key: "BMC_NAME",
+								ValueFrom: &api.VariableSourceValueFrom{
+									FieldRef: &api.FieldRefSelector{
+										FieldPath: "spec.bmcRef.name",
+									},
 								},
 							},
 						},
 					},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -891,30 +903,32 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version: "1.45.455b66-rev4",
-					// Both placeholders resolved from different sources into one value.
-					SettingsMap: map[string]string{"abc": "$(BmcName).$(SearchDomain)"},
-					Variables: []api.Variable{
-						{
-							Key: "BmcName",
-							ValueFrom: &api.VariableSourceValueFrom{
-								FieldRef: &api.FieldRefSelector{
-									FieldPath: "spec.bmcRef.name",
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "$(BmcName).$(SearchDomain)"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						// Both placeholders resolved from different sources into one value.
+						Variables: []api.Variable{
+							{
+								Key: "BmcName",
+								ValueFrom: &api.VariableSourceValueFrom{
+									FieldRef: &api.FieldRefSelector{
+										FieldPath: "spec.bmcRef.name",
+									},
 								},
 							},
-						},
-						{
-							Key: "SearchDomain",
-							ValueFrom: &api.VariableSourceValueFrom{
-								ConfigMapKeyRef: &api.NamespacedKeySelector{
-									Name:      domainCM.Name,
-									Namespace: ns.Name,
-									Key:       "search-domain",
+							{
+								Key: "SearchDomain",
+								ValueFrom: &api.VariableSourceValueFrom{
+									ConfigMapKeyRef: &api.NamespacedKeySelector{
+										Name:      domainCM.Name,
+										Namespace: ns.Name,
+										Key:       "search-domain",
+									},
 								},
 							},
 						},
 					},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}
@@ -967,31 +981,33 @@ var _ = Describe("BMCSettings Controller", func() {
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
 				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
-					Version:     "1.45.455b66-rev4",
-					SettingsMap: map[string]string{"abc": "$(LicenseKey)"},
-					Variables: []api.Variable{
-						{
-							// Step 1: resolve BmcName from the object's own field.
-							Key: "BmcName",
-							ValueFrom: &api.VariableSourceValueFrom{
-								FieldRef: &api.FieldRefSelector{
-									FieldPath: "spec.bmcRef.name",
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "$(LicenseKey)"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						Variables: []api.Variable{
+							{
+								// Step 1: resolve BmcName from the object's own field.
+								Key: "BmcName",
+								ValueFrom: &api.VariableSourceValueFrom{
+									FieldRef: &api.FieldRefSelector{
+										FieldPath: "spec.bmcRef.name",
+									},
 								},
 							},
-						},
-						{
-							// Step 2: use the already-resolved $(BmcName) as the ConfigMap key.
-							Key: "LicenseKey",
-							ValueFrom: &api.VariableSourceValueFrom{
-								ConfigMapKeyRef: &api.NamespacedKeySelector{
-									Name:      licensesCM.Name,
-									Namespace: ns.Name,
-									Key:       "$(BmcName)", // expanded to bmc.Name at resolution time
+							{
+								// Step 2: use the already-resolved $(BmcName) as the ConfigMap key.
+								Key: "LicenseKey",
+								ValueFrom: &api.VariableSourceValueFrom{
+									ConfigMapKeyRef: &api.NamespacedKeySelector{
+										Name:      licensesCM.Name,
+										Namespace: ns.Name,
+										Key:       "$(BmcName)", // expanded to bmc.Name at resolution time
+									},
 								},
 							},
 						},
 					},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
 				},
 			},
 		}

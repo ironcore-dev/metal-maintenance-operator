@@ -156,9 +156,12 @@ spec:
                 description: Version specifies the BMC version to upgrade to.
                 type: string
             required:
+            - bmcRef
             - image
-            - version
             type: object
+            x-kubernetes-validations:
+            - message: version is required
+              rule: size(self.version) > 0
           status:
             description: BMCVersionStatus defines the observed state of BMCVersion.
             properties:

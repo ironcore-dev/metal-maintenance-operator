@@ -29,8 +29,8 @@ const (
 // BMCVersionTemplate defines the desired BMC firmware version and upgrade parameters.
 type BMCVersionTemplate struct {
 	// Version specifies the BMC version to upgrade to.
-	// +required
-	Version string `json:"version"`
+	// +optional
+	Version string `json:"version,omitempty"`
 
 	// UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies.
 	// +optional
@@ -50,6 +50,7 @@ type BMCVersionTemplate struct {
 }
 
 // BMCVersionSpec defines the desired state of BMCVersion.
+// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
 type BMCVersionSpec struct {
 	// BMCVersionTemplate defines the template for BMC version to be applied on the server's BMC.
 	BMCVersionTemplate `json:",inline"`
@@ -60,6 +61,7 @@ type BMCVersionSpec struct {
 
 	// BMCRef is a reference to a specific BMC to apply BMC upgrade on.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="bmcRef is immutable"
+	// +required
 	BMCRef *corev1.LocalObjectReference `json:"bmcRef,omitempty"`
 }
 
