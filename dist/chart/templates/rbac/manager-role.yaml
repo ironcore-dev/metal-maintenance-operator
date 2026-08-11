@@ -107,9 +107,11 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcs
+  - servers
   verbs:
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -134,16 +136,6 @@ rules:
   verbs:
   - create
   - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
-  - servers
-  verbs:
   - get
   - list
   - patch
