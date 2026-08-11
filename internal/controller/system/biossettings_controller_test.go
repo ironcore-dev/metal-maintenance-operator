@@ -1915,7 +1915,7 @@ func ensureBiosSettingsCondition(biosSettings *systemv1alpha1.BIOSSettings, Rebo
 		HaveField("Status.Conditions", HaveLen(commonConditions)),
 	)
 
-	requiredFlowConditionMatchers := make([]interface{}, 0, len(requiredFlowConditionTypes))
+	requiredFlowConditionMatchers := make([]any, 0, len(requiredFlowConditionTypes))
 	for _, condType := range requiredFlowConditionTypes {
 		requiredFlowConditionMatchers = append(requiredFlowConditionMatchers, HaveField("Type", condType))
 	}

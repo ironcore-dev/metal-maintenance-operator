@@ -8,7 +8,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/google/uuid v1.6.0
 	github.com/ironcore-dev/controller-utils v0.13.0
-	github.com/ironcore-dev/metal-operator v0.6.2
+	github.com/ironcore-dev/metal-operator v0.6.1-0.20260810054956-99edfbf66cfb
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.24.1
@@ -111,5 +111,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace github.com/ironcore-dev/metal-operator => ../metal-operator

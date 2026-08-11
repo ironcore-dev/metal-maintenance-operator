@@ -321,7 +321,7 @@ func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, pare
 // EnqueueFromChildObjUpdatesExceptAnnotation filters update events, suppressing pure annotation-propagation changes.
 func EnqueueFromChildObjUpdatesExceptAnnotation(e event.UpdateEvent) bool {
 	isNil := func(arg any) bool {
-		if v := reflect.ValueOf(arg); !v.IsValid() || ((v.Kind() == reflect.Ptr ||
+		if v := reflect.ValueOf(arg); !v.IsValid() || ((v.Kind() == reflect.Pointer ||
 			v.Kind() == reflect.Interface ||
 			v.Kind() == reflect.Slice ||
 			v.Kind() == reflect.Map ||
@@ -347,7 +347,7 @@ func EnqueueFromChildObjUpdatesExceptAnnotation(e event.UpdateEvent) bool {
 // LabelChangeOrAnyFieldChangeInObject returns true if labels or any of the provided fields changed.
 func LabelChangeOrAnyFieldChangeInObject(e event.UpdateEvent, oldFields, newFields []any) bool {
 	isNil := func(arg any) bool {
-		if v := reflect.ValueOf(arg); !v.IsValid() || ((v.Kind() == reflect.Ptr ||
+		if v := reflect.ValueOf(arg); !v.IsValid() || ((v.Kind() == reflect.Pointer ||
 			v.Kind() == reflect.Interface ||
 			v.Kind() == reflect.Slice ||
 			v.Kind() == reflect.Map ||

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // Originally from
 // https://github.com/kubernetes/kubernetes/blob/master/third_party/forked/golang/expansion/expand_test.go
 // Forked under the Apache License 2.0. See LICENSES/Apache-2.0.txt.

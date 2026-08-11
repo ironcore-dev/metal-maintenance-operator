@@ -648,26 +648,7 @@ func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClie
 			}
 		}
 
-		powerOnIssued, err := utils.GetCondition(r.Conditions, flowStatus.Conditions, ConditionSettingsServerPowerOnIssued)
-		if err != nil {
-			return false, fmt.Errorf("failed to get Condition for issued powerOn of server: %w", err)
-		}
-		if powerOnIssued.Status != metav1.ConditionTrue {
-			if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
-				return false, fmt.Errorf("failed to power on Server %w", err)
-			}
-			if err := r.Conditions.Update(
-				powerOnIssued,
-				conditionutils.UpdateStatus(corev1.ConditionTrue),
-				conditionutils.UpdateReason(ReasonSettingsServerPowerOnIssued),
-				conditionutils.UpdateMessage("Issued PowerOn request to the server via BMC"),
-			); err != nil {
-				return false, fmt.Errorf("failed to update issued power on condition: %w", err)
-			}
-			return false, r.updateFlowStatus(ctx, settings, flowStatus.State, flowStatus, powerOnIssued)
-		}
-		log.V(1).Info("Reconciled BIOSSettings at TurnOnServer Condition, waiting for server to power on")
-		return false, nil
+		return r.ensureServerPowerOnIssued(ctx, bmcClient, settings, flowStatus, server)
 	}
 
 	// check if we have already determined if we need reboot of not.
@@ -766,6 +747,32 @@ func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClie
 		}
 	}
 	return true, nil
+}
+
+// ensureServerPowerOnIssued issues a PowerOn request to the server via BMC if it has not
+// already been issued, and updates the corresponding flow condition accordingly.
+func (r *BIOSSettingsReconciler) ensureServerPowerOnIssued(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, flowStatus *systemv1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	powerOnIssued, err := utils.GetCondition(r.Conditions, flowStatus.Conditions, ConditionSettingsServerPowerOnIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get Condition for issued powerOn of server: %w", err)
+	}
+	if powerOnIssued.Status != metav1.ConditionTrue {
+		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
+			return false, fmt.Errorf("failed to power on Server %w", err)
+		}
+		if err := r.Conditions.Update(
+			powerOnIssued,
+			conditionutils.UpdateStatus(corev1.ConditionTrue),
+			conditionutils.UpdateReason(ReasonSettingsServerPowerOnIssued),
+			conditionutils.UpdateMessage("Issued PowerOn request to the server via BMC"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update issued power on condition: %w", err)
+		}
+		return false, r.updateFlowStatus(ctx, settings, flowStatus.State, flowStatus, powerOnIssued)
+	}
+	log.V(1).Info("Reconciled BIOSSettings at TurnOnServer Condition, waiting for server to power on")
+	return false, nil
 }
 
 func (r *BIOSSettingsReconciler) setTimeoutForAppliedSettings(ctx context.Context, settings *systemv1alpha1.BIOSSettings, flowStatus *systemv1alpha1.BIOSSettingsFlowStatus) (bool, error) {
