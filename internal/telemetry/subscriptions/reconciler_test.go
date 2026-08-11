@@ -823,6 +823,27 @@ func TestNotifyTestEvent_AnyID_RecordsSuccess(t *testing.T) {
 	}
 }
 
+func TestNotifyTestEvent_AfterDeadline_NoOp(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond)
+	cfg.TestEventTimeout = 5 * time.Millisecond // very short deadline
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	// Wait for the deadline to expire before notifying.
+	time.Sleep(20 * time.Millisecond)
+	r.NotifyTestEvent(testBMCName, "late-arrival")
+	if results := rec.snapshotResults(); len(results) != 0 {
+		t.Errorf("event after deadline should be a no-op, got %+v", results)
+	}
+}
+
 func TestNotifyTestEvent_NoPending_NoOp(t *testing.T) {
 	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
 	rec := &fakeTestRecorder{}

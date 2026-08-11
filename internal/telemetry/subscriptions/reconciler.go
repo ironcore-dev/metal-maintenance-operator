@@ -609,12 +609,17 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 }
 
 // NotifyTestEvent is called by the event receiver when an alert arrives.
-// It confirms any pending test for the BMC as successful. The messageId
-// is not used for correlation — any event arrival within the deadline
-// window is accepted as confirmation. Implements events.TestEventNotifier.
+// It confirms any pending test for the BMC as successful, provided the
+// deadline has not yet passed. Events arriving after the deadline are
+// ignored — the next maybeRunTestEvent pass will record failure.
+// Implements events.TestEventNotifier.
 func (r *BMCReconciler) NotifyTestEvent(bmcName, _ string) {
-	_, ok := r.testPending.Load(bmcName)
+	raw, ok := r.testPending.Load(bmcName)
 	if !ok {
+		return
+	}
+	entry := raw.(testEntry)
+	if time.Now().After(entry.deadline) {
 		return
 	}
 	r.testPending.Delete(bmcName)
