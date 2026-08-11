@@ -65,11 +65,10 @@ type HardwareMatch struct {
 	// delivery. Must be a semver string if set. BMCs below this version
 	// are not subscribed.
 	MinFirmware string `yaml:"minFirmware,omitempty"`
-	// TestMessageId is the Redfish registry-format MessageId used when
-	// firing SubmitTestEvent health checks (e.g. "iDRAC.2.9.RAC0182" for
-	// Dell, "SYS.1.0.TestEvent" for others). Must follow the pattern
-	// <Registry>.<Major>.<Minor>.<Key>. Required for each vendor row when
-	// testEventInterval is non-zero; optional when disabled, but must use
-	// a valid format when set.
+	// TestMessageId is the MessageId passed to Redfish SubmitTestEvent health
+	// checks. The accepted format is vendor-specific: iDRAC uses the short
+	// registry key without the registry prefix (e.g. "SYS1000"), while other
+	// vendors may use a dot-separated registry path. Required for each vendor
+	// row when testEventInterval is non-zero; optional otherwise.
 	TestMessageId string `yaml:"testMessageId,omitempty"`
 }
