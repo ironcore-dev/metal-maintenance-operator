@@ -228,9 +228,11 @@ func (r *BMCVersionSetReconciler) createMissingBMCVersions(
 	var errs []error
 	for _, bmc := range bmcList.Items {
 		if _, ok := BMCWithBMCVersion[bmc.Name]; !ok {
+			// generate a deterministic k8s conform name, so that a re-reconcile on a
+			// stale cache cannot create duplicate children.
 			newBMCVersion := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: "bmc-version-set-",
+					Name: utils.VersionSetChildName(bmcVersionSet.Name, bmc.Name),
 				}}
 			opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, newBMCVersion, func() error {
 				newBMCVersion.Spec.BMCVersionTemplate = *bmcVersionSet.Spec.BMCVersionTemplate.DeepCopy()

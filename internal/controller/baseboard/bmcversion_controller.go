@@ -267,7 +267,10 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 		}
 
 		if ok, err := r.resetBMC(ctx, bmcVersion, bmcObj, constants.ConditionResetIssued); !ok || err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to reset bmc %s: %w", client.ObjectKeyFromObject(bmcObj), err)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to reset bmc %s: %w", client.ObjectKeyFromObject(bmcObj), err)
+			}
+			return ctrl.Result{}, nil
 		}
 
 		return r.handleUpgradeInProgressState(ctx, bmcVersion, bmcClient, bmcObj)
@@ -327,7 +330,7 @@ func (r *BMCVersionReconciler) handleUpgradeInProgressState(
 
 	if completedCondition.Status != metav1.ConditionTrue {
 		log.V(1).Info("Check upgrade task of BMC")
-		ctrlResult, err := r.checkBMCUpgradeStatus(ctx, bmcVersion, bmcClient, BMC, bmcVersion.Status.UpgradeTask.URI, completedCondition)
+		ctrlResult, err := r.checkBMCUpgradeStatus(ctx, bmcVersion, bmcClient, BMC, completedCondition)
 		var TaskFetchFailed *utils.BMCTaskFetchFailedError
 		if errors.As(err, &TaskFetchFailed) {
 			log.V(1).Info("Failed to fetch BMC upgrade task status from BMC", "error", err)
@@ -595,7 +598,10 @@ func (r *BMCVersionReconciler) getServerMaintenances(ctx context.Context, bmcVer
 		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{}
 		if err := r.Get(ctx, key, serverMaintenance); err != nil {
 			log.Error(err, "Failed to get referred ServerMaintenance object", "ServerMaintenance", ref.Name)
-			errs = append(errs, err)
+			errs = append(errs, &utils.MultiErrorTracker{
+				Err:        err,
+				Identifier: ref.Name,
+			})
 			continue
 		}
 		maintenances = append(maintenances, serverMaintenance)
@@ -974,10 +980,13 @@ func (r *BMCVersionReconciler) checkBMCUpgradeStatus(
 	bmcVersion *baseboardv1alpha1.BMCVersion,
 	bmcClient bmc.BMC,
 	bmcObj *metalv1alpha1.BMC,
-	bmcUpgradeTaskUri string,
 	completedCondition *metav1.Condition,
 ) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+	var bmcUpgradeTaskUri string
+	if bmcVersion.Status.UpgradeTask != nil {
+		bmcUpgradeTaskUri = bmcVersion.Status.UpgradeTask.URI
+	}
 	taskCurrentStatus, err := func() (*schemas.Task, error) {
 		if bmcUpgradeTaskUri == "" {
 			return nil, fmt.Errorf("invalid task URI. uri provided: '%v'", bmcUpgradeTaskUri)
@@ -995,7 +1004,7 @@ func (r *BMCVersionReconciler) checkBMCUpgradeStatus(
 	log.V(1).Info("BMC upgrade task current status", "TaskStatus", taskCurrentStatus)
 
 	upgradeCurrentTaskStatus := &api.Task{
-		URI:             bmcVersion.Status.UpgradeTask.URI,
+		URI:             bmcUpgradeTaskUri,
 		State:           taskCurrentStatus.TaskState,
 		Status:          taskCurrentStatus.TaskStatus,
 		PercentComplete: int32(gofish.Deref(taskCurrentStatus.PercentComplete)),

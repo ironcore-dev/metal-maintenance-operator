@@ -879,7 +879,10 @@ func (r *BIOSVersionReconciler) checkUpdateBiosUpgradeStatus(
 	completedCondition *metav1.Condition,
 ) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	taskURI := biosVersion.Status.UpgradeTask.URI
+	var taskURI string
+	if biosVersion.Status.UpgradeTask != nil {
+		taskURI = biosVersion.Status.UpgradeTask.URI
+	}
 	taskCurrentStatus, err := func() (*schemas.Task, error) {
 		if taskURI == "" {
 			return nil, fmt.Errorf("invalid task URI. uri provided: '%v'", taskURI)
@@ -896,7 +899,7 @@ func (r *BIOSVersionReconciler) checkUpdateBiosUpgradeStatus(
 	log.V(1).Info("BIOS upgrade task current status", "TaskState", taskCurrentStatus.TaskState)
 
 	upgradeCurrentTaskStatus := &api.Task{
-		URI:             biosVersion.Status.UpgradeTask.URI,
+		URI:             taskURI,
 		State:           taskCurrentStatus.TaskState,
 		Status:          taskCurrentStatus.TaskStatus,
 		PercentComplete: int32(gofish.Deref(taskCurrentStatus.PercentComplete)),

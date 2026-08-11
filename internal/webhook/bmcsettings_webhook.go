@@ -110,8 +110,15 @@ func (v *BMCSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *ba
 }
 
 func checkForDuplicateBMCSettingsRefToBMC(settingsList *baseboardv1alpha1.BMCSettingsList, settings *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
+	if settings.Spec.BMCRef == nil {
+		return nil, nil
+	}
+
 	for _, bs := range settingsList.Items {
 		if settings.Name == bs.Name {
+			continue
+		}
+		if bs.Spec.BMCRef == nil {
 			continue
 		}
 		if bs.Spec.BMCRef.Name == settings.Spec.BMCRef.Name {

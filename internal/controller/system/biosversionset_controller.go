@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -205,20 +204,13 @@ func (r *BIOSVersionSetReconciler) ensureBIOSVersionsForServers(ctx context.Cont
 	var errs []error
 	for _, server := range servers.Items {
 		if !withBiosVersion[server.Name] {
-			var newBiosVersion *systemv1alpha1.BIOSVersion
-			newBiosVersionName := fmt.Sprintf("%s-%s", versionSet.Name, server.Name)
-			if len(newBiosVersionName) > utilvalidation.DNS1123SubdomainMaxLength {
-				log.V(1).Info("BIOSVersion name is too long, it will be shortened using random string", "BIOSVersionName", newBiosVersionName)
-				newBiosVersion = &systemv1alpha1.BIOSVersion{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: newBiosVersionName[:utilvalidation.DNS1123SubdomainMaxLength-10] + "-",
-					}}
-			} else {
-				newBiosVersion = &systemv1alpha1.BIOSVersion{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: newBiosVersionName,
-					}}
-			}
+			// generate a deterministic k8s conform name, so that a re-reconcile on a
+			// stale cache cannot create duplicate children.
+			newBiosVersionName := utils.VersionSetChildName(versionSet.Name, server.Name)
+			newBiosVersion := &systemv1alpha1.BIOSVersion{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: newBiosVersionName,
+				}}
 
 			opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, newBiosVersion, func() error {
 				newBiosVersion.Spec.BIOSVersionTemplate = *versionSet.Spec.BIOSVersionTemplate.DeepCopy()

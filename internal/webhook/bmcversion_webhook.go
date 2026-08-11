@@ -95,8 +95,15 @@ func (v *BMCVersionCustomValidator) ValidateDelete(ctx context.Context, obj *bas
 }
 
 func checkForDuplicateBMCVersionsRefToBMC(versionList *baseboardv1alpha1.BMCVersionList, version *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
+	if version.Spec.BMCRef == nil {
+		return nil, nil
+	}
+
 	for _, v := range versionList.Items {
 		if version.Name == v.Name {
+			continue
+		}
+		if v.Spec.BMCRef == nil {
 			continue
 		}
 		if v.Spec.BMCRef.Name == version.Spec.BMCRef.Name {

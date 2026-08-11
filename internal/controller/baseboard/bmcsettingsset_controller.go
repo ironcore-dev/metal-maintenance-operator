@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -295,24 +294,13 @@ func (r *BMCSettingsSetReconciler) createMissingBMCSettings(
 				}
 			}
 
-			// generate k8s conform name for bmcsettings
-			newBMCSettingsName := fmt.Sprintf("%s-%s", bmcSettingsSet.Name, bmc.Name)
-			// e.g. performance-test-bmcsettingsset-01-node001-region
-			var newBMCSettings *baseboardv1alpha1.BMCSettings
-
-			if len(newBMCSettingsName) > utilvalidation.DNS1123SubdomainMaxLength {
-				log.V(1).Info("BMCSettings name is too long, it will be shortened using random string",
-					"name", newBMCSettingsName)
-				newBMCSettings = &baseboardv1alpha1.BMCSettings{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: newBMCSettingsName[:utilvalidation.DNS1123SubdomainMaxLength-10] + "-",
-					}}
-			} else {
-				newBMCSettings = &baseboardv1alpha1.BMCSettings{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: newBMCSettingsName,
-					}}
-			}
+			// generate a deterministic k8s conform name for bmcsettings, so that a
+			// re-reconcile on a stale cache cannot create duplicate children.
+			newBMCSettingsName := utils.VersionSetChildName(bmcSettingsSet.Name, bmc.Name)
+			newBMCSettings := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: newBMCSettingsName,
+				}}
 
 			// create/patch new Settings
 			opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, newBMCSettings, func() error {

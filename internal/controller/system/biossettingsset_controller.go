@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -253,20 +252,13 @@ func (r *BIOSSettingsSetReconciler) createMissingBIOSSettings(ctx context.Contex
 					continue
 				}
 			}
-			newBiosSettingsName := fmt.Sprintf("%s-%s", set.Name, server.Name)
-			var newBiosSetting *systemv1alpha1.BIOSSettings
-			if len(newBiosSettingsName) > utilvalidation.DNS1123SubdomainMaxLength {
-				log.V(1).Info("BIOSSettings name is too long and will be shortened using a random string", "Name", newBiosSettingsName)
-				newBiosSetting = &systemv1alpha1.BIOSSettings{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: newBiosSettingsName[:utilvalidation.DNS1123SubdomainMaxLength-10] + "-",
-					}}
-			} else {
-				newBiosSetting = &systemv1alpha1.BIOSSettings{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: newBiosSettingsName,
-					}}
-			}
+			// generate a deterministic k8s conform name, so that a re-reconcile on a
+			// stale cache cannot create duplicate children.
+			newBiosSettingsName := utils.VersionSetChildName(set.Name, server.Name)
+			newBiosSetting := &systemv1alpha1.BIOSSettings{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: newBiosSettingsName,
+				}}
 
 			opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, newBiosSetting, func() error {
 				newBiosSetting.Spec.BIOSSettingsTemplate = *set.Spec.BIOSSettingsTemplate.DeepCopy()

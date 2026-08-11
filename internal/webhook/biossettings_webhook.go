@@ -97,8 +97,15 @@ func (v *BIOSSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *s
 }
 
 func checkForDuplicateBIOSSettingsRefToServer(settingsList *systemv1alpha1.BIOSSettingsList, settings *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
+	if settings.Spec.ServerRef == nil {
+		return nil, nil
+	}
+
 	for _, bs := range settingsList.Items {
 		if settings.Name == bs.Name {
+			continue
+		}
+		if bs.Spec.ServerRef == nil {
 			continue
 		}
 		if settings.Spec.ServerRef.Name == bs.Spec.ServerRef.Name {
