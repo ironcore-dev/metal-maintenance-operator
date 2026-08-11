@@ -203,6 +203,14 @@ telemetry:
     # Port the Service exposes; should match the targetPort baked into
     # manager.ports[*].containerPort.
     port: 9092
+    # Expose the event receiver via the same Ingress as the operator.
+    # When enabled, a /serverevents path is added to the Ingress rule so
+    # BMCs outside the cluster can POST Redfish events through the
+    # nginx-ingress controller. Requires ingress.enable: true.
+    # Gardener automatically creates a NetworkPolicy allowing the
+    # ingress controller to reach port 9092 once this path is present.
+    ingress:
+      enable: false
 
 ## Additional Secret resources to render in the release namespace.
 ## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).

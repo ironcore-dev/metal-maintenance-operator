@@ -10,20 +10,21 @@ import (
 )
 
 // SubscribeToBMC decides whether the reconciler should keep Redfish
-// event subscriptions on this BMC. It's a pure function of the BMC's
-// vendor/model/firmware (as reported by the metal-operator BMC
-// controller) and the operator's ConfigMap policy.
-func SubscribeToBMC(ref BMCRef, cfg *Config) bool {
+// event subscriptions on this BMC. It returns the matching HardwareMatch
+// row (which carries vendor-specific settings like TestMessageId), or nil
+// if no row matches and subscriptions should not be created.
+func SubscribeToBMC(ref BMCRef, cfg *Config) *HardwareMatch {
 	if cfg == nil {
-		return false
+		return nil
 	}
 	// An unknown vendor (informer hasn't populated Status yet, or BMC
 	// never reported one) does not qualify — we have no signal that
 	// this BMC supports subscriptions.
 	if ref.Vendor == "" {
-		return false
+		return nil
 	}
-	for _, hw := range cfg.EventBasedHardware {
+	for i := range cfg.EventBasedHardware {
+		hw := &cfg.EventBasedHardware[i]
 		if !vendorMatches(hw.Vendor, ref.Vendor) {
 			continue
 		}
@@ -33,9 +34,9 @@ func SubscribeToBMC(ref BMCRef, cfg *Config) bool {
 		if !firmwareSatisfies(hw.MinFirmware, ref.FirmwareVersion) {
 			continue
 		}
-		return true
+		return hw
 	}
-	return false
+	return nil
 }
 
 // vendorMatches compares the configured vendor against the BMC's

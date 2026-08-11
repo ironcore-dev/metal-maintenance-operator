@@ -345,7 +345,7 @@ func newRecWithTestRecorder(t *testing.T, c client.Client, cfg *subscriptions.Co
 // retargeted tests: any Dell BMC is event-eligible.
 func dellVendorMatch() *subscriptions.Config {
 	return &subscriptions.Config{EventBasedHardware: []subscriptions.HardwareMatch{
-		{Vendor: vendorDellInc, Models: []string{"*"}},
+		{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: testMessageId},
 	}}
 }
 

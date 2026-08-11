@@ -161,6 +161,46 @@ func TestValidate_TestEventInterval_Range(t *testing.T) {
 	}
 }
 
+func TestValidate_TestMessageId_RequiredWhenIntervalSet(t *testing.T) {
+	cfg := minimalValid()
+	cfg.TestEventInterval = time.Hour
+	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	errs := Validate(cfg)
+	assertFieldError(t, errs, "testMessageId")
+}
+
+func TestValidate_TestMessageId_NotRequiredWhenIntervalZero(t *testing.T) {
+	cfg := minimalValid()
+	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	if errs := Validate(cfg); len(errs) != 0 {
+		t.Errorf("testMessageId should not be required when interval is zero, got: %v", errs)
+	}
+}
+
+func TestValidate_TestMessageId_InvalidFormat(t *testing.T) {
+	for _, bad := range []string{"not-a-message-id", "SYS1000", "SYS.1.SYS1000", "123.1.0.Key", ".1.0.Key"} {
+		t.Run(bad, func(t *testing.T) {
+			cfg := minimalValid()
+			cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: bad}}
+			errs := Validate(cfg)
+			assertFieldError(t, errs, "testMessageId")
+		})
+	}
+}
+
+func TestValidate_TestMessageId_ValidFormat(t *testing.T) {
+	for _, good := range []string{"SYS.1.0.SYS1000", "iDRAC.2.9.RAC0182", "Base.1.12.GeneralError"} {
+		t.Run(good, func(t *testing.T) {
+			cfg := minimalValid()
+			cfg.TestEventInterval = time.Hour
+			cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: good}}
+			if errs := Validate(cfg); len(errs) != 0 {
+				t.Errorf("valid testMessageId %q rejected: %v", good, errs)
+			}
+		})
+	}
+}
+
 func TestValidate_TestEventTimeout_Range(t *testing.T) {
 	cases := []struct {
 		name    string

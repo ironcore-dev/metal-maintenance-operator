@@ -16,6 +16,7 @@ const (
 	subsFinalizer      = "telemetry.metal.ironcore.dev/subscriptions"
 	secretUsernameKey  = "username"
 	testUsername       = "admin"
+	testMessageId      = "SYS.1.0.SYS1000"
 
 	// reconciler-specific:
 	testReceiverURL         = "http://recv:9092"

@@ -5,6 +5,7 @@ package subscriptions
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,10 @@ import (
 	goyaml "go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
+
+// redfishMessageIdPattern matches the Redfish registry-format MessageId:
+// <Registry>.<Major>.<Minor>.<MessageKey> (e.g. "iDRAC.2.9.RAC0182").
+var redfishMessageIdPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*\.[0-9]+\.[0-9]+\.[A-Za-z][A-Za-z0-9]*$`)
 
 const (
 	minInterval = 5 * time.Second
@@ -145,6 +150,14 @@ func Validate(cfg *Config) field.ErrorList {
 				errs = append(errs, field.Invalid(hwPath.Child("minFirmware"), hw.MinFirmware,
 					fmt.Sprintf("must be a valid semver: %v", err)))
 			}
+		}
+		if cfg.TestEventInterval > 0 && hw.TestMessageId == "" {
+			errs = append(errs, field.Required(hwPath.Child("testMessageId"),
+				"required when testEventInterval is set"))
+		}
+		if hw.TestMessageId != "" && !redfishMessageIdPattern.MatchString(hw.TestMessageId) {
+			errs = append(errs, field.Invalid(hwPath.Child("testMessageId"), hw.TestMessageId,
+				"must follow Redfish format <Registry>.<Major>.<Minor>.<MessageKey>, e.g. \"iDRAC.2.9.RAC0182\""))
 		}
 	}
 	return errs
