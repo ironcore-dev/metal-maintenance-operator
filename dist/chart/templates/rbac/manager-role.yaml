@@ -31,8 +31,83 @@ rules:
   - update
   - watch
 - apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - boot.ironcore.dev
+  resources:
+  - httpbootconfig
+  - ipxebootconfig
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - boot.ironcore.dev
+  resources:
+  - httpbootconfig/status
+  - ipxebootconfig/status
+  verbs:
+  - get
+- apiGroups:
+  - boot.ironcore.dev
+  resources:
+  - httpbootconfigs
+  - ipxebootconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - boot.ironcore.dev
+  resources:
+  - httpbootconfigs/finalizers
+  - ipxebootconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - boot.ironcore.dev
+  resources:
+  - httpbootconfigs/status
+  - ipxebootconfigs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
+  - consoles
   - servermaintenances
   verbs:
   - create
@@ -45,12 +120,14 @@ rules:
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
+  - consoles/finalizers
   - servermaintenances/finalizers
   verbs:
   - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
+  - consoles/status
   - servermaintenances/status
   verbs:
   - get
@@ -60,20 +137,22 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcs
-  - bmcsecrets
   verbs:
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcs/finalizers
+  - serverbootconfigurations/finalizers
   verbs:
   - update
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - bmcsecrets
   - serverbootconfigurations
   - serverclaims
   verbs:
@@ -87,6 +166,15 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
+  - serverbootconfigurations/status
+  - servers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - servers
   verbs:
   - get
@@ -94,14 +182,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
-  - servers/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
