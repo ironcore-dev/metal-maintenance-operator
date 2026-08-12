@@ -46,6 +46,29 @@ const (
 	BMCSettingsStateFailed BMCSettingsState = "Failed"
 )
 
+// BMCSettingsApplyResultEntry holds the URI, ETag, and value hash from the last
+// successful apply of a single settings key. Used for ETag-based drift detection.
+type BMCSettingsApplyResultEntry struct {
+	// URI is the Redfish resource URI from the apply response.
+	// For PATCH operations this is the request URI; for POST operations this is
+	// the Location header value pointing to the created resource.
+	// +optional
+	URI string `json:"uri,omitempty"`
+
+	// ETag is the drift-detection token captured after the last successful apply.
+	// Either a real ETag returned by the BMC (e.g. W/"20B77DA6") or a SHA-256
+	// hash of the GET response body prefixed with "hash:sha256:" for BMCs that
+	// do not return ETag headers.
+	// +optional
+	ETag string `json:"etag,omitempty"`
+
+	// ValueHash is the SHA-256 hash of the effective (resolved) value at apply time.
+	// Used to detect desired-state changes from ConfigMap/Secret rotation independent
+	// of BMC-side drift.
+	// +optional
+	ValueHash string `json:"valueHash,omitempty"`
+}
+
 // BMCSettingsStatus defines the observed state of BMCSettings.
 type BMCSettingsStatus struct {
 	// State represents the current state of the BMC configuration task.
@@ -59,6 +82,14 @@ type BMCSettingsStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// AppliedETags stores the URI, ETag, and value hash from the last successful
+	// apply for each settings key. Used for ETag-based drift detection during
+	// verification to avoid unnecessary re-applies and to reliably detect
+	// write-only field drift (e.g. passwords) and POST-created resource drift
+	// (e.g. certificates).
+	// +optional
+	AppliedETags map[string]BMCSettingsApplyResultEntry `json:"appliedETags,omitempty"`
 
 	// Conditions represents the latest available observations of the BMC Settings Resource state.
 	// +patchStrategy=merge

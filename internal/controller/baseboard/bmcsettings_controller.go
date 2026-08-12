@@ -439,7 +439,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 				return ctrl.Result{}, fmt.Errorf("failed to check BMC settings provided: %w", err)
 			}
 
-			_, err = bmcClient.SetBMCAttributesImmediately(ctx, bmcObj.Spec.BMCUUID, settingsDiff)
+			applyResults, err := bmcClient.SetBMCAttributesImmediately(ctx, bmcObj.Spec.BMCUUID, settingsDiff)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to set BMC settings: %w", err)
 			}
@@ -455,7 +455,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 				return ctrl.Result{}, fmt.Errorf("failed to update BMCSettings Applied condition: %w", err)
 			}
 
-			if err := r.persistApplyCycleConditions(ctx, settings, changesIssued, resetBMCReq); err != nil {
+			if err := r.persistApplyCycleConditions(ctx, settings, changesIssued, resetBMCReq, applyResults); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
@@ -507,8 +507,8 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 }
 
 // persistApplyCycleConditions resets later-phase conditions (verified, reset) and
-// persists all phase conditions atomically after a successful settings apply in Phase 1.
-func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition, resetBMCReq bool) error {
+// persists all phase conditions and AppliedETags atomically after a successful settings apply in Phase 1.
+func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition, resetBMCReq bool, applyResults map[string]bmc.ApplyResult) error {
 	log := ctrl.LoggerFrom(ctx)
 
 	resetCond, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCResetPostSettingApply)
@@ -548,8 +548,20 @@ func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context,
 		}
 	}
 
-	// Persist all three conditions in a single atomic status patch.
+	// Persist conditions and AppliedETags in a single atomic status patch.
+	// The base must be taken before any mutation so the diff captures all changes.
 	BMCSettingsBase := settings.DeepCopy()
+	if len(applyResults) > 0 {
+		if settings.Status.AppliedETags == nil {
+			settings.Status.AppliedETags = make(map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry, len(applyResults))
+		}
+		for key, r := range applyResults {
+			settings.Status.AppliedETags[key] = baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				URI:  r.URI,
+				ETag: r.ETag,
+			}
+		}
+	}
 	for _, cond := range []*metav1.Condition{changesIssued, verifiedCond, resetCond} {
 		updateOpts := []conditionutils.UpdateOption{
 			conditionutils.UpdateStatus(cond.Status),
