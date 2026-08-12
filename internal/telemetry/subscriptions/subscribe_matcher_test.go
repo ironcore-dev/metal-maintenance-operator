@@ -15,16 +15,16 @@ func cfgWith(rows ...subscriptions.HardwareMatch) *subscriptions.Config {
 }
 
 func TestSubscribeToBMC_NilConfig_IsFalse(t *testing.T) {
-	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Name: testBMCName, Vendor: vendorDellInc}, nil) {
-		t.Error("nil cfg matched: want false")
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Name: testBMCName, Vendor: vendorDellInc}, nil) != nil {
+		t.Error("nil cfg matched: want nil")
 	}
 }
 
 func TestSubscribeToBMC_NoRows_IsFalse(t *testing.T) {
 	// No eventBasedHardware rows → nothing subscribes. Default-deny.
 	cfg := &subscriptions.Config{}
-	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: modelR650}, cfg) {
-		t.Error("empty cfg matched: want false")
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: modelR650}, cfg) != nil {
+		t.Error("empty cfg matched: want nil")
 	}
 }
 
@@ -42,8 +42,8 @@ func TestSubscribeToBMC_VendorMatch_CanonicalExact(t *testing.T) {
 		Models: []string{"*"},
 	})
 	t.Run("match/Dell Inc.", func(t *testing.T) {
-		if !subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: modelR650}, cfg) {
-			t.Error("canonical vendor: want true")
+		if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: modelR650}, cfg) == nil {
+			t.Error("canonical vendor: want non-nil")
 		}
 	})
 	// Non-canonical reported values must NOT match — metal-operator
@@ -51,8 +51,8 @@ func TestSubscribeToBMC_VendorMatch_CanonicalExact(t *testing.T) {
 	// them here would diverge from what Validate enforces.
 	for _, v := range []string{"Dell", "DELL", "dell", "  Dell Inc.  "} {
 		t.Run("no-match/"+v, func(t *testing.T) {
-			if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: v, Model: modelR650}, cfg) {
-				t.Errorf("vendor %q matched: want false (non-canonical reported value)", v)
+			if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: v, Model: modelR650}, cfg) != nil {
+				t.Errorf("vendor %q matched: want nil (non-canonical reported value)", v)
 			}
 		})
 	}
@@ -63,8 +63,8 @@ func TestSubscribeToBMC_VendorMismatch_IsFalse(t *testing.T) {
 		Vendor: vendorDellInc,
 		Models: []string{"*"},
 	})
-	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorHPE, Model: "ProLiant"}, cfg) {
-		t.Error("vendor mismatch matched: want false")
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorHPE, Model: "ProLiant"}, cfg) != nil {
+		t.Error("vendor mismatch matched: want nil")
 	}
 }
 
@@ -75,8 +75,8 @@ func TestSubscribeToBMC_EmptyVendor_NeverMatches(t *testing.T) {
 		Vendor: vendorDellInc,
 		Models: []string{"*"},
 	})
-	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: ""}, cfg) {
-		t.Error("empty vendor matched: want false")
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: ""}, cfg) != nil {
+		t.Error("empty vendor matched: want nil")
 	}
 }
 
@@ -89,8 +89,8 @@ func TestSubscribeToBMC_WildcardModel_MatchesAny(t *testing.T) {
 	})
 	for _, m := range []string{modelR650, modelPowerEdgeR750, "anything"} {
 		t.Run(m, func(t *testing.T) {
-			if !subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: m}, cfg) {
-				t.Errorf("model %q: want true (wildcard)", m)
+			if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: m}, cfg) == nil {
+				t.Errorf("model %q: want non-nil (wildcard)", m)
 			}
 		})
 	}
@@ -102,21 +102,24 @@ func TestSubscribeToBMC_SpecificModel_MatchesExact(t *testing.T) {
 		Models: []string{"PowerEdge R650", modelPowerEdgeR750},
 	})
 	cases := []struct {
-		model string
-		want  bool
+		model   string
+		wantNil bool
 	}{
-		{"PowerEdge R650", true},
-		{modelPowerEdgeR750, true},
-		{"powerEDGE r650", true},     // case-insensitive
-		{"  PowerEdge R650  ", true}, // whitespace tolerant
-		{"PowerEdge R840", false},    // not in list
-		{modelR650, false},           // partial match → no
+		{"PowerEdge R650", false},
+		{modelPowerEdgeR750, false},
+		{"powerEDGE r650", false},     // case-insensitive
+		{"  PowerEdge R650  ", false}, // whitespace tolerant
+		{"PowerEdge R840", true},      // not in list
+		{modelR650, true},             // partial match → no
 	}
 	for _, tc := range cases {
 		t.Run(tc.model, func(t *testing.T) {
 			got := subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: tc.model}, cfg)
-			if got != tc.want {
-				t.Errorf("model %q: got %v, want %v", tc.model, got, tc.want)
+			if tc.wantNil && got != nil {
+				t.Errorf("model %q: got non-nil, want nil", tc.model)
+			}
+			if !tc.wantNil && got == nil {
+				t.Errorf("model %q: got nil, want non-nil", tc.model)
 			}
 		})
 	}
@@ -126,8 +129,8 @@ func TestSubscribeToBMC_EmptyModelsList_DoesNotMatch(t *testing.T) {
 	// Defensive: schema validation rejects empty Models, but the function
 	// must not panic or wildcard-match if it somehow sees one.
 	cfg := cfgWith(subscriptions.HardwareMatch{Vendor: vendorDellInc, Models: []string{}})
-	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: modelR650}, cfg) {
-		t.Error("empty models matched: want false")
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorDellInc, Model: modelR650}, cfg) != nil {
+		t.Error("empty models matched: want nil")
 	}
 }
 
@@ -143,8 +146,8 @@ func TestSubscribeToBMC_MinFirmwareUnset_AlwaysSatisfied(t *testing.T) {
 	got := subscriptions.SubscribeToBMC(subscriptions.BMCRef{
 		Vendor: vendorDellInc, Model: modelR650, FirmwareVersion: "garbage",
 	}, cfg)
-	if !got {
-		t.Error("want true (no firmware constraint)")
+	if got == nil {
+		t.Error("want non-nil (no firmware constraint)")
 	}
 }
 
@@ -156,25 +159,28 @@ func TestSubscribeToBMC_FirmwareGate(t *testing.T) {
 	})
 	cases := []struct {
 		firmware string
-		want     bool
+		wantNil  bool
 		why      string
 	}{
-		{firmware5_10_0, true, "exact match"},
-		{"5.10.5", true, "patch above"},
-		{"6.0.0", true, "major above"},
-		{"5.9.99", false, "patch below"},
-		{"4.99.99", false, "major below"},
-		{"", false, "missing firmware"},
-		{"not-semver", false, "unparseable"},
-		{"5.10", true, "two-component semver (tolerant parse)"},
+		{firmware5_10_0, false, "exact match"},
+		{"5.10.5", false, "patch above"},
+		{"6.0.0", false, "major above"},
+		{"5.9.99", true, "patch below"},
+		{"4.99.99", true, "major below"},
+		{"", true, "missing firmware"},
+		{"not-semver", true, "unparseable"},
+		{"5.10", false, "two-component semver (tolerant parse)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.why, func(t *testing.T) {
 			got := subscriptions.SubscribeToBMC(subscriptions.BMCRef{
 				Vendor: vendorDellInc, Model: modelR650, FirmwareVersion: tc.firmware,
 			}, cfg)
-			if got != tc.want {
-				t.Errorf("firmware %q: got %v, want %v (%s)", tc.firmware, got, tc.want, tc.why)
+			if tc.wantNil && got != nil {
+				t.Errorf("firmware %q: got non-nil, want nil (%s)", tc.firmware, tc.why)
+			}
+			if !tc.wantNil && got == nil {
+				t.Errorf("firmware %q: got nil, want non-nil (%s)", tc.firmware, tc.why)
 			}
 		})
 	}
@@ -190,10 +196,10 @@ func TestSubscribeToBMC_FirstMatchingRowWins(t *testing.T) {
 		subscriptions.HardwareMatch{Vendor: vendorDellInc, Models: []string{"*"}},
 		subscriptions.HardwareMatch{Vendor: vendorDellInc, Models: []string{modelR650}, MinFirmware: "5.0.0"},
 	)
-	if !subscriptions.SubscribeToBMC(subscriptions.BMCRef{
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{
 		Vendor: vendorDellInc, Model: modelR650, FirmwareVersion: "6.0.0",
-	}, cfg) {
-		t.Error("want true (first matching row should win)")
+	}, cfg) == nil {
+		t.Error("want non-nil (first matching row should win)")
 	}
 }
 
@@ -203,7 +209,7 @@ func TestSubscribeToBMC_LaterRow_StillMatches(t *testing.T) {
 		subscriptions.HardwareMatch{Vendor: vendorDellInc, Models: []string{"*"}},
 		subscriptions.HardwareMatch{Vendor: vendorHPE, Models: []string{"*"}},
 	)
-	if !subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorHPE, Model: "ProLiant"}, cfg) {
-		t.Error("want true (later row matches)")
+	if subscriptions.SubscribeToBMC(subscriptions.BMCRef{Vendor: vendorHPE, Model: "ProLiant"}, cfg) == nil {
+		t.Error("want non-nil (later row matches)")
 	}
 }

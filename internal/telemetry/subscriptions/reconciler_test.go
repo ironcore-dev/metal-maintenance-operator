@@ -803,7 +803,9 @@ func TestNotifyTestEvent_MatchingID_RecordsSuccess(t *testing.T) {
 	}
 }
 
-func TestNotifyTestEvent_WrongID_NoOp(t *testing.T) {
+func TestNotifyTestEvent_AnyID_RecordsSuccess(t *testing.T) {
+	// With time-window correlation, any event arrival for a BMC with a
+	// pending test entry records success — the messageId is not checked.
 	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
 	res := &fakeResolver{}
 	res.set(makeResolved(), nil)
@@ -815,9 +817,30 @@ func TestNotifyTestEvent_WrongID_NoOp(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), req()); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	r.NotifyTestEvent(testBMCName, "wrong-id")
+	r.NotifyTestEvent(testBMCName, "any-id-works")
+	if results := rec.snapshotResults(); len(results) != 1 || results[0].result != "success" {
+		t.Errorf("any messageId should confirm success, got %+v", results)
+	}
+}
+
+func TestNotifyTestEvent_AfterDeadline_NoOp(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeTestRecorder{}
+	cfg := cfgWithTestInterval(time.Millisecond)
+	cfg.TestEventTimeout = 5 * time.Millisecond // very short deadline
+	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	// Wait for the deadline to expire before notifying.
+	time.Sleep(20 * time.Millisecond)
+	r.NotifyTestEvent(testBMCName, "late-arrival")
 	if results := rec.snapshotResults(); len(results) != 0 {
-		t.Errorf("wrong messageId should be a no-op, got %+v", results)
+		t.Errorf("event after deadline should be a no-op, got %+v", results)
 	}
 }
 

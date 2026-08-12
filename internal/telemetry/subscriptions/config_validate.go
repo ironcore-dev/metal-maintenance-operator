@@ -146,6 +146,10 @@ func Validate(cfg *Config) field.ErrorList {
 					fmt.Sprintf("must be a valid semver: %v", err)))
 			}
 		}
+		if cfg.TestEventInterval > 0 && hw.TestMessageId == "" {
+			errs = append(errs, field.Required(hwPath.Child("testMessageId"),
+				"required when testEventInterval is set"))
+		}
 	}
 	return errs
 }

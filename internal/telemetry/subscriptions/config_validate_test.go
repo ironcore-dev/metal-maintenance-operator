@@ -161,6 +161,38 @@ func TestValidate_TestEventInterval_Range(t *testing.T) {
 	}
 }
 
+func TestValidate_TestMessageId_RequiredWhenIntervalSet(t *testing.T) {
+	cfg := minimalValid()
+	cfg.TestEventInterval = time.Hour
+	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	errs := Validate(cfg)
+	assertFieldError(t, errs, "testMessageId")
+}
+
+func TestValidate_TestMessageId_NotRequiredWhenIntervalZero(t *testing.T) {
+	cfg := minimalValid()
+	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	if errs := Validate(cfg); len(errs) != 0 {
+		t.Errorf("testMessageId should not be required when interval is zero, got: %v", errs)
+	}
+}
+
+func TestValidate_TestMessageId_AnyNonEmptyAccepted(t *testing.T) {
+	// Format validation is deliberately omitted: vendors use different
+	// conventions (e.g. iDRAC accepts "SYS1000", HPE uses full registry
+	// paths). The BMC will reject a bad value at runtime.
+	for _, id := range []string{"SYS1000", "SYS.1.0.SYS1000", "iDRAC.2.9.RAC0182", "Base.1.12.GeneralError", "anything"} {
+		t.Run(id, func(t *testing.T) {
+			cfg := minimalValid()
+			cfg.TestEventInterval = time.Hour
+			cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: id}}
+			if errs := Validate(cfg); len(errs) != 0 {
+				t.Errorf("non-empty testMessageId %q should be accepted, got: %v", id, errs)
+			}
+		})
+	}
+}
+
 func TestValidate_TestEventTimeout_Range(t *testing.T) {
 	cases := []struct {
 		name    string

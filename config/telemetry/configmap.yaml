@@ -56,12 +56,20 @@ data:
     # ("Dell", "dell") are rejected — metal-operator writes the
     # canonical strings to BMC.Status.Manufacturer and a short form
     # would silently never match.
+    #
+    # testMessageId is the MessageId passed to Redfish SubmitTestEvent
+    # health checks. Required when testEventInterval is set. The accepted
+    # format is vendor-specific — iDRAC uses the short registry key without
+    # the registry prefix (e.g. "SYS1000"), while HPE iLO uses the full
+    # dot-separated form (e.g. "iLOEvents.2.2.EventLog").
     eventBasedHardware:
       - vendor: "Dell Inc."
         models:
           - PowerEdge R650
           - PowerEdge R750
         minFirmware: "5.10.0"
+        # testMessageId: "SYS1000"
       - vendor: HPE
         models: ["*"]
         minFirmware: "2.95"
+        # testMessageId: "iLOEvents.2.2.EventLog"
