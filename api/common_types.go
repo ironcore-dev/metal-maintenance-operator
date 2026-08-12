@@ -8,7 +8,6 @@ package api
 import (
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"github.com/stmcginnis/gofish/schemas"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -92,6 +91,16 @@ type ImageSpec struct {
 	URI string `json:"URI"`
 }
 
+// TaskState mirrors the Redfish task state (e.g. gofish's schemas.TaskState)
+// as a local string type, so consumers of this API do not need to depend on
+// the gofish module.
+type TaskState string
+
+// Health mirrors the Redfish health status (e.g. gofish's schemas.Health) as
+// a local string type, so consumers of this API do not need to depend on the
+// gofish module.
+type Health string
+
 type Task struct {
 	// URI is the URI of the task created by the BMC for the BIOS upgrade.
 	// +optional
@@ -99,11 +108,11 @@ type Task struct {
 
 	// State is the current state of the task.
 	// +optional
-	State schemas.TaskState `json:"state,omitempty"`
+	State TaskState `json:"state,omitempty"`
 
 	// Status is the current status of the task.
 	// +optional
-	Status schemas.Health `json:"status,omitempty"`
+	Status Health `json:"status,omitempty"`
 
 	// PercentComplete is the percentage of completion of the task.
 	// +optional

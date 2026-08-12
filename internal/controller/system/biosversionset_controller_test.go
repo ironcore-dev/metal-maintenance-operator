@@ -16,6 +16,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -485,7 +486,7 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 		By("Updating the BIOSVersionSet with retry annotation")
 		Eventually(Update(biosVersionSet, func() {
 			biosVersionSet.Annotations = map[string]string{
-				metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetryChildAndSelf,
+				constants.OperationAnnotation: constants.OperationAnnotationRetryChildAndSelf,
 			}
 		})).Should(Succeed())
 
@@ -534,17 +535,17 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 
 		By("Ensuring that the BIOSVersion 02 has not been retried again")
 		Consistently(Object(biosVersion02), "50ms").Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Ensuring that the BIOSVersion 03 has not been retried again")
 		Consistently(Object(biosVersion03), "50ms").Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Updating the BIOSVersionSet with NO retry annotation")
 		Eventually(Update(biosVersionSet, func() {
-			delete(biosVersionSet.Annotations, metalv1alpha1.OperationAnnotation)
+			delete(biosVersionSet.Annotations, constants.OperationAnnotation)
 			biosVersionSet.Spec.BIOSVersionTemplate.Version = upgradeServerBiosVersion
 			biosVersionSet.Spec.BIOSVersionTemplate.Image.URI = upgradeServerBiosVersion
 		})).Should(Succeed())

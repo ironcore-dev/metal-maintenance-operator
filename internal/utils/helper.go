@@ -160,62 +160,62 @@ func GetServerByName(ctx context.Context, c client.Client, serverName string) (*
 
 // ShouldIgnoreReconciliation checks if the object has an ignore-reconciliation annotation.
 func ShouldIgnoreReconciliation(obj client.Object) bool {
-	val, found := obj.GetAnnotations()[metalv1alpha1.OperationAnnotation]
+	val, found := obj.GetAnnotations()[constants.OperationAnnotation]
 	if !found {
 		return false
 	}
 	return slices.Contains([]string{
-		metalv1alpha1.OperationAnnotationIgnore,
-		metalv1alpha1.OperationAnnotationIgnoreChildAndSelf,
-		metalv1alpha1.OperationAnnotationIgnorePropagated,
+		constants.OperationAnnotationIgnore,
+		constants.OperationAnnotationIgnoreChildAndSelf,
+		constants.OperationAnnotationIgnorePropagated,
 	}, val)
 }
 
 // ShouldChildIgnoreReconciliation checks if the parent's annotation requests child ignore.
 func ShouldChildIgnoreReconciliation(parentObj client.Object) bool {
-	val, found := parentObj.GetAnnotations()[metalv1alpha1.OperationAnnotation]
+	val, found := parentObj.GetAnnotations()[constants.OperationAnnotation]
 	if !found {
 		return false
 	}
-	return val == metalv1alpha1.OperationAnnotationIgnoreChild || val == metalv1alpha1.OperationAnnotationIgnoreChildAndSelf
+	return val == constants.OperationAnnotationIgnoreChild || val == constants.OperationAnnotationIgnoreChildAndSelf
 }
 
 // IsChildIgnoredThroughSets checks if the child carries a propagated ignore annotation.
 func IsChildIgnoredThroughSets(childObj client.Object) bool {
 	annotations := childObj.GetAnnotations()
-	valChildIgnore, found := annotations[metalv1alpha1.OperationAnnotation]
+	valChildIgnore, found := annotations[constants.OperationAnnotation]
 	if !found {
 		return false
 	}
-	return valChildIgnore == metalv1alpha1.OperationAnnotationIgnorePropagated
+	return valChildIgnore == constants.OperationAnnotationIgnorePropagated
 }
 
 // ShouldRetryReconciliation checks if the object has a retry-failed annotation.
 func ShouldRetryReconciliation(obj client.Object) bool {
-	val, found := obj.GetAnnotations()[metalv1alpha1.OperationAnnotation]
+	val, found := obj.GetAnnotations()[constants.OperationAnnotation]
 	if !found {
 		return false
 	}
-	return val == metalv1alpha1.OperationAnnotationRetry || val == metalv1alpha1.OperationAnnotationRetryPropagated
+	return val == constants.OperationAnnotationRetry || val == constants.OperationAnnotationRetryPropagated
 }
 
 // ShouldChildRetryReconciliation checks if the parent's annotation requests child retry.
 func ShouldChildRetryReconciliation(parentObj client.Object) bool {
-	val, found := parentObj.GetAnnotations()[metalv1alpha1.OperationAnnotation]
+	val, found := parentObj.GetAnnotations()[constants.OperationAnnotation]
 	if !found {
 		return false
 	}
-	return val == metalv1alpha1.OperationAnnotationRetryChild || val == metalv1alpha1.OperationAnnotationRetryChildAndSelf
+	return val == constants.OperationAnnotationRetryChild || val == constants.OperationAnnotationRetryChildAndSelf
 }
 
 // IsChildRetryThroughSets checks if the child carries a propagated retry annotation.
 func IsChildRetryThroughSets(childObj client.Object) bool {
 	annotations := childObj.GetAnnotations()
-	valChildRetry, found := annotations[metalv1alpha1.OperationAnnotation]
+	valChildRetry, found := annotations[constants.OperationAnnotation]
 	if !found {
 		return false
 	}
-	return valChildRetry == metalv1alpha1.OperationAnnotationRetryPropagated
+	return valChildRetry == constants.OperationAnnotationRetryPropagated
 }
 
 // --- Annotation propagation helpers ---
@@ -236,15 +236,15 @@ func HandleIgnoreAnnotationPropagation(ctx context.Context, c client.Client, par
 		opResult, err := controllerutil.CreateOrPatch(ctx, c, childObj, func() error {
 			annotations := childObj.GetAnnotations()
 			if !ShouldChildIgnoreReconciliation(parentObj) && IsChildIgnoredThroughSets(childObj) && annotations != nil {
-				delete(annotations, metalv1alpha1.OperationAnnotation)
+				delete(annotations, constants.OperationAnnotation)
 				childObj.SetAnnotations(annotations)
 			}
-			_, operationAnnotationChildFound := annotations[metalv1alpha1.OperationAnnotation]
+			_, operationAnnotationChildFound := annotations[constants.OperationAnnotation]
 			if ShouldChildIgnoreReconciliation(parentObj) && !operationAnnotationChildFound {
 				if annotations == nil {
 					annotations = make(map[string]string)
 				}
-				annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.OperationAnnotationIgnorePropagated
+				annotations[constants.OperationAnnotation] = constants.OperationAnnotationIgnorePropagated
 				childObj.SetAnnotations(annotations)
 			}
 			return nil
@@ -282,7 +282,7 @@ func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, pare
 		opResult, err := controllerutil.CreateOrPatch(ctx, c, childObj, func() error {
 			annotations := childObj.GetAnnotations()
 			if !ShouldChildRetryReconciliation(parentObj) && IsChildRetryThroughSets(childObj) && annotations != nil {
-				delete(annotations, metalv1alpha1.OperationAnnotation)
+				delete(annotations, constants.OperationAnnotation)
 				childObj.SetAnnotations(annotations)
 			}
 			v := reflect.ValueOf(childObj).Elem()
@@ -296,18 +296,18 @@ func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, pare
 						retriedCondition, err := GetCondition(acc, conditions, constants.ConditionRetryOfFailedResourceIssued)
 						if err == nil && retriedCondition != nil &&
 							retriedCondition.Status == metav1.ConditionTrue &&
-							retriedCondition.Message == metalv1alpha1.OperationAnnotationRetryPropagated {
+							retriedCondition.Message == constants.OperationAnnotationRetryPropagated {
 							return nil
 						}
 					}
 				}
 			}
-			_, operationAnnotationChildFound := annotations[metalv1alpha1.OperationAnnotation]
+			_, operationAnnotationChildFound := annotations[constants.OperationAnnotation]
 			if ShouldChildRetryReconciliation(parentObj) && !operationAnnotationChildFound {
 				if annotations == nil {
 					annotations = make(map[string]string)
 				}
-				annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.OperationAnnotationRetryPropagated
+				annotations[constants.OperationAnnotation] = constants.OperationAnnotationRetryPropagated
 				childObj.SetAnnotations(annotations)
 			}
 			return nil
@@ -476,16 +476,31 @@ func MergeSettingsFlow(flow []api.SettingsFlowItem) map[string]string {
 	return merged
 }
 
-// ApplyVariables substitutes $(KEY) placeholders in settings map values.
-func ApplyVariables(settingsMap map[string]string, resolved map[string]string) map[string]string {
+// ApplyVariables substitutes $(KEY) placeholders in settings map keys and values.
+// Keys are substituted first and checked for collisions (two distinct original
+// keys resolving to the same substituted key), before values are substituted,
+// so a collision is reported as an error instead of silently dropping a setting.
+func ApplyVariables(settingsMap map[string]string, resolved map[string]string) (map[string]string, error) {
 	if len(resolved) == 0 {
-		return settingsMap
+		return settingsMap, nil
 	}
+
+	// First loop: substitute keys and ensure the result stays collision-free.
+	keys := make(map[string]string, len(settingsMap))
+	for k := range settingsMap {
+		newKey := SubstituteVars(k, resolved)
+		if existing, ok := keys[newKey]; ok {
+			return nil, fmt.Errorf("variable substitution produced duplicate setting key %q from keys %q and %q", newKey, existing, k)
+		}
+		keys[newKey] = k
+	}
+
+	// Second loop: substitute values now that the key mapping is known-safe.
 	out := make(map[string]string, len(settingsMap))
-	for k, v := range settingsMap {
-		out[k] = SubstituteVars(v, resolved)
+	for newKey, oldKey := range keys {
+		out[newKey] = SubstituteVars(settingsMap[oldKey], resolved)
 	}
-	return out
+	return out, nil
 }
 
 func SubstituteVars(s string, resolved map[string]string) string {

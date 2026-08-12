@@ -204,7 +204,7 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 		if utils.ShouldRetryReconciliation(bmcVersion) {
 			bmcVersionBase := bmcVersion.DeepCopy()
 			annotations := bmcVersion.GetAnnotations()
-			delete(annotations, metalv1alpha1.OperationAnnotation)
+			delete(annotations, constants.OperationAnnotation)
 			bmcVersion.SetAnnotations(annotations)
 			if err := r.Patch(ctx, bmcVersion, client.MergeFrom(bmcVersionBase)); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to patch BMCVersion for retrying: %w", err)
@@ -440,7 +440,7 @@ func (r *BMCVersionReconciler) handleFailedState(
 			err := r.Conditions.Update(retryCondition,
 				conditionutils.UpdateStatus(metav1.ConditionTrue),
 				conditionutils.UpdateReason(constants.ReasonRetryOfFailedResourceIssued),
-				conditionutils.UpdateMessage(annotations[metalv1alpha1.OperationAnnotation]),
+				conditionutils.UpdateMessage(annotations[constants.OperationAnnotation]),
 			)
 			if err != nil {
 				return fmt.Errorf("failed to update retry condition for BMCVersion: %w", err)
@@ -1005,8 +1005,8 @@ func (r *BMCVersionReconciler) checkBMCUpgradeStatus(
 
 	upgradeCurrentTaskStatus := &api.Task{
 		URI:             bmcUpgradeTaskUri,
-		State:           taskCurrentStatus.TaskState,
-		Status:          taskCurrentStatus.TaskStatus,
+		State:           api.TaskState(taskCurrentStatus.TaskState),
+		Status:          api.Health(taskCurrentStatus.TaskStatus),
 		PercentComplete: int32(gofish.Deref(taskCurrentStatus.PercentComplete)),
 	}
 

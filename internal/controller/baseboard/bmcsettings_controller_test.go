@@ -21,6 +21,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 )
@@ -490,7 +491,7 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		Eventually(Update(settings, func() {
 			settings.Annotations = map[string]string{
-				metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetry,
+				constants.OperationAnnotation: constants.OperationAnnotationRetry,
 			}
 		})).Should(Succeed())
 
@@ -666,7 +667,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				Namespace:    ns.Name,
 				GenerateName: "test-bmc-upgrade",
 				Annotations: map[string]string{
-					metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetry,
+					constants.OperationAnnotation: constants.OperationAnnotationRetry,
 				},
 			},
 			Spec: baseboardv1alpha1.BMCSettingsSpec{
@@ -694,7 +695,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		))
 
 		Eventually(Object(bmcSettings)).Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Ensuring that the BMC setting has not been changed")

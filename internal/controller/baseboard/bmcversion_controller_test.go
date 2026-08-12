@@ -378,7 +378,7 @@ var _ = Describe("BMCVersion Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 				Annotations: map[string]string{
-					metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetry,
+					constants.OperationAnnotation: constants.OperationAnnotationRetry,
 				},
 			},
 			Spec: baseboardv1alpha1.BMCVersionSpec{
@@ -405,7 +405,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		))
 
 		Eventually(Object(bmcVersion)).Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Ensuring that the BIOS setting has not been changed")

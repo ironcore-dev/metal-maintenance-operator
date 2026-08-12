@@ -325,7 +325,7 @@ func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, 
 	if utils.ShouldRetryReconciliation(settings) {
 		settingsBase := settings.DeepCopy()
 		annotations := settings.GetAnnotations()
-		delete(annotations, metalv1alpha1.OperationAnnotation)
+		delete(annotations, constants.OperationAnnotation)
 		settings.SetAnnotations(annotations)
 		if err := r.Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to patch BIOSSettings for removing retrying annotation: %w", err)
@@ -1140,7 +1140,7 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, settings
 			err := r.Conditions.Update(retryCondition,
 				conditionutils.UpdateStatus(metav1.ConditionTrue),
 				conditionutils.UpdateReason(constants.ReasonRetryOfFailedResourceIssued),
-				conditionutils.UpdateMessage(annotations[metalv1alpha1.OperationAnnotation]),
+				conditionutils.UpdateMessage(annotations[constants.OperationAnnotation]),
 			)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to update retry condition for BIOSSettings: %w", err)

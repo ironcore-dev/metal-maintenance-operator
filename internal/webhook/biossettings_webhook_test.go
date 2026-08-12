@@ -12,6 +12,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -227,7 +228,7 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		Expect(validator.ValidateUpdate(ctx, biosSettingsV1, biosSettingsV1Updated)).Error().To(HaveOccurred())
 
 		By("Allowing the spec update of an in-progress BIOSSettings with force-update annotation")
-		biosSettingsV1Updated.Annotations = map[string]string{metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationForceUpdateInProgress}
+		biosSettingsV1Updated.Annotations = map[string]string{constants.OperationAnnotation: constants.OperationAnnotationForceUpdateInProgress}
 		Expect(validator.ValidateUpdate(ctx, biosSettingsV1, biosSettingsV1Updated)).Error().ToNot(HaveOccurred())
 
 		By("Ensuring the BIOSSettings V1 is back to Applied state")

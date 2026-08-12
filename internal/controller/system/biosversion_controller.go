@@ -212,7 +212,7 @@ func (r *BIOSVersionReconciler) transitionState(ctx context.Context, biosVersion
 		if utils.ShouldRetryReconciliation(biosVersion) {
 			biosVersionBase := biosVersion.DeepCopy()
 			annotations := biosVersion.GetAnnotations()
-			delete(annotations, metalv1alpha1.OperationAnnotation)
+			delete(annotations, constants.OperationAnnotation)
 			biosVersion.SetAnnotations(annotations)
 			if err := r.Patch(ctx, biosVersion, client.MergeFrom(biosVersionBase)); err != nil {
 				return true, fmt.Errorf("failed to patch BIOSVersion for retrying: %w", err)
@@ -464,7 +464,7 @@ func (r *BIOSVersionReconciler) processFailedState(ctx context.Context, biosVers
 			err := r.Conditions.Update(retryCondition,
 				conditionutils.UpdateStatus(metav1.ConditionTrue),
 				conditionutils.UpdateReason(constants.ReasonRetryOfFailedResourceIssued),
-				conditionutils.UpdateMessage(annotations[metalv1alpha1.OperationAnnotation]),
+				conditionutils.UpdateMessage(annotations[constants.OperationAnnotation]),
 			)
 			if err != nil {
 				return true, fmt.Errorf("failed to update retry condition for BIOSVersion: %w", err)
@@ -900,8 +900,8 @@ func (r *BIOSVersionReconciler) checkUpdateBiosUpgradeStatus(
 
 	upgradeCurrentTaskStatus := &api.Task{
 		URI:             taskURI,
-		State:           taskCurrentStatus.TaskState,
-		Status:          taskCurrentStatus.TaskStatus,
+		State:           api.TaskState(taskCurrentStatus.TaskState),
+		Status:          api.Health(taskCurrentStatus.TaskStatus),
 		PercentComplete: int32(gofish.Deref(taskCurrentStatus.PercentComplete)),
 	}
 

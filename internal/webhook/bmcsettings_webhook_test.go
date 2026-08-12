@@ -14,6 +14,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -172,7 +173,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 			Expect(validator.ValidateUpdate(ctx, BMCSettingsV1, bmcSettingsV1Updated)).Error().To(HaveOccurred())
 
 			By("Updating an bmcSettings V1 spec, should pass to update when inProgress with ForceUpdateResource finalizer")
-			bmcSettingsV1Updated.Annotations = map[string]string{metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationForceUpdateInProgress}
+			bmcSettingsV1Updated.Annotations = map[string]string{constants.OperationAnnotation: constants.OperationAnnotationForceUpdateInProgress}
 			Expect(validator.ValidateUpdate(ctx, BMCSettingsV1, bmcSettingsV1Updated)).Error().ToNot(HaveOccurred())
 
 			Eventually(UpdateStatus(BMCSettingsV1, func() {

@@ -842,7 +842,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-from-server-avail",
 				Annotations: map[string]string{
-					metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetry,
+					constants.OperationAnnotation: constants.OperationAnnotationRetry,
 				},
 			},
 			Spec: systemv1alpha1.BIOSSettingsSpec{
@@ -875,7 +875,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		))
 
 		Eventually(Object(biosSettings)).Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Ensuring that the BIOS setting has not been changed")

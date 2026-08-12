@@ -16,6 +16,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	v1 "k8s.io/api/core/v1"
@@ -609,7 +610,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		By("Pausing the 2nd BMCSettingsSet")
 		Eventually(Update(bmcSettingsSet2, func() {
 			bmcSettingsSet2.Annotations = map[string]string{
-				metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationIgnore,
+				constants.OperationAnnotation: constants.OperationAnnotationIgnore,
 			}
 		})).Should(Succeed())
 
@@ -635,7 +636,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 
 		By("Re enable the 2nd BMCSettingsSet")
 		Eventually(Update(bmcSettingsSet2, func() {
-			delete(bmcSettingsSet2.Annotations, metalv1alpha1.OperationAnnotation)
+			delete(bmcSettingsSet2.Annotations, constants.OperationAnnotation)
 		})).Should(Succeed())
 
 		By("Checking if the status has been updated by the 2nd BMCSettingsSet")
@@ -748,7 +749,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		By("Updating the BMCSettingsSet with retry annotation")
 		Eventually(Update(bmcSettingsSet, func() {
 			bmcSettingsSet.Annotations = map[string]string{
-				metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetryChildAndSelf,
+				constants.OperationAnnotation: constants.OperationAnnotationRetryChildAndSelf,
 			}
 		})).Should(Succeed())
 
@@ -779,12 +780,12 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 
 		By("Ensuring that the BMCSetting01 has not been retried again")
 		Consistently(Object(bmcSettings01), "50ms").Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Updating the BMCSettingsSet with NO retry annotation")
 		Eventually(Update(bmcSettingsSet, func() {
-			delete(bmcSettingsSet.GetAnnotations(), metalv1alpha1.OperationAnnotation)
+			delete(bmcSettingsSet.GetAnnotations(), constants.OperationAnnotation)
 			bmcSettingsSet.Spec.BMCSettingsTemplate.SettingsFlow = []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": changedBMCSetting}}}
 		})).Should(Succeed())
 

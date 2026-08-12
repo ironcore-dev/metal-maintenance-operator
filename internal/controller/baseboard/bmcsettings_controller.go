@@ -284,7 +284,7 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 		if utils.ShouldRetryReconciliation(settings) {
 			settingsBase := settings.DeepCopy()
 			annotations := settings.GetAnnotations()
-			delete(annotations, metalv1alpha1.OperationAnnotation)
+			delete(annotations, constants.OperationAnnotation)
 			settings.SetAnnotations(annotations)
 			if err := r.Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings for removing retrying annotation: %w", err)
@@ -745,7 +745,7 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 			err := r.Conditions.Update(retryCondition,
 				conditionutils.UpdateStatus(metav1.ConditionTrue),
 				conditionutils.UpdateReason(constants.ReasonRetryOfFailedResourceIssued),
-				conditionutils.UpdateMessage(annotations[metalv1alpha1.OperationAnnotation]),
+				conditionutils.UpdateMessage(annotations[constants.OperationAnnotation]),
 			)
 			if err != nil {
 				return fmt.Errorf("failed to update retry condition for BMCSettings: %w", err)
@@ -815,7 +815,10 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	if err != nil {
 		return diff, fmt.Errorf("failed to resolve BMCSettings variables: %w", err)
 	}
-	effectiveSettingsMap := utils.ApplyVariables(utils.MergeSettingsFlow(settings.Spec.SettingsFlow), resolvedVars)
+	effectiveSettingsMap, err := utils.ApplyVariables(utils.MergeSettingsFlow(settings.Spec.SettingsFlow), resolvedVars)
+	if err != nil {
+		return diff, fmt.Errorf("failed to apply BMCSettings variables: %w", err)
+	}
 
 	currentSettings, err := bmcClient.GetBMCAttributeValues(ctx, bmc.GetBMCAttributeValuesRequest{
 		UUID:       bmcObj.Spec.BMCUUID,

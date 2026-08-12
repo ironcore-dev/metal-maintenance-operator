@@ -360,7 +360,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 				Annotations: map[string]string{
-					metalv1alpha1.OperationAnnotation: metalv1alpha1.OperationAnnotationRetry,
+					constants.OperationAnnotation: constants.OperationAnnotationRetry,
 				},
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
@@ -387,7 +387,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		))
 
 		Eventually(Object(biosVersion)).Should(
-			HaveField("ObjectMeta.Annotations", Not(HaveKey(metalv1alpha1.OperationAnnotation))),
+			HaveField("ObjectMeta.Annotations", Not(HaveKey(constants.OperationAnnotation))),
 		)
 
 		By("Ensuring that the BIOSVersion has not been changed")
