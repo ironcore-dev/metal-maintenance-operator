@@ -272,7 +272,7 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 	if err != nil {
 		return
 	}
-	r.log.V(1).Info("Received metrics payload", "bmc", bmcName, "payload", string(body))
+	r.log.V(1).Info("Received metric report", "bmc", bmcName)
 
 	var data wireMetricReport
 	if err := json.Unmarshal(body, &data); err != nil {
