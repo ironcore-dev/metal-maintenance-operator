@@ -6,6 +6,7 @@ package maintenance
 import (
 	"github.com/ironcore-dev/controller-utils/metautils"
 	serverMaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -640,7 +641,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 
 		By("Setting ignore-reconciliation annotation to prevent the reconciler from re-adding the finalizer")
 		Eventually(Update(serverMaintenance, func() {
-			metav1.SetMetaDataAnnotation(&serverMaintenance.ObjectMeta, metalv1alpha1.OperationAnnotation, metalv1alpha1.OperationAnnotationIgnore)
+			metav1.SetMetaDataAnnotation(&serverMaintenance.ObjectMeta, constants.OperationAnnotation, constants.OperationAnnotationIgnore)
 		})).Should(Succeed())
 
 		By("Manually removing the finalizer to simulate a no-finalizer state")

@@ -33,7 +33,10 @@ rules:
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
-  - bmcusers
+  - bmcsettings
+  - bmcsettingssets
+  - bmcversions
+  - bmcversionsets
   verbs:
   - create
   - delete
@@ -45,41 +48,27 @@ rules:
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
-  - bmcusers/finalizers
+  - bmcsettings/finalizers
+  - bmcsettingssets/finalizers
+  - bmcversions/finalizers
+  - bmcversionsets/finalizers
   verbs:
   - update
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
-  - bmcusers/status
+  - bmcsettings/status
+  - bmcsettingssets/status
+  - bmcversions/status
+  - bmcversionsets/status
   verbs:
   - get
   - patch
   - update
 - apiGroups:
-  - boot.ironcore.dev
+  - batch
   resources:
-  - httpbootconfig
-  - ipxebootconfig
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - watch
-- apiGroups:
-  - boot.ironcore.dev
-  resources:
-  - httpbootconfig/status
-  - ipxebootconfig/status
-  verbs:
-  - get
-- apiGroups:
-  - boot.ironcore.dev
-  resources:
-  - httpbootconfigs
-  - ipxebootconfigs
+  - jobs
   verbs:
   - create
   - delete
@@ -88,26 +77,9 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - boot.ironcore.dev
-  resources:
-  - httpbootconfigs/finalizers
-  - ipxebootconfigs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - boot.ironcore.dev
-  resources:
-  - httpbootconfigs/status
-  - ipxebootconfigs/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
-  - consoles
   - servermaintenances
   verbs:
   - create
@@ -120,14 +92,12 @@ rules:
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
-  - consoles/finalizers
   - servermaintenances/finalizers
   verbs:
   - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
-  - consoles/status
   - servermaintenances/status
   verbs:
   - get
@@ -137,22 +107,30 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcs
+  - servers
   verbs:
   - get
   - list
   - patch
+  - update
   - watch
 - apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcs/finalizers
-  - serverbootconfigurations/finalizers
   verbs:
   - update
 - apiGroups:
   - metal.ironcore.dev
   resources:
   - bmcsecrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - serverbootconfigurations
   - serverclaims
   verbs:
@@ -166,22 +144,11 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - serverbootconfigurations/status
   - servers/status
   verbs:
   - get
   - patch
   - update
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
-  - servers
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - readiness.metal.ironcore.dev
   resources:
@@ -204,6 +171,41 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings
+  - biossettingssets
+  - biosversions
+  - biosversionsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings/finalizers
+  - biossettingssets/finalizers
+  - biosversions/finalizers
+  - biosversionsets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings/status
+  - biossettingssets/status
+  - biosversions/status
+  - biosversionsets/status
   verbs:
   - get
   - patch
