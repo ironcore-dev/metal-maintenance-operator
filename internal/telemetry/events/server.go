@@ -288,9 +288,6 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	if r.cfg.TestNotifier != nil {
-		r.cfg.TestNotifier.NotifyTestEvent(bmcName, "")
-	}
 	r.log.V(1).Info("Published samples", "bmc", bmcName, "count", len(samples))
 	w.WriteHeader(http.StatusOK)
 }
