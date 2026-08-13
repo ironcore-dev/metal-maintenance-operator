@@ -86,8 +86,8 @@ func TestAlerts_HappyPath_EventsField(t *testing.T) {
 	h := newReceiver(t, eSink)
 	res := doPost(t, h, "/serverevents/alerts/bmc-1",
 		`{"Events":[{"EventId":"E1","Severity":"Warning","Message":"hot"}]}`)
-	if res.StatusCode != http.StatusNoContent {
-		t.Fatalf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", res.StatusCode)
 	}
 	got := eSink.lastCall()
 	if got.bmcName != testBMCName || len(got.events) != 1 || got.events[0].EventID != "E1" {
@@ -100,8 +100,8 @@ func TestAlerts_HappyPath_AlertsField(t *testing.T) {
 	h := newReceiver(t, eSink)
 	res := doPost(t, h, "/serverevents/alerts/bmc-1",
 		`{"Alerts":[{"EventId":"A1","Severity":"Critical","Message":"dead"}]}`)
-	if res.StatusCode != http.StatusNoContent {
-		t.Fatalf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", res.StatusCode)
 	}
 	got := eSink.lastCall()
 	if len(got.events) != 1 || got.events[0].EventID != "A1" {
@@ -114,8 +114,8 @@ func TestAlerts_BothFieldsEventsWins(t *testing.T) {
 	h := newReceiver(t, eSink)
 	res := doPost(t, h, "/serverevents/alerts/bmc-1",
 		`{"Events":[{"EventId":"E1"}],"Alerts":[{"EventId":"A1"}]}`)
-	if res.StatusCode != http.StatusNoContent {
-		t.Fatalf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", res.StatusCode)
 	}
 	got := eSink.lastCall()
 	if len(got.events) != 1 {
@@ -130,8 +130,8 @@ func TestAlerts_EmptyPayload(t *testing.T) {
 	eSink := &recordingEventSink{}
 	h := newReceiver(t, eSink)
 	res := doPost(t, h, "/serverevents/alerts/bmc-1", `{}`)
-	if res.StatusCode != http.StatusNoContent {
-		t.Errorf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
 	}
 	// Sink should have been called with a nil/empty slice.
 	if len(eSink.calls) != 1 {
@@ -239,8 +239,8 @@ func TestReceiver_AcceptsRealPOST(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	if res.StatusCode != http.StatusNoContent {
-		t.Errorf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
 	}
 	_ = res.Body.Close()
 	if len(eSink.calls) != 1 {
@@ -312,8 +312,8 @@ func TestMetricsReport_HappyPath(t *testing.T) {
 		]
 	}`
 	res := doPost(t, h, "/serverevents/metricsreport/bmc-1", body)
-	if res.StatusCode != http.StatusNoContent {
-		t.Errorf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
 	}
 	got := mSink.lastCall()
 	if got.bmcName != testBMCName || len(got.samples) != 1 {
@@ -340,8 +340,8 @@ func TestMetricsReport_UnparseableRowsDropped(t *testing.T) {
 		]
 	}`
 	res := doPost(t, h, "/serverevents/metricsreport/bmc-1", body)
-	if res.StatusCode != http.StatusNoContent {
-		t.Errorf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
 	}
 	got := mSink.lastCall()
 	if len(got.samples) != 1 || got.samples[0].MetricID != "Good" {
@@ -492,8 +492,8 @@ func TestAlerts_NilTestNotifier_NoPanic(t *testing.T) {
 	h := newReceiverWithNotifier(t, eSink, nil)
 	res := doPost(t, h, "/serverevents/alerts/bmc-1",
 		`{"Events":[{"MessageId":"FOO.1.0.Bar","EventId":"E1"}]}`)
-	if res.StatusCode != http.StatusNoContent {
-		t.Errorf("status: got %d, want 204", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
 	}
 }
 

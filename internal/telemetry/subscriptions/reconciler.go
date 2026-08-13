@@ -364,7 +364,7 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 		uri, err := c.CreateEventSubscription(
 			ctx, dest,
 			schemas.MetricReportEventFormatType,
-			schemas.TerminateAfterRetriesDeliveryRetryPolicy,
+			schemas.RetryForeverDeliveryRetryPolicy,
 		)
 		if err != nil {
 			r.Log.V(1).Info("Failed to create metrics subscription",
@@ -380,7 +380,7 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 		uri, err := c.CreateEventSubscription(
 			ctx, dest,
 			schemas.EventEventFormatType,
-			schemas.TerminateAfterRetriesDeliveryRetryPolicy,
+			schemas.RetryForeverDeliveryRetryPolicy,
 		)
 		if err != nil {
 			r.Log.V(1).Info("Failed to create alerts subscription",
@@ -575,7 +575,7 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		entry := raw.(testEntry)
 		if time.Now().After(entry.deadline) {
 			r.testPending.Delete(bmcName)
-			r.Log.V(1).Info("Test event timed out", "bmc", bmcName)
+			r.Log.Info("Test event timed out", "bmc", bmcName)
 			if r.TestRecorder != nil {
 				r.TestRecorder.RecordTestResult(bmcName, testResultFailure)
 			}
@@ -620,7 +620,7 @@ func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
 		return
 	}
 	r.testPending.Delete(bmcName)
-	r.Log.V(1).Info("Test event round-trip confirmed", "bmc", bmcName)
+	r.Log.Info("Test event round-trip confirmed", "bmc", bmcName)
 	if r.TestRecorder != nil {
 		r.TestRecorder.RecordTestResult(bmcName, testResultSuccess)
 	}
