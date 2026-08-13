@@ -58,6 +58,9 @@ func (l *ConfigLoader) Start(ctx context.Context) error {
 	// this the cache-backed client returns "not ready" and the load is
 	// silently deferred until the first watch event.
 	if !l.Cache.WaitForCacheSync(ctx) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return fmt.Errorf("ConfigLoader: cache sync timed out or context cancelled")
 	}
 
