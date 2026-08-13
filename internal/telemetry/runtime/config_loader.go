@@ -54,6 +54,16 @@ func (l *ConfigLoader) Start(ctx context.Context) error {
 		return errors.New("ConfigLoader: Namespace and Name are required")
 	}
 
+	// Wait for the cache to be populated before the initial read; without
+	// this the cache-backed client returns "not ready" and the load is
+	// silently deferred until the first watch event.
+	if !l.Cache.WaitForCacheSync(ctx) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("ConfigLoader: cache sync timed out or context cancelled")
+	}
+
 	if err := l.reload(ctx); err != nil {
 		l.Log.Info("Initial ConfigMap load deferred to watch", "reason", err.Error())
 	}
