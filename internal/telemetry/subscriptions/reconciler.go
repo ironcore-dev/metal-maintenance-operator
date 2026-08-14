@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -244,7 +243,8 @@ func (r *BMCReconciler) perBMCTimeout() time.Duration {
 func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC) {
 	ref := r.bmcRefWithServerFallback(ctx, bmc)
 	cfg := r.Config()
-	wantSubscribed := SubscribeToBMC(ref, cfg)
+	hw := MatchBMC(ref, cfg)
+	wantSubscribed := hw != nil
 
 	ctx, cancel := context.WithTimeout(ctx, r.perBMCTimeout())
 	defer cancel()
@@ -294,7 +294,7 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 			return
 		}
 		r.ensureSubscriptions(ctx, c, ref.Name, current)
-		r.maybeRunTestEvent(ctx, c, ref.Name, cfg)
+		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, hw)
 	} else {
 		// BMC isn't in the event-based set (or was and is no longer):
 		// tear off any subscriptions we previously created here, then
@@ -565,8 +565,11 @@ const (
 // interval has elapsed since the last test for this BMC. It also enforces
 // the deadline for any pending test that has not yet been confirmed, recording
 // a failure if it expired.
-func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config) {
+func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config, hw *HardwareMatch) {
 	if cfg == nil || cfg.TestEventInterval <= 0 {
+		return
+	}
+	if hw == nil || hw.TestMessageId == "" {
 		return
 	}
 
@@ -597,14 +600,26 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		timeout = 30 * time.Second
 	}
 
-	msgID := uuid.New().String()
-	if err := c.SubmitTestEvent(ctx, msgID); err != nil {
+	severity := hw.TestSeverity
+	if severity == "" {
+		severity = "OK"
+	}
+	originOfCondition := hw.TestOriginOfCondition
+	if originOfCondition == "" {
+		originOfCondition = "/redfish/v1/Systems/1"
+	}
+	params := TestEventParams{
+		MessageId:         hw.TestMessageId,
+		Severity:          severity,
+		OriginOfCondition: originOfCondition,
+	}
+	if err := c.SubmitTestEvent(ctx, params); err != nil {
 		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
 		return
 	}
-	r.testPending.Store(bmcName, testEntry{messageID: msgID, deadline: time.Now().Add(timeout)})
+	r.testPending.Store(bmcName, testEntry{messageID: hw.TestMessageId, deadline: time.Now().Add(timeout)})
 	r.lastTestTime.Store(bmcName, time.Now())
-	r.Log.V(1).Info("Submitted test event", "bmc", bmcName, "messageID", msgID)
+	r.Log.V(1).Info("Submitted test event", "bmc", bmcName, "messageID", hw.TestMessageId)
 }
 
 // NotifyTestEvent is called by the event receiver when an alert arrives.

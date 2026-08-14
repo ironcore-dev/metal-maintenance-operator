@@ -25,4 +25,5 @@ const (
 	eventFormatEvent        = "Event"
 	subURIMetric            = "/redfish/v1/EventService/Subscriptions/m"
 	subURIAlert             = "/redfish/v1/EventService/Subscriptions/a"
+	testMessageId           = "SYS.1.0.SYS1000"
 )

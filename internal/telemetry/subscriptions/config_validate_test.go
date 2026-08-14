@@ -107,15 +107,14 @@ func TestValidate_EventBasedHardware_EmptyModels(t *testing.T) {
 	assertFieldError(t, errs, "eventBasedHardware[0].models")
 }
 
-func TestValidate_EventBasedHardware_DuplicateVendor(t *testing.T) {
+func TestValidate_EventBasedHardware_MultipleRowsSameVendor(t *testing.T) {
 	cfg := minimalValid()
 	cfg.EventBasedHardware = []HardwareMatch{
-		{Vendor: vendorDellInc, Models: []string{"*"}},
-		{Vendor: vendorDellInc, Models: []string{"PowerEdge R740"}},
+		{Vendor: vendorDellInc, Models: []string{"PowerEdge R750"}},
+		{Vendor: vendorDellInc, Models: []string{"PowerEdge R640"}},
 	}
-	errs := Validate(cfg)
-	if len(errs) == 0 {
-		t.Fatal("expected duplicate vendor error")
+	if errs := Validate(cfg); len(errs) != 0 {
+		t.Fatalf("multiple rows for same vendor should be allowed, got: %v", errs)
 	}
 }
 
@@ -131,6 +130,22 @@ func TestValidate_EventBasedHardware_ValidSemver(t *testing.T) {
 	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, MinFirmware: firmware5_10_0}}
 	if errs := Validate(cfg); len(errs) != 0 {
 		t.Fatalf("unexpected errors with valid semver: %v", errs)
+	}
+}
+
+func TestValidate_EventBasedHardware_TestMessageIdRequiredWhenIntervalSet(t *testing.T) {
+	cfg := minimalValid()
+	cfg.TestEventInterval = time.Minute
+	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	errs := Validate(cfg)
+	assertFieldError(t, errs, "testMessageId")
+}
+
+func TestValidate_EventBasedHardware_TestMessageIdNotRequiredWithoutInterval(t *testing.T) {
+	cfg := minimalValid()
+	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	if errs := Validate(cfg); len(errs) != 0 {
+		t.Fatalf("unexpected errors without testEventInterval: %v", errs)
 	}
 }
 

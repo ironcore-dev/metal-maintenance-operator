@@ -14,16 +14,24 @@ import (
 // vendor/model/firmware (as reported by the metal-operator BMC
 // controller) and the operator's ConfigMap policy.
 func SubscribeToBMC(ref BMCRef, cfg *Config) bool {
+	return MatchBMC(ref, cfg) != nil
+}
+
+// MatchBMC returns the first HardwareMatch row that applies to ref, or
+// nil if no row matches. Callers that need the matched config (e.g. to
+// read TestMessageId) should use this instead of SubscribeToBMC.
+func MatchBMC(ref BMCRef, cfg *Config) *HardwareMatch {
 	if cfg == nil {
-		return false
+		return nil
 	}
 	// An unknown vendor (informer hasn't populated Status yet, or BMC
 	// never reported one) does not qualify — we have no signal that
 	// this BMC supports subscriptions.
 	if ref.Vendor == "" {
-		return false
+		return nil
 	}
-	for _, hw := range cfg.EventBasedHardware {
+	for i := range cfg.EventBasedHardware {
+		hw := &cfg.EventBasedHardware[i]
 		if !vendorMatches(hw.Vendor, ref.Vendor) {
 			continue
 		}
@@ -33,9 +41,9 @@ func SubscribeToBMC(ref BMCRef, cfg *Config) bool {
 		if !firmwareSatisfies(hw.MinFirmware, ref.FirmwareVersion) {
 			continue
 		}
-		return true
+		return hw
 	}
-	return false
+	return nil
 }
 
 // vendorMatches compares the configured vendor against the BMC's
