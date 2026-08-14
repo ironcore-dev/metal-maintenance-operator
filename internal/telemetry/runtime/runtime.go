@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/stmcginnis/gofish"
 	"github.com/stmcginnis/gofish/schemas"
@@ -244,7 +245,7 @@ func (c *extendedClient) ListEventSubscriptions(_ context.Context) ([]subscripti
 	return out, nil
 }
 
-func (c *extendedClient) SubmitTestEvent(_ context.Context, messageId string) error {
+func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions.TestEventParams) error {
 	svc := c.api.GetService()
 	if svc == nil {
 		return fmt.Errorf("submit test event: no service root")
@@ -254,9 +255,13 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, messageId string) er
 		return fmt.Errorf("submit test event: event service: %w", err)
 	}
 	_, err = es.SubmitTestEvent(&schemas.EventServiceSubmitTestEventParameters{
-		MessageID: messageId,
-		Message:   "metal-maintenance-operator pipeline health check",
-		Severity:  "Informational",
+		EventID:           "1",
+		EventTimestamp:    time.Now().UTC().Format(time.RFC3339),
+		MessageID:         params.MessageId,
+		Message:           "metal-maintenance-operator pipeline health check",
+		MessageArgs:       []string{},
+		Severity:          params.Severity,
+		OriginOfCondition: params.OriginOfCondition,
 	})
 	return err
 }

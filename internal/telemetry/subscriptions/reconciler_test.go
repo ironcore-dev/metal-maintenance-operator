@@ -804,8 +804,8 @@ func TestNotifyTestEvent_MatchingID_RecordsSuccess(t *testing.T) {
 }
 
 func TestNotifyTestEvent_AnyID_RecordsSuccess(t *testing.T) {
-	// With time-window correlation, any event arrival for a BMC with a
-	// pending test entry records success — the messageId is not checked.
+	// NotifyTestEvent correlates on the configured testMessageId — a matching
+	// arrival confirms round-trip success.
 	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
 	res := &fakeResolver{}
 	res.set(makeResolved(), nil)
@@ -817,7 +817,7 @@ func TestNotifyTestEvent_AnyID_RecordsSuccess(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), req()); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	r.NotifyTestEvent(testBMCName, "any-id-works")
+	r.NotifyTestEvent(testBMCName, testMessageId)
 	if results := rec.snapshotResults(); len(results) != 1 || results[0].result != "success" {
 		t.Errorf("any messageId should confirm success, got %+v", results)
 	}

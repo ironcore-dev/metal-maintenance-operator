@@ -243,8 +243,8 @@ func (r *BMCReconciler) perBMCTimeout() time.Duration {
 func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC) {
 	ref := r.bmcRefWithServerFallback(ctx, bmc)
 	cfg := r.Config()
-	match := SubscribeToBMC(ref, cfg)
-	wantSubscribed := match != nil
+	hw := SubscribeToBMC(ref, cfg)
+	wantSubscribed := hw != nil
 
 	ctx, cancel := context.WithTimeout(ctx, r.perBMCTimeout())
 	defer cancel()
@@ -294,7 +294,7 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 			return
 		}
 		r.ensureSubscriptions(ctx, c, ref.Name, current)
-		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, match)
+		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, hw)
 	} else {
 		// BMC isn't in the event-based set (or was and is no longer):
 		// tear off any subscriptions we previously created here, then
@@ -552,7 +552,8 @@ func (r *BMCReconciler) bmcRefWithServerFallback(ctx context.Context, bmc *metal
 
 // testEntry holds the correlation state for one in-flight SubmitTestEvent.
 type testEntry struct {
-	deadline time.Time
+	messageID string
+	deadline  time.Time
 }
 
 const (
@@ -599,27 +600,38 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		timeout = 30 * time.Second
 	}
 
-	if err := c.SubmitTestEvent(ctx, hw.TestMessageId); err != nil {
+	severity := hw.TestSeverity
+	if severity == "" {
+		severity = "OK"
+	}
+	originOfCondition := hw.TestOriginOfCondition
+	if originOfCondition == "" {
+		originOfCondition = "/redfish/v1/Systems/1"
+	}
+	params := TestEventParams{
+		MessageId:         hw.TestMessageId,
+		Severity:          severity,
+		OriginOfCondition: originOfCondition,
+	}
+	if err := c.SubmitTestEvent(ctx, params); err != nil {
 		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
 		return
 	}
-	r.testPending.Store(bmcName, testEntry{deadline: time.Now().Add(timeout)})
+	r.testPending.Store(bmcName, testEntry{messageID: hw.TestMessageId, deadline: time.Now().Add(timeout)})
 	r.lastTestTime.Store(bmcName, time.Now())
-	r.Log.V(1).Info("Submitted test event", "bmc", bmcName)
+	r.Log.V(1).Info("Submitted test event", "bmc", bmcName, "messageID", hw.TestMessageId)
 }
 
 // NotifyTestEvent is called by the event receiver when an alert arrives.
-// It confirms any pending test for the BMC as successful, provided the
-// deadline has not yet passed. Events arriving after the deadline are
-// ignored — the next maybeRunTestEvent pass will record failure.
-// Implements events.TestEventNotifier.
-func (r *BMCReconciler) NotifyTestEvent(bmcName, _ string) {
+// It correlates the messageId against any pending test for the BMC and
+// records a success result if matched. Implements events.TestEventNotifier.
+func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
 	raw, ok := r.testPending.Load(bmcName)
 	if !ok {
 		return
 	}
 	entry := raw.(testEntry)
-	if time.Now().After(entry.deadline) {
+	if entry.messageID != messageId {
 		return
 	}
 	r.testPending.Delete(bmcName)

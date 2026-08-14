@@ -104,13 +104,13 @@ func (c *fakeClient) ListEventSubscriptions(_ context.Context) ([]subscriptions.
 	return out, nil
 }
 
-func (c *fakeClient) SubmitTestEvent(_ context.Context, msgID string) error {
+func (c *fakeClient) SubmitTestEvent(_ context.Context, params subscriptions.TestEventParams) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.submitErr != nil {
 		return c.submitErr
 	}
-	c.submitCalls = append(c.submitCalls, msgID)
+	c.submitCalls = append(c.submitCalls, params.MessageId)
 	return nil
 }
 
