@@ -80,6 +80,8 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var enableWebhooks bool
+	var webhookServer webhook.Server
 	var tlsOpts []func(*tls.Config)
 	var sanitizationNamespace string
 	var sanitizationImage string
@@ -249,10 +251,12 @@ func main() {
 			config.GetCertificate = webhookCertWatcher.GetCertificate
 		})
 	}
-
-	webhookServer := webhook.NewServer(webhook.Options{
-		TLSOpts: webhookTLSOpts,
-	})
+	enableWebhooks = os.Getenv("ENABLE_WEBHOOKS") != "false"
+	if enableWebhooks {
+		webhookServer = webhook.NewServer(webhook.Options{
+			TLSOpts: webhookTLSOpts,
+		})
+	}
 
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
@@ -497,24 +501,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = maintenancewebhook.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BMCSettings webhook")
-		os.Exit(1)
-	}
+	if enableWebhooks {
+		if err = maintenancewebhook.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BMCSettings webhook")
+			os.Exit(1)
+		}
 
-	if err = maintenancewebhook.SetupBMCVersionWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BMCVersion webhook")
-		os.Exit(1)
-	}
+		if err = maintenancewebhook.SetupBMCVersionWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BMCVersion webhook")
+			os.Exit(1)
+		}
 
-	if err = maintenancewebhook.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BIOSSettings webhook")
-		os.Exit(1)
-	}
+		if err = maintenancewebhook.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BIOSSettings webhook")
+			os.Exit(1)
+		}
 
-	if err = maintenancewebhook.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BIOSVersion webhook")
-		os.Exit(1)
+		if err = maintenancewebhook.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
