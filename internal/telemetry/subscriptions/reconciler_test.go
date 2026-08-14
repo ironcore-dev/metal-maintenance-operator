@@ -803,23 +803,27 @@ func TestNotifyTestEvent_MatchingID_RecordsSuccess(t *testing.T) {
 	}
 }
 
-func TestNotifyTestEvent_AnyID_RecordsSuccess(t *testing.T) {
-	// NotifyTestEvent correlates on the configured testMessageId — a matching
-	// arrival confirms round-trip success.
-	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
-	res := &fakeResolver{}
-	res.set(makeResolved(), nil)
-	fc := &fakeClient{}
-	rec := &fakeTestRecorder{}
-	cfg := cfgWithTestInterval(time.Millisecond)
-	r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+func TestNotifyTestEvent_CaseInsensitive_RecordsSuccess(t *testing.T) {
+	// Correlation is case-insensitive: BMCs may echo back the messageId
+	// in different casing than what was sent.
+	for _, notifyID := range []string{strings.ToUpper(testMessageId), strings.ToLower(testMessageId)} {
+		t.Run(notifyID, func(t *testing.T) {
+			c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+			res := &fakeResolver{}
+			res.set(makeResolved(), nil)
+			fc := &fakeClient{}
+			rec := &fakeTestRecorder{}
+			cfg := cfgWithTestInterval(time.Millisecond)
+			r := newRecWithTestRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
 
-	if _, err := r.Reconcile(context.Background(), req()); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	r.NotifyTestEvent(testBMCName, testMessageId)
-	if results := rec.snapshotResults(); len(results) != 1 || results[0].result != "success" {
-		t.Errorf("any messageId should confirm success, got %+v", results)
+			if _, err := r.Reconcile(context.Background(), req()); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			r.NotifyTestEvent(testBMCName, notifyID)
+			if results := rec.snapshotResults(); len(results) != 1 || results[0].result != "success" {
+				t.Errorf("messageId %q should confirm success, got %+v", notifyID, results)
+			}
+		})
 	}
 }
 

@@ -631,7 +631,7 @@ func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
 		return
 	}
 	entry := raw.(testEntry)
-	if entry.messageID != messageId {
+	if !strings.EqualFold(entry.messageID, messageId) {
 		return
 	}
 	r.testPending.Delete(bmcName)
