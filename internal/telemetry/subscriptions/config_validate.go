@@ -111,8 +111,9 @@ func Validate(cfg *Config) field.ErrorList {
 
 	// eventBasedHardware — vendor must be a canonical metal-operator
 	// bmc.Manufacturer value, models non-empty (and individually
-	// non-blank), no duplicate vendors, valid semver for MinFirmware.
-	vendorsSeen := make(map[string]bool, len(cfg.EventBasedHardware))
+	// non-blank), valid semver for MinFirmware. Multiple rows per vendor
+	// are allowed to support per-model overrides (e.g. different
+	// testMessageId for old vs new firmware).
 	for i, hw := range cfg.EventBasedHardware {
 		hwPath := root.Child("eventBasedHardware").Index(i)
 		vendor := strings.TrimSpace(hw.Vendor)
@@ -125,10 +126,6 @@ func Validate(cfg *Config) field.ErrorList {
 			// would pass validation but never match the exact-compare
 			// runtime path in vendorMatches.
 			errs = append(errs, field.NotSupported(hwPath.Child("vendor"), hw.Vendor, supportedVendorList))
-		case vendorsSeen[vendor]:
-			errs = append(errs, field.Duplicate(hwPath.Child("vendor"), hw.Vendor))
-		default:
-			vendorsSeen[vendor] = true
 		}
 		if len(hw.Models) == 0 {
 			errs = append(errs, field.Required(hwPath.Child("models"), "at least one model or \"*\" required"))
