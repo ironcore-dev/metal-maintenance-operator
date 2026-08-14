@@ -503,22 +503,22 @@ func main() {
 
 	if enableWebhooks {
 		if err = maintenancewebhook.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create BMCSettings webhook")
+			setupLog.Error(err, "Failed to set up BMCSettings webhook")
 			os.Exit(1)
 		}
 
 		if err = maintenancewebhook.SetupBMCVersionWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create BMCVersion webhook")
+			setupLog.Error(err, "Failed to set up BMCVersion webhook")
 			os.Exit(1)
 		}
 
 		if err = maintenancewebhook.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create BIOSSettings webhook")
+			setupLog.Error(err, "Failed to set up BIOSSettings webhook")
 			os.Exit(1)
 		}
 
 		if err = maintenancewebhook.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "Unable to create BIOSVersion webhook")
+			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
 			os.Exit(1)
 		}
 	}
