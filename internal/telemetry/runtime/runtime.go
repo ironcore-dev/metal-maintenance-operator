@@ -275,7 +275,7 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 
 	resp, err := c.api.Post(es.SubmitTestEventTarget, payload)
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	return err
 }
