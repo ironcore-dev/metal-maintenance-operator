@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/stmcginnis/gofish"
-	"github.com/stmcginnis/gofish/schemas"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -254,15 +253,30 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 	if err != nil {
 		return fmt.Errorf("submit test event: event service: %w", err)
 	}
-	_, err = es.SubmitTestEvent(&schemas.EventServiceSubmitTestEventParameters{
-		EventID:           "1",
-		EventTimestamp:    time.Now().UTC().Format(time.RFC3339),
-		MessageID:         params.MessageId,
-		Message:           "metal-maintenance-operator pipeline health check",
-		MessageArgs:       []string{},
-		Severity:          params.Severity,
-		OriginOfCondition: params.OriginOfCondition,
-	})
+	if es.SubmitTestEventTarget == "" {
+		return fmt.Errorf("submit test event: no target URL")
+	}
+
+	// Build the payload manually. gofish's EventServiceSubmitTestEventParameters
+	// uses omitempty on MessageArgs (iLO rejects absent field) and sends
+	// OriginOfCondition as a plain string (older iDRAC expects a JSON object).
+	// We control exactly what goes on the wire to satisfy both vendors.
+	payload := map[string]any{
+		"EventId":        "1",
+		"EventTimestamp": time.Now().UTC().Format(time.RFC3339),
+		"MessageId":      params.MessageId,
+		"Message":        "metal-maintenance-operator pipeline health check",
+		"MessageArgs":    []string{},
+		"Severity":       params.Severity,
+	}
+	if params.OriginOfCondition != "" {
+		payload["OriginOfCondition"] = params.OriginOfCondition
+	}
+
+	resp, err := c.api.Post(es.SubmitTestEventTarget, payload)
+	if resp != nil {
+		resp.Body.Close()
+	}
 	return err
 }
 
