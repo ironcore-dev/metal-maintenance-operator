@@ -131,7 +131,7 @@ func registerIndexFields(ctx context.Context, indexer client.FieldIndexer) error
 	return nil
 }
 
-func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
+func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver.Option) *corev1.Namespace {
 	ns := &corev1.Namespace{}
 
 	BeforeEach(func(ctx SpecContext) {
@@ -206,6 +206,22 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			Scheme: k8sManager.GetScheme(),
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		Expect((&FirmwareUpdateDellReconciler{
+			Client:             k8sManager.GetClient(),
+			ManagerNamespace:   ns.Name,
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			Scheme:             k8sManager.GetScheme(),
+			ResyncInterval:     10 * time.Millisecond,
+			Conditions:         accessor,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+			MaxRepositoryPasses: 5,
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real
 		// BMC/Server controllers - which live in metal-operator's internal package
 		// and can't be imported - by syncing status (PowerState, FirmwareVersion,
@@ -245,11 +261,12 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			ResyncInterval: 10 * time.Millisecond,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		opts := append([]mockserver.Option{mockserver.WithAuth()}, mockServerOpts...)
 		if len(redfishMockServers) > 0 {
 			mockServers = make([]*mockserver.MockServer, 0, len(redfishMockServers))
 			for _, serverAddr := range redfishMockServers {
 				By(fmt.Sprintf("Starting mock Redfish server %v", serverAddr))
-				ms := mockserver.NewMockServer(GinkgoLogr, serverAddr.String(), mockserver.WithAuth())
+				ms := mockserver.NewMockServer(GinkgoLogr, serverAddr.String(), opts...)
 				mockServers = append(mockServers, ms)
 				Expect(k8sManager.Add(manager.RunnableFunc(func(ctx context.Context) error {
 					if err := ms.Start(ctx); err != nil {
@@ -261,7 +278,7 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			}
 		} else {
 			By("Starting the default mock Redfish server")
-			ms := mockserver.NewMockServer(GinkgoLogr, fmt.Sprintf(":%d", MockServerPort), mockserver.WithAuth())
+			ms := mockserver.NewMockServer(GinkgoLogr, fmt.Sprintf(":%d", MockServerPort), opts...)
 			mockServers = []*mockserver.MockServer{ms}
 			Expect(k8sManager.Add(manager.RunnableFunc(func(ctx context.Context) error {
 				if err := ms.Start(ctx); err != nil {
@@ -293,6 +310,7 @@ func EnsureCleanState() {
 		&systemv1alpha1.BIOSSettingsSetList{},
 		&systemv1alpha1.BIOSVersionList{},
 		&systemv1alpha1.BIOSVersionSetList{},
+		&systemv1alpha1.FirmwareUpdateDellList{},
 		&maintenancev1alpha1.ServerMaintenanceList{},
 	}
 

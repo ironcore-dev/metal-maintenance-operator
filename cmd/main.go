@@ -92,6 +92,7 @@ func main() {
 	var resyncInterval time.Duration
 	var biosSettingsTimeoutExpiry time.Duration
 	var rebootTimeoutExpiry time.Duration
+	var maxRepositoryPasses int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -138,6 +139,8 @@ func main() {
 		"Timeout for BIOS settings application before the task is considered expired.")
 	flag.DurationVar(&rebootTimeoutExpiry, "reboot-timeout-expiry", 10*time.Minute,
 		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
+	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", 5,
+		"Maximum number of check->apply->track->recheck passes a FirmwareUpdateDell may take before being marked Failed.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -476,6 +479,22 @@ func main() {
 		RebootTimeoutExpiry:         rebootTimeoutExpiry,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BIOSVersion controller")
+		os.Exit(1)
+	}
+
+	if err = (&systemctrl.FirmwareUpdateDellReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		BMCOptions:                  bmcOpts,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		MaxRepositoryPasses:         int32(maxRepositoryPasses),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create FirmwareUpdateDell controller")
 		os.Exit(1)
 	}
 
