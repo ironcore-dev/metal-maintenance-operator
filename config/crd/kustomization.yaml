@@ -5,6 +5,14 @@ resources:
 - bases/vendorconsole.metal.ironcore.dev_consoles.yaml
 - bases/readiness.metal.ironcore.dev_serverwirings.yaml
 - bases/maintenance.metal.ironcore.dev_servermaintenances.yaml
+- bases/system.metal.ironcore.dev_biossettings.yaml
+- bases/system.metal.ironcore.dev_biossettingssets.yaml
+- bases/system.metal.ironcore.dev_biosversions.yaml
+- bases/system.metal.ironcore.dev_biosversionsets.yaml
+- bases/baseboard.metal.ironcore.dev_bmcsettings.yaml
+- bases/baseboard.metal.ironcore.dev_bmcsettingssets.yaml
+- bases/baseboard.metal.ironcore.dev_bmcversions.yaml
+- bases/baseboard.metal.ironcore.dev_bmcversionsets.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
