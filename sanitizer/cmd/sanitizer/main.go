@@ -33,7 +33,7 @@ func dhConfigure(ctx context.Context) error {
 	ifs, err := dhclient.Interfaces("^e.*")
 	if err != nil {
 		allIfaces, _ := dhclient.Interfaces(".*")
-		allIfaceNames := make([]string, len(allIfaces))
+		allIfaceNames := make([]string, 0, len(allIfaces))
 		for _, iface := range allIfaces {
 			allIfaceNames = append(allIfaceNames, fmt.Sprintf("%#+v", iface.Attrs()))
 		}
@@ -42,6 +42,7 @@ func dhConfigure(ctx context.Context) error {
 
 	var (
 		errs       []error
+		succeeded  bool
 		done       = make(chan struct{})
 		closeOnce  sync.Once
 		notifyDone = func() {
@@ -63,6 +64,10 @@ func dhConfigure(ctx context.Context) error {
 				Port: dhcpv6.DefaultServerPort,
 			},
 		}, 30*time.Second) {
+			if succeeded {
+				continue
+			}
+
 			if res.Err != nil {
 				errs = append(errs, res.Err)
 				continue
@@ -73,6 +78,7 @@ func dhConfigure(ctx context.Context) error {
 				continue
 			}
 
+			succeeded = true
 			notifyDone()
 		}
 	}()
@@ -80,6 +86,9 @@ func dhConfigure(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-done:
+		if succeeded {
+			return nil
+		}
 		return errors.Join(errs...)
 	}
 }
