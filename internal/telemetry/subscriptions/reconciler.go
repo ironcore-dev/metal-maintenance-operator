@@ -599,18 +599,10 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		timeout = 30 * time.Second
 	}
 
-	severity := hw.TestSeverity
-	if severity == "" {
-		severity = "OK"
-	}
-	originOfCondition := hw.TestOriginOfCondition
-	if originOfCondition == "" {
-		originOfCondition = "/redfish/v1/Systems/1"
-	}
 	params := TestEventParams{
 		MessageId:         hw.TestMessageId,
-		Severity:          severity,
-		OriginOfCondition: originOfCondition,
+		Severity:          hw.TestSeverity,
+		OriginOfCondition: hw.TestOriginOfCondition,
 	}
 	if err := c.SubmitTestEvent(ctx, params); err != nil {
 		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
