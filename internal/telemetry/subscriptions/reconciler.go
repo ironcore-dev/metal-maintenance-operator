@@ -552,8 +552,7 @@ func (r *BMCReconciler) bmcRefWithServerFallback(ctx context.Context, bmc *metal
 
 // testEntry holds the correlation state for one in-flight SubmitTestEvent.
 type testEntry struct {
-	messageID string
-	deadline  time.Time
+	deadline time.Time
 }
 
 const (
@@ -617,9 +616,9 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
 		return
 	}
-	r.testPending.Store(bmcName, testEntry{messageID: hw.TestMessageId, deadline: time.Now().Add(timeout)})
+	r.testPending.Store(bmcName, testEntry{deadline: time.Now().Add(timeout)})
 	r.lastTestTime.Store(bmcName, time.Now())
-	r.Log.V(1).Info("Submitted test event", "bmc", bmcName, "messageID", hw.TestMessageId)
+	r.Log.V(1).Info("Submitted test event", "bmc", bmcName)
 }
 
 // NotifyTestEvent is called by the event receiver when an alert arrives.
@@ -631,7 +630,9 @@ func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
 		return
 	}
 	entry := raw.(testEntry)
-	if !strings.EqualFold(entry.messageID, messageId) {
+	if time.Now().After(entry.deadline) {
+		// Deadline already passed — the timeout path in maybeRunTestEvent
+		// will record the failure on the next reconcile. Ignore late arrival.
 		return
 	}
 	r.testPending.Delete(bmcName)

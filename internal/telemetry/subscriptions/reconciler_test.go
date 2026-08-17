@@ -803,10 +803,11 @@ func TestNotifyTestEvent_MatchingID_RecordsSuccess(t *testing.T) {
 	}
 }
 
-func TestNotifyTestEvent_CaseInsensitive_RecordsSuccess(t *testing.T) {
-	// Correlation is case-insensitive: BMCs may echo back the messageId
-	// in different casing than what was sent.
-	for _, notifyID := range []string{strings.ToUpper(testMessageId), strings.ToLower(testMessageId)} {
+func TestNotifyTestEvent_AnyMessageId_RecordsSuccess(t *testing.T) {
+	// Correlation is time-window based: any event arriving before the
+	// deadline confirms success, regardless of messageId. BMCs like iDRAC
+	// rewrite the messageId, so strict matching would cause false negatives.
+	for _, notifyID := range []string{"any-id", strings.ToUpper(testMessageId), "IDRAC.2.9.SYS1000"} {
 		t.Run(notifyID, func(t *testing.T) {
 			c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
 			res := &fakeResolver{}
