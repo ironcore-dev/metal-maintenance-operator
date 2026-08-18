@@ -259,7 +259,7 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 
 	// Build the payload manually. gofish's EventServiceSubmitTestEventParameters
 	// uses omitempty on MessageArgs (iLO rejects absent field) and sends
-	// OriginOfCondition as a plain string (older iDRAC expects a JSON object).
+	// OriginOfCondition as a plain string (iDRAC expects a JSON object).
 	// We control exactly what goes on the wire to satisfy both vendors.
 	payload := map[string]any{
 		"EventId":        "1",
@@ -267,10 +267,12 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 		"MessageId":      params.MessageId,
 		"Message":        "metal-maintenance-operator pipeline health check",
 		"MessageArgs":    []string{},
-		"Severity":       params.Severity,
+	}
+	if params.Severity != "" {
+		payload["Severity"] = params.Severity
 	}
 	if params.OriginOfCondition != "" {
-		payload["OriginOfCondition"] = params.OriginOfCondition
+		payload["OriginOfCondition"] = map[string]string{"@odata.id": params.OriginOfCondition}
 	}
 
 	resp, err := c.api.Post(es.SubmitTestEventTarget, payload)

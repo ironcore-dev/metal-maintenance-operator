@@ -59,9 +59,21 @@ data:
     #
     # testMessageId is the MessageId passed to Redfish SubmitTestEvent
     # health checks. Required when testEventInterval is set. The accepted
-    # format is vendor-specific — iDRAC uses the short registry key without
-    # the registry prefix (e.g. "SYS1000"), while HPE iLO uses the full
-    # dot-separated form (e.g. "iLOEvents.2.2.EventLog").
+    # format is vendor-specific:
+    #   Dell iDRAC:  short registry key without prefix, e.g. "SYS1000"
+    #                (newer firmware: "SYS.1.0.SYS1000")
+    #   HPE iLO:     full dot-separated form from a registry included in
+    #                the subscription's RegistryPrefixes, e.g.
+    #                "iLOEvents.1.0.TestAlert"
+    #   Lenovo XCC:  full registry form, e.g.
+    #                "EventRegistry.1.0.0.FQXSPCA0012I"
+    #
+    # testSeverity: optional Severity field for SubmitTestEvent. Omit for
+    #   Dell (iDRAC rejects unknown parameters on some firmware versions).
+    #   Use "OK" for HPE and Lenovo.
+    #
+    # testOriginOfCondition: optional OriginOfCondition field. Omit for
+    #   Dell. Use "/redfish/v1/Systems/1" for HPE and Lenovo.
     eventBasedHardware:
       - vendor: "Dell Inc."
         models:
@@ -72,4 +84,6 @@ data:
       - vendor: HPE
         models: ["*"]
         minFirmware: "2.95"
-        # testMessageId: "iLOEvents.2.2.EventLog"
+        # testMessageId: "iLOEvents.1.0.TestAlert"
+        # testSeverity: "OK"
+        # testOriginOfCondition: "/redfish/v1/Systems/1"
