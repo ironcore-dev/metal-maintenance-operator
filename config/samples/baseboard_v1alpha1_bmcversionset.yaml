@@ -1,0 +1,16 @@
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCVersionSet
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bmcversionset-sample
+spec:
+  bmcSelector:
+    matchLabels:
+      metal.ironcore.dev/vendor: lenovo
+  bmcVersionTemplate:
+    version: 1.46.455b66-rev1
+    serverMaintenancePolicy: Enforced
+    image:
+      URI: https://example.com/firmware/bmc-1.46.455b66-rev1.bin

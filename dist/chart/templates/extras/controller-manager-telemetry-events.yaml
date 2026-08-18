@@ -1,4 +1,3 @@
-{{- if .Values.telemetry.events.serviceEnabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,10 +12,9 @@ metadata:
 spec:
   ports:
   - name: events
-    port: {{ .Values.telemetry.events.port }}
+    port: 9092
     protocol: TCP
     targetPort: events
   selector:
     app.kubernetes.io/name: {{ include "metal-maintenance-operator.name" . }}
     control-plane: controller-manager
-{{- end }}

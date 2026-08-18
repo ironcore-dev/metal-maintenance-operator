@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -41,7 +40,7 @@ const bmcSubscriptionFinalizer = "telemetry.metal.ironcore.dev/subscriptions"
 // subscriptions converged with the operator's policy. Implements
 // controller-runtime's reconcile.Reconciler.
 type BMCReconciler struct {
-	// Client is the controller-runtime client used to fetch BMCs.
+	// Client is the controller-runtime client used to fetch BMCs and Servers.
 	Client client.Client
 
 	// Config returns the live operator policy ConfigMap. Refreshed by
@@ -242,9 +241,10 @@ func (r *BMCReconciler) perBMCTimeout() time.Duration {
 }
 
 func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC) {
-	ref := bmcRefFromObject(bmc)
+	ref := r.bmcRefWithServerFallback(ctx, bmc)
 	cfg := r.Config()
-	wantSubscribed := SubscribeToBMC(ref, cfg)
+	hw := SubscribeToBMC(ref, cfg)
+	wantSubscribed := hw != nil
 
 	ctx, cancel := context.WithTimeout(ctx, r.perBMCTimeout())
 	defer cancel()
@@ -294,7 +294,7 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 			return
 		}
 		r.ensureSubscriptions(ctx, c, ref.Name, current)
-		r.maybeRunTestEvent(ctx, c, ref.Name, cfg)
+		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, hw)
 	} else {
 		// BMC isn't in the event-based set (or was and is no longer):
 		// tear off any subscriptions we previously created here, then
@@ -364,7 +364,7 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 		uri, err := c.CreateEventSubscription(
 			ctx, dest,
 			schemas.MetricReportEventFormatType,
-			schemas.TerminateAfterRetriesDeliveryRetryPolicy,
+			schemas.RetryForeverDeliveryRetryPolicy,
 		)
 		if err != nil {
 			r.Log.V(1).Info("Failed to create metrics subscription",
@@ -380,7 +380,7 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 		uri, err := c.CreateEventSubscription(
 			ctx, dest,
 			schemas.EventEventFormatType,
-			schemas.TerminateAfterRetriesDeliveryRetryPolicy,
+			schemas.RetryForeverDeliveryRetryPolicy,
 		)
 		if err != nil {
 			r.Log.V(1).Info("Failed to create alerts subscription",
@@ -527,10 +527,32 @@ func bmcRefFromObject(bmc *metalv1alpha1.BMC) BMCRef {
 	}
 }
 
+// bmcRefWithServerFallback builds a BMCRef, preferring Server.status fields
+// for Vendor and Model when BMC.status.manufacturer is empty. Dell BMCs, for
+// example, do not populate BMC.status.manufacturer, whereas the associated
+// Server always has status.manufacturer and status.model set by metal-operator.
+func (r *BMCReconciler) bmcRefWithServerFallback(ctx context.Context, bmc *metalv1alpha1.BMC) BMCRef {
+	ref := bmcRefFromObject(bmc)
+	if ref.Vendor != "" {
+		return ref
+	}
+	serverList := &metalv1alpha1.ServerList{}
+	if err := r.Client.List(ctx, serverList, client.MatchingFields{"spec.bmcRef.name": bmc.Name}); err != nil {
+		r.Log.V(1).Info("Could not list Servers for BMC vendor/model lookup", "bmc", bmc.Name, "err", err.Error())
+		return ref
+	}
+	if len(serverList.Items) == 0 {
+		return ref
+	}
+	srv := serverList.Items[0]
+	ref.Vendor = srv.Status.Manufacturer
+	ref.Model = srv.Status.Model
+	return ref
+}
+
 // testEntry holds the correlation state for one in-flight SubmitTestEvent.
 type testEntry struct {
-	messageID string
-	deadline  time.Time
+	deadline time.Time
 }
 
 const (
@@ -542,8 +564,11 @@ const (
 // interval has elapsed since the last test for this BMC. It also enforces
 // the deadline for any pending test that has not yet been confirmed, recording
 // a failure if it expired.
-func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config) {
+func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config, hw *HardwareMatch) {
 	if cfg == nil || cfg.TestEventInterval <= 0 {
+		return
+	}
+	if hw == nil || hw.TestMessageId == "" {
 		return
 	}
 
@@ -552,7 +577,7 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		entry := raw.(testEntry)
 		if time.Now().After(entry.deadline) {
 			r.testPending.Delete(bmcName)
-			r.Log.V(1).Info("Test event timed out", "bmc", bmcName)
+			r.Log.Info("Test event timed out", "bmc", bmcName)
 			if r.TestRecorder != nil {
 				r.TestRecorder.RecordTestResult(bmcName, testResultFailure)
 			}
@@ -574,14 +599,26 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 		timeout = 30 * time.Second
 	}
 
-	msgID := uuid.New().String()
-	if err := c.SubmitTestEvent(ctx, msgID); err != nil {
+	severity := hw.TestSeverity
+	if severity == "" {
+		severity = "OK"
+	}
+	originOfCondition := hw.TestOriginOfCondition
+	if originOfCondition == "" {
+		originOfCondition = "/redfish/v1/Systems/1"
+	}
+	params := TestEventParams{
+		MessageId:         hw.TestMessageId,
+		Severity:          severity,
+		OriginOfCondition: originOfCondition,
+	}
+	if err := c.SubmitTestEvent(ctx, params); err != nil {
 		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
 		return
 	}
-	r.testPending.Store(bmcName, testEntry{messageID: msgID, deadline: time.Now().Add(timeout)})
+	r.testPending.Store(bmcName, testEntry{deadline: time.Now().Add(timeout)})
 	r.lastTestTime.Store(bmcName, time.Now())
-	r.Log.V(1).Info("Submitted test event", "bmc", bmcName, "messageID", msgID)
+	r.Log.V(1).Info("Submitted test event", "bmc", bmcName)
 }
 
 // NotifyTestEvent is called by the event receiver when an alert arrives.
@@ -593,11 +630,13 @@ func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
 		return
 	}
 	entry := raw.(testEntry)
-	if entry.messageID != messageId {
+	if time.Now().After(entry.deadline) {
+		// Deadline already passed — the timeout path in maybeRunTestEvent
+		// will record the failure on the next reconcile. Ignore late arrival.
 		return
 	}
 	r.testPending.Delete(bmcName)
-	r.Log.V(1).Info("Test event round-trip confirmed", "bmc", bmcName)
+	r.Log.Info("Test event round-trip confirmed", "bmc", bmcName)
 	if r.TestRecorder != nil {
 		r.TestRecorder.RecordTestResult(bmcName, testResultSuccess)
 	}

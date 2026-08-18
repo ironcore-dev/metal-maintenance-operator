@@ -45,12 +45,12 @@ var _ = Describe("BMCUser Controller", func() {
 			},
 			Spec: metalv1alpha1.BMCSpec{
 				Endpoint: &metalv1alpha1.InlineEndpoint{
-					IP:         metalv1alpha1.MustParseIP("127.0.0.1"),
+					IP:         metalv1alpha1.MustParseIP(MockServerIP),
 					MACAddress: "23:11:8A:33:CF:EA",
 				},
 				Protocol: metalv1alpha1.Protocol{
 					Name: metalv1alpha1.ProtocolRedfishLocal,
-					Port: 8000,
+					Port: MockServerPort,
 				},
 				BMCSecretRef: v1.LocalObjectReference{
 					Name: bmcSecret.Name,
@@ -62,8 +62,8 @@ var _ = Describe("BMCUser Controller", func() {
 		Eventually(Get(bmcObj)).Should(Succeed())
 	})
 
-	AfterEach(func(ctx SpecContext) {
-		EnsureCleanState(ctx)
+	AfterEach(func() {
+		EnsureCleanState()
 	})
 
 	It("should create a BMC user and secret", func(ctx SpecContext) {

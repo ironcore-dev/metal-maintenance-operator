@@ -1,0 +1,14 @@
+apiVersion: system.metal.ironcore.dev/v1alpha1
+kind: BIOSVersion
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: biosversion-sample
+spec:
+  serverRef:
+    name: endpoint-sample-system-0
+  version: P79 v1.46 (01/15/2018)
+  serverMaintenancePolicy: OwnerApproval
+  image:
+    URI: https://example.com/firmware/bios-P79-v1.46.bin

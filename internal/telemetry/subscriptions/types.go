@@ -17,6 +17,14 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 )
 
+// TestEventParams holds the per-vendor parameters for a SubmitTestEvent call.
+// All fields map directly to Redfish EventService.SubmitTestEvent parameters.
+type TestEventParams struct {
+	MessageId         string
+	Severity          string // e.g. "OK", "Informational"
+	OriginOfCondition string // e.g. "/redfish/v1/Systems/1"; empty = omit
+}
+
 // pathPrefix is the URL prefix every subscription destination starts
 // with. We only adopt or delete subscriptions whose path begins here —
 // foreign subscriptions are left alone.
@@ -67,9 +75,10 @@ type Client interface {
 	DeleteEventSubscription(ctx context.Context, uri string) error
 	ListEventSubscriptions(ctx context.Context) ([]Subscription, error)
 	// SubmitTestEvent fires a Redfish SubmitTestEvent action using the
-	// given messageId as a correlation token. The caller can match the
-	// token when the event arrives at the receiver to confirm round-trip.
-	SubmitTestEvent(ctx context.Context, messageId string) error
+	// given params. The MessageId is used as a correlation token; the
+	// caller can match it when the event arrives at the receiver to
+	// confirm round-trip.
+	SubmitTestEvent(ctx context.Context, params TestEventParams) error
 	Logout()
 }
 

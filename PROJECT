@@ -33,6 +33,93 @@ resources:
   version: v1alpha1
 - api:
     crdVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: metal.ironcore.dev
+  group: maintenance
+  kind: ServerMaintenance
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: baseboard
+  kind: BMCSettings
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: baseboard
+  kind: BMCSettingsSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: baseboard
+  kind: BMCVersion
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: baseboard
+  kind: BMCVersionSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: system
+  kind: BIOSSettings
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: system
+  kind: BIOSSettingsSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: system
+  kind: BIOSVersion
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: system
+  kind: BIOSVersionSet
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
   controller: true
   domain: metal.ironcore.dev
   group: baseboard

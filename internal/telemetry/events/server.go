@@ -189,6 +189,7 @@ func (r *Receiver) handleAlerts(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
+	r.log.V(1).Info("Received alert payload", "bmc", bmcName, "payload", string(body))
 
 	// Redfish vendors disagree on whether SEL events arrive under
 	// "Events" or "Alerts" — accept either and merge.
@@ -213,8 +214,8 @@ func (r *Receiver) handleAlerts(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-	r.log.V(2).Info("Published events", "bmc", bmcName, "count", len(events))
-	w.WriteHeader(http.StatusNoContent)
+	r.log.V(1).Info("Published events", "bmc", bmcName, "count", len(events))
+	w.WriteHeader(http.StatusOK)
 }
 
 // eventEnvelope accepts both vendor variants of the SEL push payload:
@@ -271,6 +272,7 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 	if err != nil {
 		return
 	}
+	r.log.V(1).Info("Received metric report", "bmc", bmcName)
 
 	var data wireMetricReport
 	if err := json.Unmarshal(body, &data); err != nil {
@@ -286,16 +288,15 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	r.log.V(2).Info("Published samples", "bmc", bmcName, "count", len(samples))
-	w.WriteHeader(http.StatusNoContent)
+	r.log.V(1).Info("Published samples", "bmc", bmcName, "count", len(samples))
+	w.WriteHeader(http.StatusOK)
 }
 
 func readBody(req *http.Request, w http.ResponseWriter) ([]byte, error) {
 	req.Body = http.MaxBytesReader(w, req.Body, maxBodyBytes)
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		var mbErr *http.MaxBytesError
-		if errors.As(err, &mbErr) {
+		if errors.As(err, new(*http.MaxBytesError)) {
 			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
 			return nil, err
 		}

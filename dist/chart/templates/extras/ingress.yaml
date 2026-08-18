@@ -42,4 +42,13 @@ spec:
             name: {{ include "metal-maintenance-operator.fullname" . }}
             port:
               number: {{ .Values.ingress.port }}
+{{- if and .Values.telemetry.events.ingress.enable .Values.telemetry.events.serviceEnabled }}
+      - path: /serverevents
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "controller-manager-telemetry-events" "context" $) }}
+            port:
+              number: {{ .Values.telemetry.events.port }}
+{{- end }}
 {{- end }}
