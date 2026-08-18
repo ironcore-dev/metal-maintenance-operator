@@ -258,9 +258,11 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 	}
 
 	// Build the payload manually. gofish's EventServiceSubmitTestEventParameters
-	// uses omitempty on MessageArgs (iLO rejects absent field) and sends
-	// OriginOfCondition as a plain string (iDRAC expects a JSON object).
-	// We control exactly what goes on the wire to satisfy both vendors.
+	// uses omitempty on MessageArgs (iLO rejects absent field). OriginOfCondition
+	// is sent as a plain string: HPE and Lenovo require it in that form (iLO/XCC
+	// reject the {"@odata.id": ...} link-object form with a type error). Dell
+	// rows omit OriginOfCondition entirely via config, so the format never
+	// matters for Dell.
 	payload := map[string]any{
 		"EventId":        "1",
 		"EventTimestamp": time.Now().UTC().Format(time.RFC3339),
@@ -272,7 +274,7 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 		payload["Severity"] = params.Severity
 	}
 	if params.OriginOfCondition != "" {
-		payload["OriginOfCondition"] = map[string]string{"@odata.id": params.OriginOfCondition}
+		payload["OriginOfCondition"] = params.OriginOfCondition
 	}
 
 	resp, err := c.api.Post(es.SubmitTestEventTarget, payload)
@@ -294,6 +296,20 @@ func (f *subscriptionClientFactory) NewClient(ctx context.Context, r *subscripti
 	if err != nil {
 		return nil, err
 	}
+	return wrapClient(base)
+}
+
+// NewTestEventClient wraps an already-connected metalbmc.BMC (e.g. from
+// metalbmc.NewRedfishBMCClient) into a subscriptions.Client. It exists for
+// callers outside the controller-runtime reconcile loop — such as CLI
+// tooling under hack/ — that want to invoke SubmitTestEvent through the
+// exact same code path the operator's health check uses, without needing
+// a *subscriptions.Resolved / metalv1alpha1.BMC object.
+func NewTestEventClient(base metalbmc.BMC) (subscriptions.Client, error) {
+	return wrapClient(base)
+}
+
+func wrapClient(base metalbmc.BMC) (subscriptions.Client, error) {
 	accessor, ok := base.(interface{ Client() *gofish.APIClient })
 	if !ok {
 		return nil, fmt.Errorf("bmc client %T does not expose Client() *gofish.APIClient; "+

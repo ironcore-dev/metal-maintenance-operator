@@ -70,10 +70,13 @@ data:
     #
     # testSeverity: optional Severity field for SubmitTestEvent. Omit for
     #   Dell (iDRAC rejects unknown parameters on some firmware versions).
-    #   Use "OK" for HPE and Lenovo.
+    #   Required for HPE — SubmitTestEvent is rejected without it. Use "OK".
     #
-    # testOriginOfCondition: optional OriginOfCondition field. Omit for
-    #   Dell. Use "/redfish/v1/Systems/1" for HPE and Lenovo.
+    # testOriginOfCondition: optional OriginOfCondition field, sent as a
+    #   plain string (HPE iLO and Lenovo XCC reject the Redfish
+    #   {"@odata.id": ...} link-object form with a type error). Omit for
+    #   Dell. Required for HPE — SubmitTestEvent is rejected without it.
+    #   Use "/redfish/v1/Managers/1".
     eventBasedHardware:
       - vendor: "Dell Inc."
         models:
@@ -86,4 +89,4 @@ data:
         minFirmware: "2.95"
         # testMessageId: "iLOEvents.1.0.TestAlert"
         # testSeverity: "OK"
-        # testOriginOfCondition: "/redfish/v1/Systems/1"
+        # testOriginOfCondition: "/redfish/v1/Managers/1"
