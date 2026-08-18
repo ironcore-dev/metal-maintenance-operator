@@ -33,6 +33,8 @@ resources:
   version: v1alpha1
 - api:
     crdVersion: v1
+  kind: ""
+  version: ""
 - api:
     crdVersion: v1
     namespaced: true
