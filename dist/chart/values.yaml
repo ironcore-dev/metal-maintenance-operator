@@ -180,6 +180,13 @@ metrics:
 certManager:
   enable: false
 
+## Webhook server configuration.
+## Requires certManager.enable=true for TLS certificate provisioning.
+##
+webhook:
+  enable: false
+  port: 9443
+
 ## Prometheus ServiceMonitor for metrics scraping.
 ## Requires prometheus-operator to be installed in the cluster.
 ##

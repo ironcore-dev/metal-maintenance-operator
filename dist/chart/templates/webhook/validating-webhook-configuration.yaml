@@ -1,0 +1,95 @@
+{{- if .Values.webhook.enable }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    {{- if .Values.certManager.enable }}
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "metal-maintenance-operator.resourceName" (dict "suffix" "serving-cert" "context" $) }}
+    {{- end }}
+  name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "validating-webhook-configuration" "context" $) }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "webhook-service" "context" $) }}
+      namespace: {{ .Release.Namespace }}
+      path: /validate-system-metal-ironcore-dev-v1alpha1-biossettings
+  failurePolicy: Fail
+  name: vbiossettings-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - system.metal.ironcore.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - biossettings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "webhook-service" "context" $) }}
+      namespace: {{ .Release.Namespace }}
+      path: /validate-system-metal-ironcore-dev-v1alpha1-biosversion
+  failurePolicy: Fail
+  name: vbiosversion-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - system.metal.ironcore.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - biosversions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "webhook-service" "context" $) }}
+      namespace: {{ .Release.Namespace }}
+      path: /validate-baseboard-metal-ironcore-dev-v1alpha1-bmcsettings
+  failurePolicy: Fail
+  name: vbmcsettings-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - baseboard.metal.ironcore.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - bmcsettings
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ include "metal-maintenance-operator.resourceName" (dict "suffix" "webhook-service" "context" $) }}
+      namespace: {{ .Release.Namespace }}
+      path: /validate-baseboard-metal-ironcore-dev-v1alpha1-bmcversion
+  failurePolicy: Fail
+  name: vbmcversion-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - baseboard.metal.ironcore.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - bmcversions
+  sideEffects: None
+{{- end }}
