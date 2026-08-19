@@ -142,7 +142,9 @@ func (r result) String() string {
 
 // runOne connects to one BMC and calls SubmitTestEvent. It performs no
 // other Redfish calls (no inventory lookup, no subscription management).
-func runOne(s serverEntry, username, password string, cfg *subscriptions.Config, timeout time.Duration, insecure bool) result {
+func runOne(s serverEntry, username, password string,
+	cfg *subscriptions.Config, timeout time.Duration, insecure bool,
+) result {
 	hw := subscriptions.SubscribeToBMC(subscriptions.BMCRef{
 		Name: s.Endpoint, Vendor: s.Vendor, Model: s.Model, FirmwareVersion: s.Firmware,
 	}, cfg)
