@@ -6,9 +6,9 @@ package prometheus_test
 import (
 	"testing"
 
-	psink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
@@ -33,7 +33,7 @@ func TestFirmwareStateCollector_BIOSVersion(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(server, biosv).WithStatusSubresource(biosv).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestFirmwareStateCollector_BMCVersion(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bmc, bmcv).WithStatusSubresource(bmcv).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestFirmwareStateCollector_EmptyCluster(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -108,6 +108,28 @@ func TestFirmwareStateCollector_EmptyCluster(t *testing.T) {
 		if n := gatherStateCount(t, reg, family); n != 0 {
 			t.Errorf("%s: got %d series, want 0", family, n)
 		}
+	}
+}
+
+func TestFirmwareStateCollector_NilServerRefSkipped(t *testing.T) {
+	scheme := newStateScheme(t)
+	biosv := &systemv1alpha1.BIOSVersion{
+		ObjectMeta: metav1.ObjectMeta{Name: "biosv-noref"},
+		Spec:       systemv1alpha1.BIOSVersionSpec{BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{Version: "1.0.0"}},
+		Status:     systemv1alpha1.BIOSVersionStatus{State: systemv1alpha1.BIOSVersionStatePending},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(biosv).WithStatusSubresource(biosv).Build()
+
+	reg := prometheus.NewRegistry()
+	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
+		t.Fatalf("NewFirmwareStateCollector: %v", err)
+	}
+
+	if _, err := reg.Gather(); err != nil {
+		t.Errorf("Gather returned error for nil ServerRef: %v", err)
+	}
+	if n := gatherStateCount(t, reg, "metal_maintenance_biosversion_info"); n != 0 {
+		t.Errorf("expected series to be skipped, got %d", n)
 	}
 }
 
@@ -124,7 +146,7 @@ func TestFirmwareStateCollector_ObservedVersionEmptyWhenServerMissing(t *testing
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(biosv).WithStatusSubresource(biosv).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 

@@ -15,8 +15,8 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/discovery"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
-	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	telemetryruntime "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
+	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	metalv1alpha1bmc "github.com/ironcore-dev/metal-operator/bmc"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -334,11 +334,11 @@ func main() {
 	}
 
 	if err := promsink.NewFirmwareStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
-		setupLog.Error(err, "unable to register firmware state metrics collector")
+		setupLog.Error(err, "Failed to register FirmwareStateCollector")
 		os.Exit(1)
 	}
 	if err := promsink.NewSettingsStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
-		setupLog.Error(err, "unable to register settings state metrics collector")
+		setupLog.Error(err, "Failed to register SettingsStateCollector")
 		os.Exit(1)
 	}
 

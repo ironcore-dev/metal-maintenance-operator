@@ -5,7 +5,6 @@ package prometheus
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
@@ -64,7 +63,6 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 		for i := range biosvList.Items {
 			bv := &biosvList.Items[i]
 			if bv.Spec.ServerRef == nil {
-				ch <- prometheus.NewInvalidMetric(biosFirmwareDesc, fmt.Errorf("BIOSVersion %s has nil ServerRef", bv.Name))
 				continue
 			}
 			serverName := bv.Spec.ServerRef.Name
@@ -73,7 +71,6 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 			if getErr := v.client.Get(ctx, client.ObjectKey{Name: serverName}, &srv); getErr == nil {
 				observedVersion = srv.Status.BIOSVersion
 			} else if !apierrors.IsNotFound(getErr) {
-				ch <- prometheus.NewInvalidMetric(biosFirmwareDesc, getErr)
 				continue
 			}
 			m, metricErr := prometheus.NewConstMetric(biosFirmwareDesc, prometheus.GaugeValue, 1,
@@ -93,7 +90,6 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 		for i := range bmcvList.Items {
 			bv := &bmcvList.Items[i]
 			if bv.Spec.BMCRef == nil {
-				ch <- prometheus.NewInvalidMetric(bmcFirmwareDesc, fmt.Errorf("BMCVersion %s has nil BMCRef", bv.Name))
 				continue
 			}
 			bmcName := bv.Spec.BMCRef.Name
@@ -102,7 +98,6 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 			if getErr := v.client.Get(ctx, client.ObjectKey{Name: bmcName}, &bmc); getErr == nil {
 				observedVersion = bmc.Status.FirmwareVersion
 			} else if !apierrors.IsNotFound(getErr) {
-				ch <- prometheus.NewInvalidMetric(bmcFirmwareDesc, getErr)
 				continue
 			}
 			m, metricErr := prometheus.NewConstMetric(bmcFirmwareDesc, prometheus.GaugeValue, 1,

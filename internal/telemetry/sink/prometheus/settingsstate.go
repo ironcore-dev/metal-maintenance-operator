@@ -5,7 +5,6 @@ package prometheus
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
@@ -55,7 +54,6 @@ func (s *SettingsStateCollector) Collect(ch chan<- prometheus.Metric) {
 		for i := range biossList.Items {
 			bs := &biossList.Items[i]
 			if bs.Spec.ServerRef == nil {
-				ch <- prometheus.NewInvalidMetric(biosSettingsDesc, fmt.Errorf("BIOSSettings %s has nil ServerRef", bs.Name))
 				continue
 			}
 			m, metricErr := prometheus.NewConstMetric(biosSettingsDesc, prometheus.GaugeValue, 1,
@@ -75,7 +73,6 @@ func (s *SettingsStateCollector) Collect(ch chan<- prometheus.Metric) {
 		for i := range bmcsList.Items {
 			bs := &bmcsList.Items[i]
 			if bs.Spec.BMCRef == nil {
-				ch <- prometheus.NewInvalidMetric(bmcSettingsDesc, fmt.Errorf("BMCSettings %s has nil BMCRef", bs.Name))
 				continue
 			}
 			m, metricErr := prometheus.NewConstMetric(bmcSettingsDesc, prometheus.GaugeValue, 1,

@@ -6,9 +6,9 @@ package prometheus_test
 import (
 	"testing"
 
-	psink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,7 +27,7 @@ func TestSettingsStateCollector_BIOSSettings(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bioss).WithStatusSubresource(bioss).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func TestSettingsStateCollector_BMCSettings(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bmcs).WithStatusSubresource(bmcs).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 
@@ -67,12 +67,33 @@ func TestSettingsStateCollector_BMCSettings(t *testing.T) {
 	}
 }
 
+func TestSettingsStateCollector_NilServerRefSkipped(t *testing.T) {
+	scheme := newStateScheme(t)
+	bioss := &systemv1alpha1.BIOSSettings{
+		ObjectMeta: metav1.ObjectMeta{Name: "bioss-noref"},
+		Status:     systemv1alpha1.BIOSSettingsStatus{State: systemv1alpha1.BIOSSettingsStatePending},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bioss).WithStatusSubresource(bioss).Build()
+
+	reg := prometheus.NewRegistry()
+	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
+		t.Fatalf("NewSettingsStateCollector: %v", err)
+	}
+
+	if _, err := reg.Gather(); err != nil {
+		t.Errorf("Gather returned error for nil ServerRef: %v", err)
+	}
+	if n := gatherStateCount(t, reg, "metal_maintenance_biossettings_info"); n != 0 {
+		t.Errorf("expected series to be skipped, got %d", n)
+	}
+}
+
 func TestSettingsStateCollector_EmptyCluster(t *testing.T) {
 	scheme := newStateScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	reg := prometheus.NewRegistry()
-	if err := psink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 
