@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
@@ -61,7 +62,14 @@ type serverList struct {
 }
 
 func main() {
-	configPath := flag.String("config", "", "path to the telemetry Config YAML (raw, or a ConfigMap manifest containing it under data.config.yaml)")
+	configPath := flag.String(
+		"config",
+		"",
+		strings.Join([]string{
+			"path to the telemetry Config YAML (raw, or a ConfigMap",
+			"manifest containing it under data.config.yaml)",
+		}, " "),
+	)
 	serversPath := flag.String("servers", "", "path to the server list YAML")
 	perServerTimeout := flag.Duration("timeout", 30*time.Second, "per-server connect+submit timeout")
 	insecure := flag.Bool("insecure", true, "skip TLS verification")
@@ -140,11 +148,20 @@ func runOne(s serverEntry, username, password string, cfg *subscriptions.Config,
 	}, cfg)
 	if hw == nil {
 		return result{endpoint: s.Endpoint, outcome: outcomeSkip,
-			detail: fmt.Sprintf("no eventBasedHardware row matches vendor=%q model=%q firmware=%q", s.Vendor, s.Model, s.Firmware)}
+			detail: fmt.Sprintf(
+				"no eventBasedHardware row matches vendor=%q model=%q firmware=%q",
+				s.Vendor,
+				s.Model,
+				s.Firmware,
+			)}
 	}
 	if hw.TestMessageId == "" {
 		return result{endpoint: s.Endpoint, outcome: outcomeSkip,
-			detail: fmt.Sprintf("matched vendor=%q model=%q but row has no testMessageId configured", s.Vendor, s.Model)}
+			detail: fmt.Sprintf(
+				"matched vendor=%q model=%q but row has no testMessageId configured",
+				s.Vendor,
+				s.Model,
+			)}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -173,10 +190,21 @@ func runOne(s serverEntry, username, password string, cfg *subscriptions.Config,
 	}
 	if err := client.SubmitTestEvent(ctx, params); err != nil {
 		return result{endpoint: s.Endpoint, outcome: outcomeFail,
-			detail: fmt.Sprintf("SubmitTestEvent(vendor=%q model=%q messageId=%q): %v", s.Vendor, s.Model, hw.TestMessageId, err)}
+			detail: fmt.Sprintf(
+				"SubmitTestEvent(vendor=%q model=%q messageId=%q): %v",
+				s.Vendor,
+				s.Model,
+				hw.TestMessageId,
+				err,
+			)}
 	}
 	return result{endpoint: s.Endpoint, outcome: outcomeOK,
-		detail: fmt.Sprintf("SubmitTestEvent accepted (vendor=%q model=%q messageId=%q)", s.Vendor, s.Model, hw.TestMessageId)}
+		detail: fmt.Sprintf(
+			"SubmitTestEvent accepted (vendor=%q model=%q messageId=%q)",
+			s.Vendor,
+			s.Model,
+			hw.TestMessageId,
+		)}
 }
 
 // loadConfig accepts either a raw telemetry Config YAML document, or a
