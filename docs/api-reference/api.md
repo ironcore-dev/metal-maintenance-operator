@@ -381,6 +381,7 @@ _Appears in:_
 - [BMCSettingsTemplate](#bmcsettingstemplate)
 - [BMCVersionSpec](#bmcversionspec)
 - [BMCVersionTemplate](#bmcversiontemplate)
+- [FirmwareUpdateDellSpec](#firmwareupdatedellspec)
 - [ServerMaintenanceSpec](#servermaintenancespec)
 - [SettingsTemplate](#settingstemplate)
 
@@ -585,6 +586,7 @@ Package v1alpha1 contains API Schema definitions for the system.metal.ironcore.d
 - [BIOSSettingsSet](#biossettingsset)
 - [BIOSVersion](#biosversion)
 - [BIOSVersionSet](#biosversionset)
+- [FirmwareUpdateDell](#firmwareupdatedell)
 
 
 
@@ -942,6 +944,197 @@ _Appears in:_
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BIOS version. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+
+
+#### ComponentJobsSummary
+
+
+
+ComponentJobsSummary tallies the current pass's per-component jobs (ComponentJobs) by
+completion state, computed by the controller purely for observability (e.g. printcolumns);
+controller logic drives off ComponentJobs directly rather than this summary.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDellStatus](#firmwareupdatedellstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `total` _integer_ | Total is the number of component jobs discovered so far in the current pass. |  |  |
+| `completed` _integer_ | Completed is the number of component jobs that finished successfully. |  |  |
+| `inProgress` _integer_ | InProgress is the number of component jobs that have not yet reached a terminal state. |  |  |
+| `failed` _integer_ | Failed is the number of component jobs that finished in a failed state. |  |  |
+
+
+#### DellShareType
+
+_Underlying type:_ _string_
+
+DellShareType is the type of network share hosting the Dell update repository/catalog.
+
+
+
+_Appears in:_
+- [RepositorySpec](#repositoryspec)
+
+| Field | Description |
+| --- | --- |
+| `NFS` |  |
+| `CIFS` |  |
+| `HTTP` |  |
+| `HTTPS` |  |
+
+
+#### FirmwareUpdateDell
+
+
+
+FirmwareUpdateDell is the Schema for the firmwareupdatedells API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `FirmwareUpdateDell` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[FirmwareUpdateDellSpec](#firmwareupdatedellspec)_ |  |  |  |
+| `status` _[FirmwareUpdateDellStatus](#firmwareupdatedellstatus)_ |  |  |  |
+
+
+#### FirmwareUpdateDellSpec
+
+
+
+FirmwareUpdateDellSpec defines the desired state of FirmwareUpdateDell.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDell](#firmwareupdatedell)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `repository` _[RepositorySpec](#repositoryspec)_ | Repository describes the network share hosting the update repository/catalog. |  |  |
+| `applySameVersions` _boolean_ | ApplySameVersions, if true, re-applies packages already at the same version. |  |  |
+| `applyDowngradeVersions` _boolean_ | ApplyDowngradeVersions, if true, allows applying packages older than the currently installed version. |  |  |
+| `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to a ServerMaintenance object that the controller has requested for the referred server. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the repository-based firmware update on. |  |  |
+| `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+
+
+#### FirmwareUpdateDellState
+
+_Underlying type:_ _string_
+
+FirmwareUpdateDellState describes the current state of a FirmwareUpdateDell.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDellStatus](#firmwareupdatedellstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | FirmwareUpdateDellStatePending specifies that the repository-based firmware update is waiting.<br /> |
+| `InProgress` | FirmwareUpdateDellStateInProgress specifies that the repository-based firmware update is in progress.<br /> |
+| `Completed` | FirmwareUpdateDellStateCompleted specifies that the repository-based firmware update has been completed.<br /> |
+| `Failed` | FirmwareUpdateDellStateFailed specifies that the repository-based firmware update has failed.<br /> |
+
+
+#### FirmwareUpdateDellStatus
+
+
+
+FirmwareUpdateDellStatus defines the observed state of FirmwareUpdateDell.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDell](#firmwareupdatedell)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[FirmwareUpdateDellState](#firmwareupdatedellstate)_ | State represents the current state of the repository-based firmware update. |  |  |
+| `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
+| `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
+| `componentJobs` _[RepositoryJob](#repositoryjob) array_ | ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job. |  |  |
+| `componentJobsSummary` _[ComponentJobsSummary](#componentjobssummary)_ | ComponentJobsSummary tallies ComponentJobs by completion state. |  |  |
+| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. |  |  |
+| `passCount` _integer_ | PassCount is the number of check->apply->track->recheck passes completed so far. It bounds<br />the internal convergence loop. |  |  |
+| `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
+| `observedGeneration` _integer_ | ObservedGeneration is the most recent generation observed by the controller. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest available observations of the repository-based firmware update state. |  |  |
+
+
+#### FirmwareUpdateDellTemplate
+
+
+
+FirmwareUpdateDellTemplate defines the desired repository-based firmware update parameters.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDellSpec](#firmwareupdatedellspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `repository` _[RepositorySpec](#repositoryspec)_ | Repository describes the network share hosting the update repository/catalog. |  |  |
+| `applySameVersions` _boolean_ | ApplySameVersions, if true, re-applies packages already at the same version. |  |  |
+| `applyDowngradeVersions` _boolean_ | ApplyDowngradeVersions, if true, allows applying packages older than the currently installed version. |  |  |
+
+
+#### RepositoryJob
+
+
+
+RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
+operation. State is intentionally a plain string (not a gofish schemas.TaskState or
+schemas.JobState), mirroring bmc.DellJob, so consumers of this API do not need to depend on
+the gofish module.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDellStatus](#firmwareupdatedellstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `jobID` _string_ | JobID is the iDRAC job identifier (e.g. "JID_..."). |  |  |
+| `name` _string_ | Name is the job's display name. |  |  |
+| `jobType` _string_ | JobType is the Dell-reported job type (e.g. "RepositoryUpdate", "FirmwareUpdate"). |  |  |
+| `state` _string_ | State is the Dell-reported raw JobState string. |  |  |
+| `message` _string_ | Message is the Dell-reported status message. |  |  |
+| `percentComplete` _integer_ | PercentComplete is the Dell-reported completion percentage. |  |  |
+
+
+#### RepositorySpec
+
+
+
+RepositorySpec describes the network share hosting Dell's update repository/catalog, as
+consumed by DellSoftwareInstallationService.InstallFromRepository.
+
+
+
+_Appears in:_
+- [FirmwareUpdateDellSpec](#firmwareupdatedellspec)
+- [FirmwareUpdateDellTemplate](#firmwareupdatedelltemplate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `shareType` _[DellShareType](#dellsharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
+| `address` _string_ | Address is the share's IP address or hostname (e.g. downloads.dell.com). |  |  |
+| `shareName` _string_ | ShareName is the network share name. Not required for HTTP/HTTPS catalogs. |  |  |
+| `catalogFile` _string_ | CatalogFile is the catalog file name within the share. Defaults to "Catalog.xml". |  |  |
+| `workgroup` _string_ | Workgroup is the CIFS workgroup, if applicable. |  |  |
+| `secretRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | SecretRef references the credentials used to authenticate against the share, if required. |  |  |
+| `ignoreCertWarning` _boolean_ | IgnoreCertWarning, if true, ignores certificate warnings for HTTPS shares. |  |  |
 
 
 

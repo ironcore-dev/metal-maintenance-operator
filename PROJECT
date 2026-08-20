@@ -116,4 +116,12 @@ resources:
   kind: BIOSVersionSet
   path: github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: metal.ironcore.dev
+  group: system
+  kind: FirmwareUpdateDell
+  path: github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1
+  version: v1alpha1
 version: "3"
