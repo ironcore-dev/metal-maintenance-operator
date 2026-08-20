@@ -22,6 +22,7 @@ import (
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 )
@@ -222,9 +223,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		))
 
 		// cleanup
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should create maintenance and wait for its approval before applying settings", func(ctx SpecContext) {
@@ -355,7 +354,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			server.Spec.ServerClaimRef = nil
 		})).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			testutils.ServerNotParked,
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
 		))
 	})
@@ -452,9 +451,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			HaveField("Spec.BMCSettingRef", BeNil()),
 		))
 
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should allow retry using annotation", func(ctx SpecContext) {
@@ -509,9 +506,7 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		// cleanup
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should replace missing BMCSettings ref in server", func(ctx SpecContext) {
@@ -643,9 +638,7 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, bmcSettings2)).To(Succeed())
 		Eventually(Get(bmcSettings2)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("Should allow retry using annotation", func(ctx SpecContext) {
@@ -714,9 +707,7 @@ var _ = Describe("BMCSettings Controller", func() {
 				Expect(k8sClient.Delete(ctx, &maintenance)).To(Succeed())
 			}
 		}
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should apply BMCSettings with a value resolved from a Secret variable", func(ctx SpecContext) {
