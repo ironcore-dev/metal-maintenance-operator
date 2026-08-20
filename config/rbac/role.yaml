@@ -74,7 +74,6 @@ rules:
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
-  - consoles
   - servermaintenances
   verbs:
   - create
@@ -87,14 +86,12 @@ rules:
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
-  - consoles/finalizers
   - servermaintenances/finalizers
   verbs:
   - update
 - apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
-  - consoles/status
   - servermaintenances/status
   verbs:
   - get
@@ -115,7 +112,6 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcs/finalizers
-  - serverbootconfigurations/finalizers
   verbs:
   - update
 - apiGroups:
@@ -142,7 +138,6 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - serverbootconfigurations/status
   - servers/status
   verbs:
   - get
