@@ -12,6 +12,7 @@ import (
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
@@ -125,9 +126,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		By("Ensuring that the BiosVersion has been removed")
 		Eventually(Get(biosVersion)).Should(Satisfy(apierrors.IsNotFound))
 		Consistently(Get(biosVersion)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should successfully Start and monitor Upgrade task to completion", func(ctx SpecContext) {
@@ -183,13 +182,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		)
 
 		By("Ensuring that Server in Maintenance state")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-			HaveField("Spec.ServerMaintenanceRef", &metalv1alpha1.ObjectReference{
-				Namespace: serverMaintenance.Namespace,
-				Name:      serverMaintenance.Name,
-			}),
-		))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		By("Ensuring that both BMCVersion and BIOSVersion report consistent InProgress state while waiting on maintenance")
 		// This test verifies that both version CRDs use the same state enum value when waiting on maintenance
@@ -220,9 +213,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		By("Ensuring that the BiosVersion has been removed")
 		Eventually(Get(biosVersion)).Should(Satisfy(apierrors.IsNotFound))
 		Consistently(Get(biosVersion)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should upgrade servers BIOS when in reserved state", func(ctx SpecContext) {
@@ -313,13 +304,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		})).Should(Succeed())
 
 		By("Ensuring that Server in Maintenance state")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-			HaveField("Spec.ServerMaintenanceRef", &metalv1alpha1.ObjectReference{
-				Namespace: serverMaintenance.Namespace,
-				Name:      serverMaintenance.Name,
-			}),
-		))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		ensureBiosVersionConditionTransition(acc, biosVersion, server)
 
@@ -348,7 +333,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).To(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			testutils.ServerNotParked,
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
 		))
 	})
@@ -416,9 +401,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 			}
 			return owned
 		}).Should(Equal(0))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })
 
@@ -536,13 +519,7 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 		)
 
 		By("Ensuring that Server in Maintenance state")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-			HaveField("Spec.ServerMaintenanceRef", &metalv1alpha1.ObjectReference{
-				Namespace: serverMaintenance.Namespace,
-				Name:      serverMaintenance.Name,
-			}),
-		))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		ensureBiosVersionConditionTransition(acc, biosVersion, server)
 
@@ -567,9 +544,7 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 		By("Ensuring that the BiosVersion has been removed")
 		Eventually(Get(biosVersion)).Should(Satisfy(apierrors.IsNotFound))
 		Consistently(Get(biosVersion)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })
 

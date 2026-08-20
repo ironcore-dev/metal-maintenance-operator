@@ -18,6 +18,7 @@ import (
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -289,15 +290,9 @@ var _ = Describe("BMCVersionSet Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, bmcVersion01)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, bmcVersion02)).To(Succeed())
-		Eventually(Object(server01)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server02)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server03)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server01)).Should(testutils.ServerNotParked)
+		Eventually(Object(server02)).Should(testutils.ServerNotParked)
+		Eventually(Object(server03)).Should(testutils.ServerNotParked)
 	})
 
 	It("should successfully reconcile the resource when BMCs are deleted/created", func(ctx SpecContext) {
@@ -497,15 +492,9 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			}
 			Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
 		}
-		Eventually(Object(server01)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server02)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server03)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server01)).Should(testutils.ServerNotParked)
+		Eventually(Object(server02)).Should(testutils.ServerNotParked)
+		Eventually(Object(server03)).Should(testutils.ServerNotParked)
 	})
 
 	It("Should successfully retry failed state child resources", func(ctx SpecContext) {
@@ -673,11 +662,7 @@ var _ = Describe("BMCVersionSet Controller", func() {
 		Expect(k8sClient.Delete(ctx, bmcVersion03)).To(Succeed())
 		Eventually(Get(bmcVersion03)).Should(Satisfy(apierrors.IsNotFound))
 
-		Eventually(Object(server03)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server02)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server03)).Should(testutils.ServerNotParked)
+		Eventually(Object(server02)).Should(testutils.ServerNotParked)
 	})
 })
