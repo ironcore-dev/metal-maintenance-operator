@@ -77,7 +77,7 @@ type HardwareMatch struct {
 	TestSeverity string `yaml:"testSeverity,omitempty"`
 	// TestOriginOfCondition is the OriginOfCondition URI sent in
 	// SubmitTestEvent. Some BMC firmware (e.g. HPE iLO) requires this field
-	// even though the Redfish spec marks it optional. Defaults to
-	// "/redfish/v1/Systems/1" when empty and testEventInterval is set.
+	// even though the Redfish spec marks it optional. When empty the field
+	// is omitted entirely — required for Dell and Lenovo compatibility.
 	TestOriginOfCondition string `yaml:"testOriginOfCondition,omitempty"`
 }
