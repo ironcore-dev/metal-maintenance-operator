@@ -58,6 +58,14 @@ linters:
       - linters:
           - staticcheck
         text: "SA1019.*server\\.Spec\\.Power is deprecated"
+      # Server.spec.biosSettingsRef and BMC.spec.biosSettingRef are deprecated
+      # (see ironcore-dev/metal-operator) but are still used here as the
+      # single-active-claimant reference between a Server/BMC and its
+      # BIOSSettings/BMCSettings object. Legacy access remains until the
+      # fields are fully removed in a future release.
+      - linters:
+          - staticcheck
+        text: "SA1019.*Spec\\.(BIOSSettingsRef|BMCSettingRef) is deprecated"
     paths:
       - third_party
       - builtin$
