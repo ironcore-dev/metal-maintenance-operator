@@ -60,9 +60,11 @@ func server(name, bmcName string) *metalv1alpha1.Server {
 func criticalEvent(eventID string) sink.Event {
 	return sink.Event{
 		EventID:           eventID,
+		MessageID:         "IPMI.1.0.PSGoodToBad",
 		Severity:          "Critical",
 		Message:           "PSU failure",
 		OriginOfCondition: "/redfish/v1/Chassis/1/PowerSupplies/1",
+		EventTimestamp:    "2026-08-17T10:00:00Z",
 	}
 }
 
@@ -104,6 +106,12 @@ func TestHandleCritical_SingleMatchingServer_SetsCondition(t *testing.T) {
 	}
 	if !strings.Contains(cond.Message, "PSU failure") {
 		t.Errorf("message missing event Message: %q", cond.Message)
+	}
+	if !strings.Contains(cond.Message, "IPMI.1.0.PSGoodToBad") {
+		t.Errorf("message missing MessageID: %q", cond.Message)
+	}
+	if !strings.Contains(cond.Message, "2026-08-17T10:00:00Z") {
+		t.Errorf("message missing EventTimestamp: %q", cond.Message)
 	}
 }
 
