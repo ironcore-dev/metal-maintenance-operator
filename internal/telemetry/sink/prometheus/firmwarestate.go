@@ -19,13 +19,13 @@ var (
 	biosFirmwareDesc = prometheus.NewDesc(
 		"metal_maintenance_biosversion_info",
 		"State of BIOS firmware upgrade resources.",
-		[]string{"name", "server", "desired_version", "observed_version", "state"},
+		[]string{"name", "server", "manufacturer", "model", "desired_version", "observed_version", "state"},
 		nil,
 	)
 	bmcFirmwareDesc = prometheus.NewDesc(
 		"metal_maintenance_bmcversion_info",
 		"State of BMC firmware upgrade resources.",
-		[]string{"name", "bmc", "desired_version", "observed_version", "state"},
+		[]string{"name", "bmc", "manufacturer", "model", "desired_version", "observed_version", "state"},
 		nil,
 	)
 )
@@ -74,7 +74,7 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 			m, metricErr := prometheus.NewConstMetric(biosFirmwareDesc, prometheus.GaugeValue, 1,
-				bv.Name, serverName, bv.Spec.Version, observedVersion, stateLabel(string(bv.Status.State)))
+				bv.Name, serverName, srv.Status.Manufacturer, srv.Status.Model, bv.Spec.Version, observedVersion, stateLabel(string(bv.Status.State)))
 			if metricErr != nil {
 				ch <- prometheus.NewInvalidMetric(biosFirmwareDesc, metricErr)
 				continue
@@ -101,7 +101,7 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 			m, metricErr := prometheus.NewConstMetric(bmcFirmwareDesc, prometheus.GaugeValue, 1,
-				bv.Name, bmcName, bv.Spec.Version, observedVersion, stateLabel(string(bv.Status.State)))
+				bv.Name, bmcName, bmc.Status.Manufacturer, bmc.Status.Model, bv.Spec.Version, observedVersion, stateLabel(string(bv.Status.State)))
 			if metricErr != nil {
 				ch <- prometheus.NewInvalidMetric(bmcFirmwareDesc, metricErr)
 				continue

@@ -20,7 +20,7 @@ func TestFirmwareStateCollector_BIOSVersion(t *testing.T) {
 	scheme := newStateScheme(t)
 	server := &metalv1alpha1.Server{
 		ObjectMeta: metav1.ObjectMeta{Name: "server-1"},
-		Status:     metalv1alpha1.ServerStatus{BIOSVersion: "1.0.0"},
+		Status:     metalv1alpha1.ServerStatus{BIOSVersion: "1.0.0", Manufacturer: "servermanufacturer", Model: "servermodel"},
 	}
 	biosv := &systemv1alpha1.BIOSVersion{
 		ObjectMeta: metav1.ObjectMeta{Name: "biosv-1"},
@@ -40,6 +40,8 @@ func TestFirmwareStateCollector_BIOSVersion(t *testing.T) {
 	labels, ok := gatherStateMetric(t, reg, "metal_maintenance_biosversion_info", map[string]string{
 		"name":             "biosv-1",
 		"server":           "server-1",
+		"manufacturer":     "servermanufacturer",
+		"model":            "servermodel",
 		"desired_version":  "2.0.0",
 		"observed_version": "1.0.0",
 		"state":            "InProgress",
@@ -59,7 +61,7 @@ func TestFirmwareStateCollector_BMCVersion(t *testing.T) {
 	scheme := newStateScheme(t)
 	bmc := &metalv1alpha1.BMC{
 		ObjectMeta: metav1.ObjectMeta{Name: "bmc-1"},
-		Status:     metalv1alpha1.BMCStatus{FirmwareVersion: "3.0.0"},
+		Status:     metalv1alpha1.BMCStatus{FirmwareVersion: "3.0.0", Manufacturer: "bmcmanufacturer", Model: "bmcmodel"},
 	}
 	bmcv := &baseboardv1alpha1.BMCVersion{
 		ObjectMeta: metav1.ObjectMeta{Name: "bmcv-1"},
@@ -77,9 +79,11 @@ func TestFirmwareStateCollector_BMCVersion(t *testing.T) {
 	}
 
 	labels, ok := gatherStateMetric(t, reg, "metal_maintenance_bmcversion_info", map[string]string{
-		"name":  "bmcv-1",
-		"bmc":   "bmc-1",
-		"state": "Completed",
+		"name":         "bmcv-1",
+		"bmc":          "bmc-1",
+		"manufacturer": "bmcmanufacturer",
+		"model":        "bmcmodel",
+		"state":        "Completed",
 	})
 	if !ok {
 		t.Fatal("metal_maintenance_bmcversion_info not found")
