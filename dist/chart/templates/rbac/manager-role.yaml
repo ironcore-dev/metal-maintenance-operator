@@ -236,4 +236,3 @@ rules:
   - get
   - patch
   - update
-{{- end }}
