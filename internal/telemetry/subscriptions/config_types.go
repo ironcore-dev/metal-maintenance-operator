@@ -82,8 +82,7 @@ type HardwareMatch struct {
 	// TestOriginOfCondition is the OriginOfCondition URI sent in
 	// SubmitTestEvent, as a plain string (HPE iLO and Lenovo XCC reject
 	// the Redfish {"@odata.id": ...} link-object form with a type error).
-	// Passed through as-is; empty omits the field from the request
-	// entirely. HPE iLO requires this field to be set — leaving it empty
-	// will cause SubmitTestEvent to be rejected.
+	// When empty the field is omitted entirely — required for Dell and
+	// Lenovo compatibility. HPE iLO requires this field to be set.
 	TestOriginOfCondition string `yaml:"testOriginOfCondition,omitempty"`
 }
