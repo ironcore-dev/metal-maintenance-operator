@@ -399,8 +399,9 @@ func main() {
 	}
 
 	if err = (&maintenancectrl.ServerMaintenanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ResyncInterval: resyncInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerMaintenance controller")
 		os.Exit(1)

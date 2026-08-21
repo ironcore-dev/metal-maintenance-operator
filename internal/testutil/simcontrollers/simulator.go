@@ -18,8 +18,9 @@
 // production reconciler from this repository.
 //
 // Only the fields tests actually rely on are synced (BMC PowerState/FirmwareVersion,
-// Server PowerState/BIOSVersion, and Server Status.State transitions to/from Maintenance
-// driven by Server.Spec.ServerMaintenanceRef).
+// Server PowerState, and Server Status.State transitions to/from Parked driven by
+// the metalv1alpha1.OperationAnnotation "park"/"unpark" requests that this repo's
+// real ServerMaintenanceReconciler issues).
 package simcontrollers
 
 import (
@@ -27,8 +28,6 @@ import (
 	"strings"
 	"time"
 
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
@@ -238,7 +237,7 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
-	if requeue, err := r.syncMaintenanceState(ctx, server); err != nil || requeue {
+	if err := r.syncClaimState(ctx, server); err != nil {
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
 	}
 
@@ -268,6 +267,28 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if server.Spec.SystemURI == "" {
 			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
+	}
+
+	// Mimic metal-operator's real ServerReconciler.updateServerStatus: refresh
+	// Status.PowerState from the BMC unconditionally, on every reconcile, before
+	// any state-specific handling below - the real controller does this too,
+	// which is why other controllers (e.g. BIOSSettingsReconciler) that issue
+	// direct BMC power commands while a Server is Parked for maintenance can
+	// rely on Status.PowerState reflecting the change without waiting for the
+	// Server to leave the Parked state first.
+	if err := r.updateServerStatus(ctx, bmcClient, server); err != nil {
+		log.V(1).Info("sim-server: failed to update server status, will retry", "error", err)
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+	}
+
+	if requeue, err := r.syncParkedState(ctx, bmcClient, server); err != nil || requeue {
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
+	}
+
+	if server.Status.State == metalv1alpha1.ServerStateParked {
+		// Parked is an overlay state: while active, normal state-machine progression,
+		// boot, and power healing are suspended (mirrors metal-operator's real behavior).
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 
 	// Mimic metal-operator's real ServerReconciler.handleAvailableState: an
@@ -305,49 +326,34 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	systemInfo, err := bmcClient.GetSystemInfo(ctx, server.Spec.SystemURI)
-	if err != nil {
-		log.V(1).Info("sim-server: failed to get system info, will retry", "error", err)
-		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-	}
-
-	updatedPowerState := metalv1alpha1.ServerPowerState(systemInfo.PowerState)
-	biosVersion, err := bmcClient.GetBiosVersion(ctx, server.Spec.SystemURI)
-	if err != nil {
-		log.V(1).Info("sim-server: failed to get BIOS version, will retry", "error", err)
-		biosVersion = server.Status.BIOSVersion
-	}
-	if server.Status.PowerState != updatedPowerState || server.Status.BIOSVersion != biosVersion {
-		serverBase := server.DeepCopy()
-		server.Status.PowerState = updatedPowerState
-		server.Status.BIOSVersion = biosVersion
-		if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 }
 
-// syncMaintenanceState mimics metal-operator's real Server controller: it keeps
-// Server.Status.State in sync with Server.Spec.ServerMaintenanceRef, which is
-// otherwise only set/cleared by this repo's real ServerMaintenanceReconciler
-// (maintenance-operator) but never turned into a Status.State transition, since
-// that transition is metal-operator's responsibility and its controller can't be
-// imported here.
-func (r *ServerReconciler) syncMaintenanceState(ctx context.Context, server *metalv1alpha1.Server) (bool, error) {
-	log := logf.FromContext(ctx)
+// updateServerStatus mirrors metal-operator's real ServerReconciler.updateServerStatus:
+// it refreshes Status.PowerState from the BMC's reported system info.
+func (r *ServerReconciler) updateServerStatus(ctx context.Context, bmcClient bmc.BMC, server *metalv1alpha1.Server) error {
+	systemInfo, err := bmcClient.GetSystemInfo(ctx, server.Spec.SystemURI)
+	if err != nil {
+		return err
+	}
 
-	if server.Spec.ServerMaintenanceRef != nil {
-		if server.Status.State == metalv1alpha1.ServerStateInitial || server.Status.State == metalv1alpha1.ServerStateMaintenance {
-			return false, nil
-		}
-		serverBase := server.DeepCopy()
-		server.Status.State = metalv1alpha1.ServerStateMaintenance
-		if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-			return false, err
-		}
-		return false, nil
+	updatedPowerState := metalv1alpha1.ServerPowerState(systemInfo.PowerState)
+	if updatedPowerState == server.Status.PowerState {
+		return nil
+	}
+
+	serverBase := server.DeepCopy()
+	server.Status.PowerState = updatedPowerState
+	return r.Status().Patch(ctx, server, client.MergeFrom(serverBase))
+}
+
+// syncClaimState mirrors metal-operator's real ServerReconciler.handleReservedState/
+// handleAvailableState claim-driven transitions: it keeps Server.Status.State in sync
+// with Spec.ServerClaimRef. It does nothing while Parked, since Parked is an overlay
+// state that suspends normal state-machine progression.
+func (r *ServerReconciler) syncClaimState(ctx context.Context, server *metalv1alpha1.Server) error {
+	if server.Status.State == metalv1alpha1.ServerStateParked {
+		return nil
 	}
 
 	// Mirrors metal-operator's real ServerReconciler.handleReservedState under
@@ -361,27 +367,26 @@ func (r *ServerReconciler) syncMaintenanceState(ctx context.Context, server *met
 		claimKey := client.ObjectKey{Name: server.Spec.ServerClaimRef.Name, Namespace: server.Spec.ServerClaimRef.Namespace}
 		if err := r.Get(ctx, claimKey, claim); err != nil {
 			if !apierrors.IsNotFound(err) {
-				return false, err
+				return err
 			}
 			serverBase := server.DeepCopy()
 			server.Spec.ServerClaimRef = nil
 			if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-				return false, err
+				return err
 			}
-			return false, nil
+			return nil
 		}
 	}
 
-	// Also mirrors real Server-controller behavior unrelated to maintenance:
-	// once a ServerClaim is released, a Server sitting in Reserved reverts to
-	// Available.
+	// Also mirrors real Server-controller behavior: once a ServerClaim is
+	// released, a Server sitting in Reserved reverts to Available.
 	if server.Status.State == metalv1alpha1.ServerStateReserved && server.Spec.ServerClaimRef == nil {
 		serverBase := server.DeepCopy()
 		server.Status.State = metalv1alpha1.ServerStateAvailable
 		if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-			return false, err
+			return err
 		}
-		return false, nil
+		return nil
 	}
 
 	// Mirrors metal-operator's real ServerReconciler.handleAvailableState: once a
@@ -391,91 +396,104 @@ func (r *ServerReconciler) syncMaintenanceState(ctx context.Context, server *met
 		serverBase := server.DeepCopy()
 		server.Status.State = metalv1alpha1.ServerStateReserved
 		if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	return nil
+}
+
+// syncParkedState mimics metal-operator's real Server controller Parked-state handling
+// (handleAnnotationOperations/parkServer/unparkServer/resumeParkedServer): it reacts to
+// the metalv1alpha1.OperationAnnotation ("park"/"unpark") requests issued by this repo's
+// real ServerMaintenanceReconciler, powers the Server off before confirming Parked, and
+// resumes it to its pre-park state (Available/Reserved) once unparked.
+func (r *ServerReconciler) syncParkedState(ctx context.Context, bmcClient bmc.BMC, server *metalv1alpha1.Server) (bool, error) {
+	log := logf.FromContext(ctx)
+	operation := server.GetAnnotations()[metalv1alpha1.OperationAnnotation]
+
+	if operation == metalv1alpha1.OperationAnnotationUnpark {
+		if server.Status.State == metalv1alpha1.ServerStateParked {
+			target := metalv1alpha1.ServerStateAvailable
+			if server.Spec.ServerClaimRef != nil {
+				target = metalv1alpha1.ServerStateReserved
+			}
+			serverBase := server.DeepCopy()
+			server.Status.State = target
+			if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
+				return false, err
+			}
+		}
+		if err := r.removeServerOperationAnnotation(ctx, server); err != nil {
 			return false, err
 		}
-		return false, nil
-	}
-
-	if server.Status.State != metalv1alpha1.ServerStateMaintenance {
-		return false, nil
-	}
-
-	pending, err := r.hasPendingMaintenance(ctx, server.Name)
-	if err != nil {
-		return false, err
-	}
-	if pending {
-		log.V(1).Info("sim-server: other maintenance still pending, staying in Maintenance", "Server", server.Name)
+		log.V(1).Info("sim-server: unparked", "Server", server.Name)
 		return true, nil
 	}
 
-	target := metalv1alpha1.ServerStateAvailable
-	if server.Spec.ServerClaimRef != nil {
-		target = metalv1alpha1.ServerStateReserved
-	}
-	serverBase := server.DeepCopy()
-	server.Status.State = target
-	if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-		return false, err
-	}
-	return false, nil
-}
-
-// hasPendingMaintenance reports whether any non-deleting ServerMaintenance for
-// this server would still require it to be in Maintenance: either an Enforced
-// policy, or an OwnerApproval policy whose ServerClaim has been approved.
-func (r *ServerReconciler) hasPendingMaintenance(ctx context.Context, serverName string) (bool, error) {
-	maintenanceList := &maintenancev1alpha1.ServerMaintenanceList{}
-	if err := r.List(ctx, maintenanceList, client.MatchingFields{constants.ServerRefField: serverName}); err != nil {
-		return false, err
-	}
-	for i := range maintenanceList.Items {
-		m := &maintenanceList.Items[i]
-		if !m.DeletionTimestamp.IsZero() {
-			continue
-		}
-		switch m.Spec.Policy {
-		case maintenancev1alpha1.ServerMaintenancePolicyEnforced:
-			return true, nil
-		case maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval:
-			approved, err := r.claimApproved(ctx, serverName)
-			if err != nil {
+	if operation == metalv1alpha1.OperationAnnotationPark {
+		if server.Status.State == metalv1alpha1.ServerStateParked {
+			// Already parked; just consume the redundant request, mirroring
+			// metal-operator's real standDownParked.
+			if err := r.removeServerOperationAnnotation(ctx, server); err != nil {
 				return false, err
 			}
-			if approved {
-				return true, nil
-			}
+			return true, nil
 		}
+		if server.Status.State != metalv1alpha1.ServerStateAvailable && server.Status.State != metalv1alpha1.ServerStateReserved {
+			log.V(1).Info("sim-server: park requested but server is not in a parkable state, deferring", "Server", server.Name, "State", server.Status.State)
+			return true, nil
+		}
+		// Query the live BMC power state rather than trusting server.Status.PowerState:
+		// that field is only refreshed at the end of Reconcile, which never runs while
+		// a park request is pending (this function always requeues in that case), so it
+		// would otherwise never observe the power-off triggered below and would keep
+		// issuing redundant PowerOff calls forever.
+		systemInfo, err := bmcClient.GetSystemInfo(ctx, server.Spec.SystemURI)
+		if err != nil {
+			log.V(1).Info("sim-server: failed to get system info while parking, will retry", "error", err)
+			return true, nil
+		}
+		if metalv1alpha1.ServerPowerState(systemInfo.PowerState) != metalv1alpha1.ServerOffPowerState {
+			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
+				log.V(1).Info("sim-server: failed to power off for parking, will retry", "error", err)
+			}
+			return true, nil
+		}
+		serverBase := server.DeepCopy()
+		server.Status.State = metalv1alpha1.ServerStateParked
+		if err := r.Status().Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
+			return false, err
+		}
+		if err := r.removeServerOperationAnnotation(ctx, server); err != nil {
+			return false, err
+		}
+		log.V(1).Info("sim-server: parked", "Server", server.Name)
+		return true, nil
 	}
+
 	return false, nil
 }
 
-// claimApproved reports whether the ServerClaim referenced by the named
-// Server carries the ServerMaintenanceApprovedLabelKey label.
-func (r *ServerReconciler) claimApproved(ctx context.Context, serverName string) (bool, error) {
-	server := &metalv1alpha1.Server{}
-	if err := r.Get(ctx, client.ObjectKey{Name: serverName}, server); err != nil {
-		return false, err
+// removeServerOperationAnnotation consumes the metalv1alpha1.OperationAnnotation
+// request, mirroring metal-operator's real removeOperationAnnotation.
+func (r *ServerReconciler) removeServerOperationAnnotation(ctx context.Context, server *metalv1alpha1.Server) error {
+	if _, ok := server.GetAnnotations()[metalv1alpha1.OperationAnnotation]; !ok {
+		return nil
 	}
-	if server.Spec.ServerClaimRef == nil {
-		return false, nil
-	}
-	claim := &metalv1alpha1.ServerClaim{}
-	if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.ServerClaimRef.Name, Namespace: server.Spec.ServerClaimRef.Namespace}, claim); err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	_, ok := claim.Labels[maintenancev1alpha1.ServerMaintenanceApprovedLabelKey]
-	return ok, nil
+	serverBase := server.DeepCopy()
+	annotations := server.GetAnnotations()
+	delete(annotations, metalv1alpha1.OperationAnnotation)
+	server.SetAnnotations(annotations)
+	return r.Patch(ctx, server, client.MergeFrom(serverBase))
 }
 
 // ServerClaimReconciler is a test-only stand-in for metal-operator's real
 // ServerClaimReconciler. It only implements the subset of behavior tests here
 // rely on: claiming the referenced Server (Spec.ServerClaimRef, mirroring
 // claimServer/ensureObjectRefForServer) and, once the Server reaches Reserved
-// (driven by ServerReconciler.syncMaintenanceState), propagating the claim's
+// (driven by ServerReconciler.syncClaimState), propagating the claim's
 // desired power state (mirroring ensurePowerStateForServer).
 type ServerClaimReconciler struct {
 	client.Client
