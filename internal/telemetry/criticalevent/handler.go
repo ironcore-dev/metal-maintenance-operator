@@ -55,10 +55,11 @@ func (h *ConditionHandler) HandleCritical(ctx context.Context, bmcName string, e
 	}
 
 	condition := metav1.Condition{
-		Type:    CriticalEventConditionType,
-		Status:  metav1.ConditionTrue,
-		Reason:  fmt.Sprintf("CriticalEvent%s", sanitizeEventID(event.EventID)),
-		Message: fmt.Sprintf("Critical Redfish event: %s (component: %s)", event.Message, event.OriginOfCondition),
+		Type:   CriticalEventConditionType,
+		Status: metav1.ConditionTrue,
+		Reason: fmt.Sprintf("CriticalEvent%s", sanitizeEventID(event.EventID)),
+		Message: fmt.Sprintf("Critical Redfish event [%s]: %s (component: %s, at: %s)",
+			event.MessageID, event.Message, event.OriginOfCondition, event.EventTimestamp),
 	}
 
 	var failed []error
