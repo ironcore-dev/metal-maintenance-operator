@@ -6,6 +6,8 @@ package maintenance
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/controller-utils/metautils"
@@ -32,7 +34,8 @@ const (
 // ServerMaintenanceReconciler reconciles a ServerMaintenance object.
 type ServerMaintenanceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme         *runtime.Scheme
+	ResyncInterval time.Duration
 }
 
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
@@ -83,16 +86,14 @@ func (r *ServerMaintenanceReconciler) reconcile(ctx context.Context, maintenance
 	// This needs to be checked because "Enforced" Maintenance Policy evicts the server from the current maintenance
 	// and assigns it to itself, causing some other maintenance to be InMaintenance.
 	// In this case, we should not reconcile the maintenance because it is not the one holding the maintenance on server.
-	if server.Spec.ServerMaintenanceRef != nil {
-		if server.Spec.ServerMaintenanceRef.Name != maintenance.Name || server.Spec.ServerMaintenanceRef.Namespace != maintenance.Namespace {
-			log.V(1).Info("Server is already in maintenance with other tasks", "Server", server.Name)
-			if maintenance.Status.State != serverMaintenancev1alpha1.ServerMaintenanceStatePending {
-				if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStatePending); err != nil || modified {
-					return ctrl.Result{}, err
-				}
+	if owner, ok := server.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; ok && owner != serverMaintenanceOwnerKey(maintenance) {
+		log.V(1).Info("Server is already in maintenance with other tasks", "Server", server.Name)
+		if maintenance.Status.State != serverMaintenancev1alpha1.ServerMaintenanceStatePending {
+			if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStatePending); err != nil || modified {
+				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, nil
 		}
+		return ctrl.Result{}, nil
 	}
 
 	if modified, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, maintenance, serverMaintenanceFinalizer); err != nil || modified {
@@ -140,8 +141,12 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 	if server.Spec.ServerClaimRef == nil {
 		log.V(1).Info("Server has no ServerClaim, move to maintenance state right away", "Server", server.Name)
-		if claimed, err := r.updateServerRef(ctx, maintenance, server); err != nil || !claimed {
+		if claimed, err := r.requestServerPark(ctx, maintenance, server); err != nil || !claimed {
 			return ctrl.Result{}, err
+		}
+		if !controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
+			log.V(1).Info("Waiting for Server to reach Parked state", "Server", server.Name, "State", server.Status.State)
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
 		_, err = r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance)
 		return ctrl.Result{}, err
@@ -174,8 +179,12 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 		if hasLabel {
 			log.V(1).Info("Server approved for maintenance", "Server", server.Name)
-			if claimed, err := r.updateServerRef(ctx, maintenance, server); err != nil || !claimed {
+			if claimed, err := r.requestServerPark(ctx, maintenance, server); err != nil || !claimed {
 				return ctrl.Result{}, err
+			}
+			if !controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
+				log.V(1).Info("Waiting for Server to reach Parked state", "Server", server.Name, "State", server.Status.State)
+				return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 			}
 			_, err = r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance)
 			return ctrl.Result{}, err
@@ -186,8 +195,12 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 	if maintenance.Spec.Policy == serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced {
 		log.V(1).Info("Enforcing maintenance", "Server", server.Name)
-		if claimed, err := r.updateServerRef(ctx, maintenance, server); err != nil || !claimed {
+		if claimed, err := r.requestServerPark(ctx, maintenance, server); err != nil || !claimed {
 			return ctrl.Result{}, err
+		}
+		if !controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
+			log.V(1).Info("Waiting for Server to reach Parked state", "Server", server.Name, "State", server.Status.State)
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
 		if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance); err != nil || modified {
 			return ctrl.Result{}, err
@@ -251,29 +264,43 @@ func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Conte
 		return ctrl.Result{}, err
 	}
 
-	// TEMPORARY: clear the desired power directive while a Server is InMaintenance so that no
-	// other controller (e.g. the Server controller reconciling Spec.Power) keeps forcing it back
-	// to a fixed power state and fighting with BIOS controllers that need to power-cycle the
-	// Server on their own. Remove this once the Server has a proper "Parked" state transition
-	// that natively suspends power-state enforcement during maintenance.
-	if server.Spec.Power != "" {
-		serverBase := server.DeepCopy()
-		server.Spec.Power = ""
-		if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to clear Server power directive: %w", err)
-		}
-		log.V(1).Info("Cleared Server power directive while InMaintenance", "Server", server.Name)
+	if controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
+		log.V(1).Info("Reconciled ServerMaintenance in InMaintenance state")
+		return ctrl.Result{}, nil
 	}
 
-	log.V(1).Info("Reconciled ServerMaintenance in InMaintenance state")
-	return ctrl.Result{}, nil
+	// The Server drifted out of Parked state or lost its ownership annotation out of
+	// band; re-assert the park claim so InMaintenance and the Server's actual state
+	// don't stay inconsistent.
+	claimed, err := r.requestServerPark(ctx, maintenance, server)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !claimed {
+		log.V(1).Info("Server is no longer claimed by this maintenance, returning to Pending", "Server", server.Name)
+		_, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStatePending)
+		return ctrl.Result{}, err
+	}
+
+	log.V(1).Info("Server not yet Parked while InMaintenance, waiting", "Server", server.Name, "State", server.Status.State)
+	return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 }
 
-// updateServerRef claims the ServerMaintenanceRef on the given Server for maintenance.
+// serverMaintenanceOwnerKey returns the "namespace/name" key used to record which
+// ServerMaintenance owns a Server's Parked state.
+func serverMaintenanceOwnerKey(maintenance *serverMaintenancev1alpha1.ServerMaintenance) string {
+	return controllerutils.ServerMaintenanceOwnerKey(maintenance.Namespace, maintenance.Name)
+}
+
+// requestServerPark requests that the given Server be parked for this maintenance.
 // It re-fetches the latest Server state to avoid acting on a stale copy, and returns whether
-// this ServerMaintenance owns (or successfully claimed) the ref. Callers must only transition
-// to InMaintenance when the returned bool is true.
-func (r *ServerMaintenanceReconciler) updateServerRef(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) (bool, error) {
+// this ServerMaintenance owns (or successfully claimed) the park request. Callers must only
+// transition to InMaintenance when the returned bool is true.
+//
+// metal-operator's Parked state has no concept of an owning object (it's a plain
+// annotation), so ownership is tracked here via controllerutils.ServerMaintenanceOwnerAnnotation
+// to preserve the same "single active claimant" semantics ServerMaintenanceRef used to give us.
+func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	latest := &metalv1alpha1.Server{}
@@ -281,30 +308,29 @@ func (r *ServerMaintenanceReconciler) updateServerRef(ctx context.Context, maint
 		return false, fmt.Errorf("failed to get latest Server: %w", err)
 	}
 
-	if ref := latest.Spec.ServerMaintenanceRef; ref != nil {
+	key := serverMaintenanceOwnerKey(maintenance)
+	if owner, ok := latest.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; ok {
 		*server = *latest
-		if ref.Name == maintenance.Name && ref.Namespace == maintenance.Namespace {
-			log.V(1).Info("Server is already in Maintenance", "Server", latest.Name, "Maintenance", ref.Name)
+		if owner == key {
+			log.V(1).Info("Server is already claimed for this maintenance", "Server", latest.Name)
 			return true, nil
 		}
-		log.V(1).Info("Server is already claimed by another ServerMaintenance", "Server", latest.Name, "Maintenance", ref.Name)
+		log.V(1).Info("Server is already claimed by another ServerMaintenance", "Server", latest.Name, "Owner", owner)
 		return false, nil
 	}
 
-	latest.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
-		Namespace: maintenance.Namespace,
-		Name:      maintenance.Name,
-	}
-	// use update to not overwrite ServerMaintenanceRef if another maintenance was quicker
+	metav1.SetMetaDataAnnotation(&latest.ObjectMeta, controllerutils.ServerMaintenanceOwnerAnnotation, key)
+	metav1.SetMetaDataAnnotation(&latest.ObjectMeta, metalv1alpha1.OperationAnnotation, metalv1alpha1.OperationAnnotationPark)
+	// use update to not overwrite the claim if another maintenance was quicker
 	if err := r.Update(ctx, latest); err != nil {
 		if apierrors.IsConflict(err) {
 			log.V(1).Info("Conflict while claiming Server, will retry", "Server", latest.Name)
 			return false, nil
 		}
-		return false, fmt.Errorf("failed to patch maintenance ref for server: %w", err)
+		return false, fmt.Errorf("failed to request park for server: %w", err)
 	}
 	*server = *latest
-	log.V(1).Info("Updated ServerMaintenance reference on Server", "Server", latest.Name)
+	log.V(1).Info("Requested Server park for maintenance", "Server", latest.Name)
 	return true, nil
 }
 
@@ -350,9 +376,9 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 		return nil
 	}
 
-	if ref := server.Spec.ServerMaintenanceRef; ref != nil && ref.Name == maintenance.Name && ref.Namespace == maintenance.Namespace {
-		if err := r.removeMaintenanceRefFromServer(ctx, server); err != nil {
-			return fmt.Errorf("failed to remove ServerMaintenance ref from Server: %w", err)
+	if owner := server.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; owner == serverMaintenanceOwnerKey(maintenance) {
+		if err := r.unparkServerForMaintenance(ctx, server); err != nil {
+			return fmt.Errorf("failed to request unpark for Server: %w", err)
 		}
 		if server.Spec.MaintenanceBootConfigurationRef != nil {
 			config := &metalv1alpha1.ServerBootConfiguration{
@@ -424,11 +450,12 @@ func (r *ServerMaintenanceReconciler) removeBootConfigRefFromServer(ctx context.
 	return nil
 }
 
-func (r *ServerMaintenanceReconciler) removeMaintenanceRefFromServer(ctx context.Context, server *metalv1alpha1.Server) error {
+func (r *ServerMaintenanceReconciler) unparkServerForMaintenance(ctx context.Context, server *metalv1alpha1.Server) error {
 	serverBase := server.DeepCopy()
-	server.Spec.ServerMaintenanceRef = nil
+	metautils.DeleteAnnotation(server, controllerutils.ServerMaintenanceOwnerAnnotation)
+	metav1.SetMetaDataAnnotation(&server.ObjectMeta, metalv1alpha1.OperationAnnotation, metalv1alpha1.OperationAnnotationUnpark)
 	if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-		return fmt.Errorf("failed to patch claim ref for server: %w", err)
+		return fmt.Errorf("failed to patch unpark request for server: %w", err)
 	}
 	return nil
 }
@@ -462,10 +489,12 @@ func (r *ServerMaintenanceReconciler) enqueueMaintenanceByServerRefs() handler.E
 			return nil
 		}
 
-		if server.Spec.ServerMaintenanceRef != nil {
-			req = append(req, reconcile.Request{
-				NamespacedName: types.NamespacedName{Namespace: server.Spec.ServerMaintenanceRef.Namespace, Name: server.Spec.ServerMaintenanceRef.Name},
-			})
+		if owner, ok := server.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; ok {
+			if ns, name, found := strings.Cut(owner, "/"); found {
+				req = append(req, reconcile.Request{
+					NamespacedName: types.NamespacedName{Namespace: ns, Name: name},
+				})
+			}
 		}
 
 		maintenanceList := &serverMaintenancev1alpha1.ServerMaintenanceList{}

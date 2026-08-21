@@ -17,6 +17,7 @@ import (
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,6 +123,17 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, server03)).Should(Succeed())
+
+		By("Patching servers to Available so they can be Parked for maintenance")
+		Eventually(UpdateStatus(server01, func() {
+			server01.Status.State = metalv1alpha1.ServerStateAvailable
+		})).Should(Succeed())
+		Eventually(UpdateStatus(server02, func() {
+			server02.Status.State = metalv1alpha1.ServerStateAvailable
+		})).Should(Succeed())
+		Eventually(UpdateStatus(server03, func() {
+			server03.Status.State = metalv1alpha1.ServerStateAvailable
+		})).Should(Succeed())
 	})
 
 	AfterEach(func(ctx SpecContext) {
@@ -224,15 +236,9 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, biosVersion02)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, biosVersion03)).To(Succeed())
-		Eventually(Object(server01)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server02)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server03)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server01)).Should(testutils.ServerNotParked)
+		Eventually(Object(server02)).Should(testutils.ServerNotParked)
+		Eventually(Object(server03)).Should(testutils.ServerNotParked)
 	})
 
 	It("should successfully reconcile the resource when BMC are deleted/created", func(ctx SpecContext) {
@@ -394,15 +400,9 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosVersion01)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, biosVersion02)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, biosVersion03)).To(Succeed())
-		Eventually(Object(server01)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server02)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server03)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server01)).Should(testutils.ServerNotParked)
+		Eventually(Object(server02)).Should(testutils.ServerNotParked)
+		Eventually(Object(server03)).Should(testutils.ServerNotParked)
 	})
 
 	It("Should successfully retry failed state child resources", func(ctx SpecContext) {
@@ -565,14 +565,8 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 		Eventually(Get(biosVersion02)).Should(Satisfy(apierrors.IsNotFound))
 		Expect(k8sClient.Delete(ctx, biosVersion03)).To(Succeed())
 		Eventually(Get(biosVersion03)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server01)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server02)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
-		Eventually(Object(server03)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server01)).Should(testutils.ServerNotParked)
+		Eventually(Object(server02)).Should(testutils.ServerNotParked)
+		Eventually(Object(server03)).Should(testutils.ServerNotParked)
 	})
 })

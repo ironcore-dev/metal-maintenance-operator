@@ -98,6 +98,33 @@ func GetServerMaintenanceForObjectReference(ctx context.Context, c client.Client
 	return maintenance, nil
 }
 
+// --- Server Parked-state helpers ---
+
+// ServerMaintenanceOwnerAnnotation records which owner (a ServerMaintenance,
+// BIOSSettings, or BMCSettings object, encoded as a "namespace/name" key via
+// ServerMaintenanceOwnerKey) currently owns a Server's Parked state.
+// metal-operator's Parked state (unlike ServerMaintenanceRef) has no concept
+// of an owning object, so ownership is tracked here via this annotation to
+// give the same "single active claimant" semantics ServerMaintenanceRef used
+// to provide.
+const ServerMaintenanceOwnerAnnotation = "maintenance.metal.ironcore.dev/server-maintenance"
+
+// ServerMaintenanceOwnerKey returns the "namespace/name" key used to record
+// ownership of a Server's Parked state, see ServerMaintenanceOwnerAnnotation.
+func ServerMaintenanceOwnerKey(namespace, name string) string {
+	return client.ObjectKey{Namespace: namespace, Name: name}.String()
+}
+
+// IsServerParkedForOwner reports whether server is currently Parked and its
+// park was requested by the owner identified by ownerKey (see
+// ServerMaintenanceOwnerKey).
+func IsServerParkedForOwner(server *metalv1alpha1.Server, ownerKey string) bool {
+	if server.Status.State != metalv1alpha1.ServerStateParked {
+		return false
+	}
+	return server.GetAnnotations()[ServerMaintenanceOwnerAnnotation] == ownerKey
+}
+
 // --- Deletion helpers ---
 
 // ShouldProceedWithDeletion returns true when obj should proceed with deletion.

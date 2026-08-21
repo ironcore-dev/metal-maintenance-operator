@@ -16,6 +16,7 @@ import (
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 
@@ -191,9 +192,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Eventually(Object(server)).Should(
 			HaveField("Spec.BIOSSettingsRef", BeNil()),
 		)
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should move to completed if no bios setting changes to referred server", func(ctx SpecContext) {
@@ -256,9 +255,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Eventually(Object(server)).Should(
 			HaveField("Spec.BIOSSettingsRef", BeNil()),
 		)
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should reboot server if the resetRequired field is missing in the biosRegistry", func(ctx SpecContext) {
@@ -317,9 +314,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Eventually(Object(server)).Should(
 			HaveField("Spec.BIOSSettingsRef", BeNil()),
 		)
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should request maintenance when changing power status of server, even if bios settings update does not need it", func(ctx SpecContext) {
@@ -467,7 +462,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			testutils.ServerNotParked,
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
 		))
 	})
@@ -577,9 +572,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		)
 
 		By("Ensuring that the Server is in Maintenance")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		// because of how we mock the setting update, it applied immediately and hence will not go through reboots to apply setting
 		// this is the eventual state we would need to reach
@@ -604,7 +597,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosSettings)).Should(Succeed())
 		Expect(k8sClient.Delete(ctx, serverClaim)).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			testutils.ServerNotParked,
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
 		))
 	})
@@ -676,9 +669,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		)
 
 		By("Ensuring that the Server is in Maintenance")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		// because of the mocking, the transitions are superfast here.
 		Eventually(Object(biosSettings)).Should(SatisfyAll(
@@ -697,9 +688,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Eventually(Object(server)).Should(
 			HaveField("Spec.BIOSSettingsRef", BeNil()),
 		)
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should wait for upgrade and reconcile when biosSettings version is correct", func(ctx SpecContext) {
@@ -824,9 +813,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should allow retry using annotation", func(ctx SpecContext) {
@@ -904,9 +891,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 			}
 			return owned
 		}).Should(Equal(0))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should replace missing BIOSSettings ref in server", func(ctx SpecContext) {
@@ -1020,9 +1005,7 @@ var _ = Describe("BIOSSettings Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, biosSettings2)).To(Succeed())
 		Eventually(Get(biosSettings2)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })
 
@@ -1229,7 +1212,7 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			testutils.ServerNotParked,
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
 		))
 	})
@@ -1355,9 +1338,7 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 		Expect(k8sClient.Delete(ctx, serverMaintenance)).Should(Succeed())
 
 		By("Waiting for Server to exit Maintenance state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 
 		By("Cleaning up ServerClaim")
 		Expect(k8sClient.Delete(ctx, serverClaim)).Should(Succeed())
@@ -1466,9 +1447,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 
 		By("Deleting the BIOSSetting")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should fail if settings provided are invalid", func(ctx SpecContext) {
@@ -1531,9 +1510,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, serverMaintenance)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should fail if duplicate keys in names or settings found", func(ctx SpecContext) {
@@ -1642,9 +1619,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosSettings2)).To(Succeed())
 		By("Deleting the biosSettings")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should successfully apply sequence of different settings and reconcile from applied state", func(ctx SpecContext) {
@@ -1711,9 +1686,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 
 		By("Deleting the BIOSSettings")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should successfully apply sequence of settings when the names and priority changed, before the settings update was issued on server", func(ctx SpecContext) {
@@ -1808,9 +1781,7 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 
 		By("Deleting the BIOSSetting")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })
 
