@@ -3,7 +3,7 @@ module github.com/ironcore-dev/metal-maintenance-operator
 go 1.26.3
 
 require (
-	github.com/HewlettPackard/oneview-golang v11.3.0+incompatible
+	github.com/HewlettPackard/oneview-golang v11.4.0+incompatible
 	github.com/blang/semver/v4 v4.0.0
 	github.com/go-logr/logr v1.4.4
 	github.com/google/uuid v1.6.0
