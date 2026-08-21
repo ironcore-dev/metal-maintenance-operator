@@ -65,9 +65,9 @@ func init() {
 
 	utilruntime.Must(vendorconsolev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(baseboardv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
-	utilruntime.Must(baseboardv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(systemv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -408,6 +408,7 @@ func main() {
 
 	accessor := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
 	bmcOpts := metalv1alpha1bmc.Options{
+		BasicAuth:            true,
 		PowerPollingInterval: 5 * time.Second,
 		PowerPollingTimeout:  2 * time.Minute,
 	}
@@ -532,6 +533,17 @@ func main() {
 			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
 			os.Exit(1)
 		}
+	}
+
+	if err = (&baseboardctrl.BMCUserReconciler{
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		DefaultProtocol:    protocol,
+		SkipCertValidation: skipCertValidation,
+		BMCOptions:         bmcOpts,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create BMCUser controller")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 

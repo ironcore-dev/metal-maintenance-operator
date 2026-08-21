@@ -173,6 +173,18 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			Scheme: k8sManager.GetScheme(),
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		Expect((&BMCUserReconciler{
+			Client:             k8sManager.GetClient(),
+			Scheme:             k8sManager.GetScheme(),
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real
 		// BMC/Server controllers - which live in metal-operator's internal package
 		// and can't be imported - by syncing status (PowerState, FirmwareVersion,
@@ -277,6 +289,7 @@ func EnsureCleanState() {
 		&baseboardv1alpha1.BMCSettingsSetList{},
 		&baseboardv1alpha1.BMCVersionList{},
 		&baseboardv1alpha1.BMCVersionSetList{},
+		&baseboardv1alpha1.BMCUserList{},
 	}
 
 	for _, list := range objectLists {

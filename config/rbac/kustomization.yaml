@@ -28,4 +28,7 @@ resources:
 - servermaintenance_admin_role.yaml
 - servermaintenance_editor_role.yaml
 - servermaintenance_viewer_role.yaml
+- bmcuser_admin_role.yaml
+- bmcuser_editor_role.yaml
+- bmcuser_viewer_role.yaml
 
