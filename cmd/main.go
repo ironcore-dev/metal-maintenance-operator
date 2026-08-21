@@ -531,7 +531,7 @@ func main() {
 		SkipCertValidation: skipCertValidation,
 		BMCOptions:         bmcOpts,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BMCUser controller")
+		setupLog.Error(err, "Failed to create BMCUser controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
