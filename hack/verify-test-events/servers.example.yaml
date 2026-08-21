@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Example server list for hack/verify-test-events. Copy this file (it is
+# gitignored under a name like servers.local.yaml) and fill in real BMC
+# credentials — do not commit credentials.
+#
+# username/password at the top level are fleet-wide defaults; per-server
+# values override them. vendor/model must match a HardwareMatch row's
+# vendor/models in the -config file exactly as the operator matches them
+# (vendor: exact string, e.g. "Dell Inc." or "HPE"; model: case-insensitive,
+# or the row's models list contains "*"). firmware is only needed if that
+# row sets minFirmware.
+
+username: admin
+password: changeme
+
+servers:
+  - endpoint: https://10.0.1.10
+    vendor: "Dell Inc."
+    model: "PowerEdge R650"
+  - endpoint: https://10.0.1.11
+    vendor: HPE
+    model: "DL380 Gen11"

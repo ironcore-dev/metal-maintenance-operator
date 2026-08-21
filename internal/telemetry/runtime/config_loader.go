@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// configKey is the well-known ConfigMap data key the loader reads.
-const configKey = "config.yaml"
+// ConfigKey is the well-known ConfigMap data key the loader reads.
+const ConfigKey = "config.yaml"
 
 // ConfigLoader watches the telemetry ConfigMap and atomic-swaps a
 // *subscriptions.Config pointer on every change. The most-recent
@@ -109,9 +109,9 @@ func (l *ConfigLoader) reload(ctx context.Context) error {
 		}
 		return fmt.Errorf("get ConfigMap %s/%s: %w", l.Namespace, l.Name, err)
 	}
-	raw, ok := cm.Data[configKey]
+	raw, ok := cm.Data[ConfigKey]
 	if !ok {
-		return fmt.Errorf("ConfigMap %s/%s is missing key %q", l.Namespace, l.Name, configKey)
+		return fmt.Errorf("ConfigMap %s/%s is missing key %q", l.Namespace, l.Name, ConfigKey)
 	}
 	cfg, errList := subscriptions.Parse([]byte(raw))
 	if len(errList) > 0 {
