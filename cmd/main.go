@@ -16,6 +16,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
 	telemetryruntime "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
+	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	metalv1alpha1bmc "github.com/ironcore-dev/metal-operator/bmc"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -328,6 +330,15 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if err := promsink.NewFirmwareStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
+		setupLog.Error(err, "Failed to register FirmwareStateCollector")
+		os.Exit(1)
+	}
+	if err := promsink.NewSettingsStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
+		setupLog.Error(err, "Failed to register SettingsStateCollector")
 		os.Exit(1)
 	}
 
