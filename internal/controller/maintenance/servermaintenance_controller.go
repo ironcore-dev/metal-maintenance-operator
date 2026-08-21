@@ -141,7 +141,7 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 	if server.Spec.ServerClaimRef == nil {
 		log.V(1).Info("Server has no ServerClaim, move to maintenance state right away", "Server", server.Name)
-		if claimed, err := r.requestServerPark(ctx, maintenance, server); err != nil || !claimed {
+		if owned, err := r.requestServerPark(ctx, maintenance, server); err != nil || !owned {
 			return ctrl.Result{}, err
 		}
 		if !controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
@@ -179,7 +179,7 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 		if hasLabel {
 			log.V(1).Info("Server approved for maintenance", "Server", server.Name)
-			if claimed, err := r.requestServerPark(ctx, maintenance, server); err != nil || !claimed {
+			if owned, err := r.requestServerPark(ctx, maintenance, server); err != nil || !owned {
 				return ctrl.Result{}, err
 			}
 			if !controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
@@ -195,7 +195,7 @@ func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, ma
 
 	if maintenance.Spec.Policy == serverMaintenancev1alpha1.ServerMaintenancePolicyEnforced {
 		log.V(1).Info("Enforcing maintenance", "Server", server.Name)
-		if claimed, err := r.requestServerPark(ctx, maintenance, server); err != nil || !claimed {
+		if owned, err := r.requestServerPark(ctx, maintenance, server); err != nil || !owned {
 			return ctrl.Result{}, err
 		}
 		if !controllerutils.IsServerParkedForOwner(server, serverMaintenanceOwnerKey(maintenance)) {
@@ -272,12 +272,12 @@ func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Conte
 	// The Server drifted out of Parked state or lost its ownership annotation out of
 	// band; re-assert the park claim so InMaintenance and the Server's actual state
 	// don't stay inconsistent.
-	claimed, err := r.requestServerPark(ctx, maintenance, server)
+	owned, err := r.requestServerPark(ctx, maintenance, server)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if !claimed {
-		log.V(1).Info("Server is no longer claimed by this maintenance, returning to Pending", "Server", server.Name)
+	if !owned {
+		log.V(1).Info("Server is no longer owned by this maintenance, returning to Pending", "Server", server.Name)
 		_, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStatePending)
 		return ctrl.Result{}, err
 	}
@@ -294,7 +294,7 @@ func serverMaintenanceOwnerKey(maintenance *serverMaintenancev1alpha1.ServerMain
 
 // requestServerPark requests that the given Server be parked for this maintenance.
 // It re-fetches the latest Server state to avoid acting on a stale copy, and returns whether
-// this ServerMaintenance owns (or successfully claimed) the park request. Callers must only
+// this ServerMaintenance owns (or successfully acquired) the park request. Callers must only
 // transition to InMaintenance when the returned bool is true.
 //
 // metal-operator's Parked state has no concept of an owning object (it's a plain
@@ -312,10 +312,10 @@ func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, mai
 	if owner, ok := latest.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; ok {
 		*server = *latest
 		if owner == key {
-			log.V(1).Info("Server is already claimed for this maintenance", "Server", latest.Name)
+			log.V(1).Info("Server is already owned by this maintenance", "Server", latest.Name)
 			return true, nil
 		}
-		log.V(1).Info("Server is already claimed by another ServerMaintenance", "Server", latest.Name, "Owner", owner)
+		log.V(1).Info("Server is already owned by another ServerMaintenance", "Server", latest.Name, "Owner", owner)
 		return false, nil
 	}
 
@@ -421,6 +421,9 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 		if len(serverMaintenancesList.Items) == 0 {
 			serverClaim := &metalv1alpha1.ServerClaim{}
 			if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.ServerClaimRef.Name, Namespace: server.Spec.ServerClaimRef.Namespace}, serverClaim); err != nil {
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
 				return fmt.Errorf("failed to get ServerClaim: %w", err)
 			}
 			serverClaimBase := serverClaim.DeepCopy()
@@ -454,7 +457,7 @@ func (r *ServerMaintenanceReconciler) unparkServerForMaintenance(ctx context.Con
 	serverBase := server.DeepCopy()
 	metautils.DeleteAnnotation(server, controllerutils.ServerMaintenanceOwnerAnnotation)
 	metav1.SetMetaDataAnnotation(&server.ObjectMeta, metalv1alpha1.OperationAnnotation, metalv1alpha1.OperationAnnotationUnpark)
-	if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
+	if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to patch unpark request for server: %w", err)
 	}
 	return nil
