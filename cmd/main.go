@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
 	telemetryruntime "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
+	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
+	metalv1alpha1bmc "github.com/ironcore-dev/metal-operator/bmc"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -31,19 +34,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	"github.com/ironcore-dev/controller-utils/conditionutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
+	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
+	maintenancewebhook "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"github.com/ironcore-dev/metal-operator/bmc"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -59,6 +67,8 @@ func init() {
 	utilruntime.Must(readinessv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(baseboardv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(systemv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -72,16 +82,20 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var enableWebhooks bool
+	var webhookServer webhook.Server
 	var tlsOpts []func(*tls.Config)
 	var sanitizationNamespace string
 	var sanitizationImage string
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
-	var bmcProtocol string
-	var bmcSkipCertValidation bool
-	var bmcPowerPollingInterval time.Duration
-	var bmcPowerPollingTimeout time.Duration
+	var managerNamespace string
+	var defaultProtocol string
+	var skipCertValidation bool
+	var resyncInterval time.Duration
+	var biosSettingsTimeoutExpiry time.Duration
+	var rebootTimeoutExpiry time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -113,14 +127,21 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
-	flag.StringVar(&bmcProtocol, "bmc-protocol", "https",
-		"Default protocol used to talk to BMCs when a BMC resource does not pin one. One of 'http' or 'https'.")
-	flag.BoolVar(&bmcSkipCertValidation, "bmc-skip-cert-validation", false,
-		"Skip TLS certificate validation when talking to BMCs over HTTPS.")
-	flag.DurationVar(&bmcPowerPollingInterval, "bmc-power-polling-interval", 5*time.Second,
-		"Interval for polling BMC power state.")
-	flag.DurationVar(&bmcPowerPollingTimeout, "bmc-power-polling-timeout", 2*time.Minute,
-		"Timeout for polling BMC power state.")
+	flag.StringVar(&managerNamespace, "manager-namespace", "",
+		"Namespace the manager runs in (used for BMC/BIOS controller secrets and boot configs).")
+	flag.StringVar(&defaultProtocol, "default-protocol", string(metalv1alpha1.HTTPProtocolScheme),
+		"Default BMC protocol scheme (e.g. https).")
+	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
+		"Skip TLS certificate validation for BMC connections.")
+	flag.DurationVar(&resyncInterval, "resync-interval", 10*time.Minute,
+		"Resync interval for BMC/BIOS maintenance controllers.")
+	var defaultFailedAutoRetryCountInt int
+	flag.IntVar(&defaultFailedAutoRetryCountInt, "default-failed-auto-retry-count", 3,
+		"Number of automatic retries before a maintenance task is marked failed.")
+	flag.DurationVar(&biosSettingsTimeoutExpiry, "bios-settings-timeout-expiry", 30*time.Minute,
+		"Timeout for BIOS settings application before the task is considered expired.")
+	flag.DurationVar(&rebootTimeoutExpiry, "reboot-timeout-expiry", 10*time.Minute,
+		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -193,17 +214,6 @@ func main() {
 		}
 	}
 
-	var bmcProtocolScheme metalv1alpha1.ProtocolScheme
-	switch bmcProtocol {
-	case "http":
-		bmcProtocolScheme = metalv1alpha1.HTTPProtocolScheme
-	case "https":
-		bmcProtocolScheme = metalv1alpha1.HTTPSProtocolScheme
-	default:
-		setupLog.Error(nil, "Invalid --bmc-protocol value. Must be 'http' or 'https'", "bmc-protocol", bmcProtocol)
-		os.Exit(1)
-	}
-
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
 	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
@@ -243,10 +253,12 @@ func main() {
 			config.GetCertificate = webhookCertWatcher.GetCertificate
 		})
 	}
-
-	webhookServer := webhook.NewServer(webhook.Options{
-		TLSOpts: webhookTLSOpts,
-	})
+	enableWebhooks = os.Getenv("ENABLE_WEBHOOKS") != "false"
+	if enableWebhooks {
+		webhookServer = webhook.NewServer(webhook.Options{
+			TLSOpts: webhookTLSOpts,
+		})
+	}
 
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
@@ -321,6 +333,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := promsink.NewFirmwareStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
+		setupLog.Error(err, "Failed to register FirmwareStateCollector")
+		os.Exit(1)
+	}
+	if err := promsink.NewSettingsStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
+		setupLog.Error(err, "Failed to register SettingsStateCollector")
+		os.Exit(1)
+	}
+
 	if err = (&vendorconsolectrl.ConsoleReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -358,25 +379,178 @@ func main() {
 		setupLog.Error(err, "Unable to create ServerWiring controller")
 		os.Exit(1)
 	}
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&maintenancev1alpha1.ServerMaintenance{},
+		"spec.serverRef.name",
+		func(rawObj client.Object) []string {
+			m, ok := rawObj.(*maintenancev1alpha1.ServerMaintenance)
+			if !ok {
+				return nil
+			}
+			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
+				return []string{m.Spec.ServerRef.Name}
+			}
+			return nil
+		}); err != nil {
+		setupLog.Error(err, "Unable to set up ServerMaintenance field indexer")
+		os.Exit(1)
+	}
+
+	if err = (&maintenancectrl.ServerMaintenanceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create ServerMaintenance controller")
+		os.Exit(1)
+	}
+
+	accessor := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
+	bmcOpts := metalv1alpha1bmc.Options{
+		BasicAuth:            true,
+		PowerPollingInterval: 5 * time.Second,
+		PowerPollingTimeout:  2 * time.Minute,
+	}
+	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
+
+	if err = (&baseboardctrl.BMCSettingsReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		BMCOptions:                  bmcOpts,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BMCSettings controller")
+		os.Exit(1)
+	}
+
+	if err = (&baseboardctrl.BMCVersionReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		BMCOptions:                  bmcOpts,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BMCVersion controller")
+		os.Exit(1)
+	}
+
+	if err = (&baseboardctrl.BMCSettingsSetReconciler{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ResyncInterval: resyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BMCSettingsSet controller")
+		os.Exit(1)
+	}
+
+	if err = (&baseboardctrl.BMCVersionSetReconciler{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ResyncInterval: resyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BMCVersionSet controller")
+		os.Exit(1)
+	}
+
+	if err = (&systemctrl.BIOSSettingsReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		BMCOptions:                  bmcOpts,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		TimeoutExpiry:               biosSettingsTimeoutExpiry,
+		RebootTimeoutExpiry:         rebootTimeoutExpiry,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BIOSSettings controller")
+		os.Exit(1)
+	}
+
+	if err = (&systemctrl.BIOSVersionReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		BMCOptions:                  bmcOpts,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		RebootTimeoutExpiry:         rebootTimeoutExpiry,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BIOSVersion controller")
+		os.Exit(1)
+	}
+
+	if err = (&systemctrl.BIOSSettingsSetReconciler{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ResyncInterval: resyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BIOSSettingsSet controller")
+		os.Exit(1)
+	}
+
+	if err = (&systemctrl.BIOSVersionSetReconciler{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ResyncInterval: resyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create BIOSVersionSet controller")
+		os.Exit(1)
+	}
+
+	if enableWebhooks {
+		if err = maintenancewebhook.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BMCSettings webhook")
+			os.Exit(1)
+		}
+
+		if err = maintenancewebhook.SetupBMCVersionWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BMCVersion webhook")
+			os.Exit(1)
+		}
+
+		if err = maintenancewebhook.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BIOSSettings webhook")
+			os.Exit(1)
+		}
+
+		if err = maintenancewebhook.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
+			os.Exit(1)
+		}
+	}
+
 	if err = (&baseboardctrl.BMCUserReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
-		DefaultProtocol:    bmcProtocolScheme,
-		SkipCertValidation: bmcSkipCertValidation,
-		BMCOptions: bmc.Options{
-			BasicAuth:            true,
-			PowerPollingInterval: bmcPowerPollingInterval,
-			PowerPollingTimeout:  bmcPowerPollingTimeout,
-		},
+		DefaultProtocol:    protocol,
+		SkipCertValidation: skipCertValidation,
+		BMCOptions:         bmcOpts,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BMCUser controller")
+		setupLog.Error(err, "Failed to create BMCUser controller")
 		os.Exit(1)
 	}
+
 	if err = (&baseboardctrl.BMCUserSetReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create BMCUserSet controller")
+		setupLog.Error(err, "Failed to create BMCUserSet controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -1,0 +1,126 @@
+// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+)
+
+// BIOSVersionState describes the current state of a BIOSVersion.
+type BIOSVersionState string
+
+const (
+	// BIOSVersionStatePending specifies that the BIOS upgrade is waiting.
+	BIOSVersionStatePending BIOSVersionState = "Pending"
+	// BIOSVersionStateInProgress specifies that upgrading BIOS is in progress.
+	BIOSVersionStateInProgress BIOSVersionState = "InProgress"
+	// BIOSVersionStateCompleted specifies that the BIOS upgrade has been completed.
+	BIOSVersionStateCompleted BIOSVersionState = "Completed"
+	// BIOSVersionStateFailed specifies that the BIOS upgrade has failed.
+	BIOSVersionStateFailed BIOSVersionState = "Failed"
+)
+
+// BIOSVersionTemplate defines the desired BIOS firmware version and upgrade parameters.
+type BIOSVersionTemplate struct {
+	// Version specifies the BIOS version to upgrade to.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies.
+	// +optional
+	UpdatePolicy *api.UpdatePolicy `json:"updatePolicy,omitempty"`
+
+	// Image specifies the image to use to upgrade to the given BIOS version.
+	// +required
+	Image api.ImageSpec `json:"image"`
+
+	// ServerMaintenancePolicy is a maintenance policy to be enforced on the server.
+	// +optional
+	ServerMaintenancePolicy *maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+
+	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
+	// +optional
+	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
+}
+
+// BIOSVersionSpec defines the desired state of BIOSVersion.
+// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
+type BIOSVersionSpec struct {
+	// BIOSVersionTemplate defines the template for Version to be applied on the servers.
+	BIOSVersionTemplate `json:",inline"`
+
+	// ServerMaintenanceRef is a reference to a ServerMaintenance object that the controller has requested for the referred server.
+	// +optional
+	ServerMaintenanceRef *metalv1alpha1.ObjectReference `json:"serverMaintenanceRef,omitempty"`
+
+	// ServerRef is a reference to a specific server to apply the BIOS upgrade on.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="serverRef is immutable"
+	// +required
+	ServerRef *corev1.LocalObjectReference `json:"serverRef"`
+}
+
+// BIOSVersionStatus defines the observed state of BIOSVersion.
+type BIOSVersionStatus struct {
+	// State represents the current state of the BIOS upgrade task.
+	// +optional
+	State BIOSVersionState `json:"state,omitempty"`
+
+	// UpgradeTask contains the state of the Upgrade Task created by the BMC.
+	// +optional
+	UpgradeTask *api.Task `json:"upgradeTask,omitempty"`
+
+	// FailedAttempts is the number of automatic retry attempts made after failure.
+	// +optional
+	FailedAttempts int32 `json:"failedAttempts,omitempty"`
+
+	// ObservedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Conditions represents the latest available observations of the BIOS version upgrade state.
+	// +patchStrategy=merge
+	// +patchMergeKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster,shortName=biosv
+// +kubebuilder:printcolumn:name="BIOSVersion",type=string,JSONPath=`.spec.version`
+// +kubebuilder:printcolumn:name="UpdatePolicy",type=string,JSONPath=`.spec.updatePolicy`
+// +kubebuilder:printcolumn:name="ServerRef",type=string,JSONPath=`.spec.serverRef.name`
+// +kubebuilder:printcolumn:name="ServerMaintenanceRef",type=string,JSONPath=`.spec.serverMaintenanceRef.name`
+// +kubebuilder:printcolumn:name="TaskState",type=string,JSONPath=`.status.upgradeTask.state`
+// +kubebuilder:printcolumn:name="TaskStatus",type=string,JSONPath=`.status.upgradeTask.status`
+// +kubebuilder:printcolumn:name="TaskProgress",type=integer,JSONPath=`.status.upgradeTask.percentageComplete`
+// +kubebuilder:printcolumn:name="State",type="string",JSONPath=`.status.state`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+
+// BIOSVersion is the Schema for the biosversions API.
+type BIOSVersion struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   BIOSVersionSpec   `json:"spec,omitempty"`
+	Status BIOSVersionStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// BIOSVersionList contains a list of BIOSVersion.
+type BIOSVersionList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []BIOSVersion `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&BIOSVersion{}, &BIOSVersionList{})
+}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
+	serverMaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/hwmgr/mock"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -36,6 +37,8 @@ const (
 	pollingInterval      = 50 * time.Millisecond
 	eventuallyTimeout    = 5 * time.Second
 	consistentlyDuration = 1 * time.Second
+
+	testGenerateName = "test-"
 
 	sanitizationNamespace = "metal-maintenance-sanitization"
 	sanitizationImage     = "metal-maintenance-sanitization:latest"
@@ -78,6 +81,7 @@ var _ = BeforeSuite(func() {
 
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(readinessv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	Expect(serverMaintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -101,14 +105,58 @@ var _ = BeforeSuite(func() {
 	}()
 })
 
-func SetupNamespace() *corev1.Namespace {
+// Option configures a manager during SetupTest.
+type Option func(ctx SpecContext, mgr ctrl.Manager) error
+
+// WithServerMaintenanceController registers the ServerMaintenanceReconciler and its field index.
+func WithServerMaintenanceController() Option {
+	return func(ctx SpecContext, mgr ctrl.Manager) error {
+		if err := mgr.GetFieldIndexer().IndexField(ctx, &serverMaintenancev1alpha1.ServerMaintenance{}, serverRefField, func(rawObj client.Object) []string {
+			m, ok := rawObj.(*serverMaintenancev1alpha1.ServerMaintenance)
+			if !ok {
+				return nil
+			}
+			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
+				return []string{m.Spec.ServerRef.Name}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		return (&ServerMaintenanceReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr)
+	}
+}
+
+// WithServerSanitizationController registers the ServerSanitizationReconciler.
+func WithServerSanitizationController() Option {
+	return func(_ SpecContext, mgr ctrl.Manager) error {
+		return (&ServerSanitizationReconciler{
+			Client:                mgr.GetClient(),
+			Scheme:                mgr.GetScheme(),
+			SanitizationNamespace: sanitizationNamespace,
+			SanitizationImage:     sanitizationImage,
+			SanitizationIgnitionProvider: func(
+				ctx context.Context,
+				server *metalv1alpha1.Server,
+				sanitizationUID string,
+			) ([]byte, error) {
+				return fmt.Appendf(nil, "%s/%s", server.UID, sanitizationUID), nil
+			},
+		}).SetupWithManager(mgr)
+	}
+}
+
+func SetupTest(opts ...Option) *corev1.Namespace {
 	ns := &corev1.Namespace{}
 	BeforeEach(func(ctx SpecContext) {
 		mgrCtx, cancel := context.WithCancel(context.Background())
 		DeferCleanup(cancel)
 
 		*ns = corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"},
+			ObjectMeta: metav1.ObjectMeta{GenerateName: testGenerateName},
 		}
 		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
 		DeferCleanup(k8sClient.Delete, ns)
@@ -122,19 +170,9 @@ func SetupNamespace() *corev1.Namespace {
 		})
 		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
-		Expect((&ServerSanitizationReconciler{
-			Client:                k8sManager.GetClient(),
-			Scheme:                k8sManager.GetScheme(),
-			SanitizationNamespace: sanitizationNamespace,
-			SanitizationImage:     sanitizationImage,
-			SanitizationIgnitionProvider: func(
-				ctx context.Context,
-				server *metalv1alpha1.Server,
-				sanitizationUID string,
-			) ([]byte, error) {
-				return fmt.Appendf(nil, "%s/%s", server.UID, sanitizationUID), nil
-			},
-		}).SetupWithManager(k8sManager)).To(Succeed())
+		for _, opt := range opts {
+			Expect(opt(ctx, k8sManager)).To(Succeed())
+		}
 
 		go func() {
 			defer GinkgoRecover()

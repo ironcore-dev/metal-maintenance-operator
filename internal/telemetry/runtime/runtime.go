@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/stmcginnis/gofish"
-	"github.com/stmcginnis/gofish/schemas"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -49,12 +49,11 @@ type Options struct {
 	SubscriberID string
 
 	// EnableCriticalEventHandler turns on the Critical-event → Server
-	// condition writer: registers a Server field indexer on
-	// spec.bmcRef.name.
+	// condition writer
 	EnableCriticalEventHandler bool
 }
 
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;patch
@@ -88,21 +87,25 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		return fmt.Errorf("init test-event sink: %w", err)
 	}
 
+	// Register the Server-by-BMCRef index unconditionally: the subscription
+	// reconciler uses it to look up Server.status.manufacturer/model when
+	// BMC.status.manufacturer is empty (e.g. Dell BMCs).
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&metalv1alpha1.Server{},
+		criticalevent.BMCRefField,
+		func(obj client.Object) []string {
+			s := obj.(*metalv1alpha1.Server)
+			if s.Spec.BMCRef == nil {
+				return nil
+			}
+			return []string{s.Spec.BMCRef.Name}
+		},
+	); err != nil {
+		return fmt.Errorf("index Server by %s: %w", criticalevent.BMCRefField, err)
+	}
+
 	if opts.EnableCriticalEventHandler {
-		if err := mgr.GetFieldIndexer().IndexField(
-			context.Background(),
-			&metalv1alpha1.Server{},
-			criticalevent.BMCRefField,
-			func(obj client.Object) []string {
-				s := obj.(*metalv1alpha1.Server)
-				if s.Spec.BMCRef == nil {
-					return nil
-				}
-				return []string{s.Spec.BMCRef.Name}
-			},
-		); err != nil {
-			return fmt.Errorf("index Server by %s: %w", criticalevent.BMCRefField, err)
-		}
 		handler := &criticalevent.ConditionHandler{
 			Client: mgr.GetClient(),
 			Log:    ctrl.Log.WithName("telemetry").WithName("readiness"),
@@ -241,7 +244,7 @@ func (c *extendedClient) ListEventSubscriptions(_ context.Context) ([]subscripti
 	return out, nil
 }
 
-func (c *extendedClient) SubmitTestEvent(_ context.Context, messageId string) error {
+func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions.TestEventParams) error {
 	svc := c.api.GetService()
 	if svc == nil {
 		return fmt.Errorf("submit test event: no service root")
@@ -250,11 +253,34 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, messageId string) er
 	if err != nil {
 		return fmt.Errorf("submit test event: event service: %w", err)
 	}
-	_, err = es.SubmitTestEvent(&schemas.EventServiceSubmitTestEventParameters{
-		MessageID: messageId,
-		Message:   "metal-maintenance-operator pipeline health check",
-		Severity:  "Informational",
-	})
+	if es.SubmitTestEventTarget == "" {
+		return fmt.Errorf("submit test event: no target URL")
+	}
+
+	// Build the payload manually. gofish's EventServiceSubmitTestEventParameters
+	// uses omitempty on MessageArgs (iLO rejects absent field). OriginOfCondition
+	// is sent as a plain string: HPE and Lenovo require it in that form (iLO/XCC
+	// reject the {"@odata.id": ...} link-object form with a type error). Dell
+	// rows omit OriginOfCondition entirely via config, so the format never
+	// matters for Dell.
+	payload := map[string]any{
+		"EventId":        "1",
+		"EventTimestamp": time.Now().UTC().Format(time.RFC3339),
+		"MessageId":      params.MessageId,
+		"Message":        "metal-maintenance-operator pipeline health check",
+		"MessageArgs":    []string{},
+	}
+	if params.Severity != "" {
+		payload["Severity"] = params.Severity
+	}
+	if params.OriginOfCondition != "" {
+		payload["OriginOfCondition"] = params.OriginOfCondition
+	}
+
+	resp, err := c.api.Post(es.SubmitTestEventTarget, payload)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	return err
 }
 
@@ -270,6 +296,20 @@ func (f *subscriptionClientFactory) NewClient(ctx context.Context, r *subscripti
 	if err != nil {
 		return nil, err
 	}
+	return wrapClient(base)
+}
+
+// NewTestEventClient wraps an already-connected metalbmc.BMC (e.g. from
+// metalbmc.NewRedfishBMCClient) into a subscriptions.Client. It exists for
+// callers outside the controller-runtime reconcile loop — such as CLI
+// tooling under hack/ — that want to invoke SubmitTestEvent through the
+// exact same code path the operator's health check uses, without needing
+// a *subscriptions.Resolved / metalv1alpha1.BMC object.
+func NewTestEventClient(base metalbmc.BMC) (subscriptions.Client, error) {
+	return wrapClient(base)
+}
+
+func wrapClient(base metalbmc.BMC) (subscriptions.Client, error) {
 	accessor, ok := base.(interface{ Client() *gofish.APIClient })
 	if !ok {
 		return nil, fmt.Errorf("bmc client %T does not expose Client() *gofish.APIClient; "+

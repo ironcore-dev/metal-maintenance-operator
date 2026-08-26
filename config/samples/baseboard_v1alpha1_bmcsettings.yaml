@@ -1,0 +1,15 @@
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCSettings
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: bmcsettings-sample
+spec:
+  bmcRef:
+    name: endpoint-sample
+  version: 1.45.455b66-rev4
+  serverMaintenancePolicy: Enforced
+  settings:
+    bootMode: "UEFI"
+    hyperThreading: "Enabled"

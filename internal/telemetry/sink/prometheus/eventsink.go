@@ -147,6 +147,15 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 		if seenIDs.contains(ev.EventID) {
 			continue
 		}
+		// Only count actionable alerts. Subscription lifecycle events
+		// (ResourceEvent.ResourceCreated/Removed) have empty or "OK"
+		// severity and generate thousands of low-value series. Unknown
+		// vendor-specific severities (e.g. "Fatal") are kept — they
+		// represent real alerts outside the standard Redfish enum.
+		sev := canonicalSeverity(ev.Severity)
+		if sev == "" || sev == "OK" || sev == "Info" {
+			continue
+		}
 		if s.OnCritical != nil && strings.EqualFold(ev.Severity, severityCritical) {
 			// Defer commit until OnCritical succeeds — see method doc.
 			toDispatch = append(toDispatch, ev)

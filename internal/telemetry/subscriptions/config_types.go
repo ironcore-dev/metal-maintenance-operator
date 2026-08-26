@@ -65,4 +65,24 @@ type HardwareMatch struct {
 	// delivery. Must be a semver string if set. BMCs below this version
 	// are not subscribed.
 	MinFirmware string `yaml:"minFirmware,omitempty"`
+
+	// TestMessageId is the Redfish MessageId sent in SubmitTestEvent. Required
+	// when testEventInterval is set. Must match the registry format accepted by
+	// this vendor's firmware (e.g. "iLO.2.2.PowerSystemBoot" for HPE,
+	// "SYS.1.0.SYS1000" for newer Dell iDRAC).
+	TestMessageId string `yaml:"testMessageId,omitempty"`
+	// TestSeverity is the Severity value sent in SubmitTestEvent. Passed
+	// through as-is; empty omits the field from the request entirely (some
+	// iDRAC/Lenovo firmware rejects unknown action parameters). HPE iLO
+	// requires this field to be set — leaving it empty will cause
+	// SubmitTestEvent to be rejected. Older Redfish implementations may
+	// only accept "OK", "Warning", or "Critical"; newer ones also accept
+	// "Informational".
+	TestSeverity string `yaml:"testSeverity,omitempty"`
+	// TestOriginOfCondition is the OriginOfCondition URI sent in
+	// SubmitTestEvent, as a plain string (HPE iLO and Lenovo XCC reject
+	// the Redfish {"@odata.id": ...} link-object form with a type error).
+	// When empty the field is omitted entirely — required for Dell and
+	// Lenovo compatibility. HPE iLO requires this field to be set.
+	TestOriginOfCondition string `yaml:"testOriginOfCondition,omitempty"`
 }

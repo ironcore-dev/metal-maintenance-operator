@@ -56,6 +56,7 @@ type BMCUserReconciler struct {
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=endpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -68,6 +69,8 @@ func (r *BMCUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.reconcileExists(ctx, user)
 }
 
+// reconcileExists routes the BMCUser to deletion handling when it is being
+// deleted, or to normal reconciliation otherwise.
 func (r *BMCUserReconciler) reconcileExists(ctx context.Context, user *baseboardv1alpha1.BMCUser) (ctrl.Result, error) {
 	if !user.DeletionTimestamp.IsZero() {
 		return r.delete(ctx, user)
@@ -75,6 +78,9 @@ func (r *BMCUserReconciler) reconcileExists(ctx context.Context, user *baseboard
 	return r.reconcile(ctx, user)
 }
 
+// reconcile ensures the BMC account for the BMCUser exists on the referenced
+// BMC, keeps the associated BMCSecret and effective secret reference up to date,
+// manages the finalizer, and drives password rotation.
 func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alpha1.BMCUser) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if user.Spec.BMCRef == nil {
@@ -134,6 +140,9 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	return r.handleRotatingPassword(ctx, user, bmcObj, bmcClient)
 }
 
+// patchUserStatus looks up the BMC account matching the user's UserName and
+// patches the BMCUser status with the account ID, optional last-rotation time,
+// and password expiration reported by the BMC.
 func (r *BMCUserReconciler) patchUserStatus(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcClient bmc.BMC, lastRotation metav1.Time) error {
 	log := ctrl.LoggerFrom(ctx)
 	accounts, err := bmcClient.GetAccounts()
@@ -166,6 +175,10 @@ func (r *BMCUserReconciler) patchUserStatus(ctx context.Context, user *baseboard
 	return nil
 }
 
+// handleRotatingPassword rotates the BMC account password when the rotation
+// period has elapsed or the rotate-credentials operation annotation is set,
+// generating a new password, updating the account and secret, and requeuing for
+// the next rotation.
 func (r *BMCUserReconciler) handleRotatingPassword(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	forceRotation := false
@@ -226,6 +239,9 @@ func (r *BMCUserReconciler) handleRotatingPassword(ctx context.Context, user *ba
 	return ctrl.Result{}, nil
 }
 
+// ensureBMCSecretForUser generates a password, creates a BMCSecret to hold the
+// credentials, and links it to the BMCUser via its BMCSecret reference when the
+// user does not yet have one.
 func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClient bmc.BMC, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.Info("No BMCSecret reference set for User, creating a new one")
@@ -247,6 +263,8 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	return nil
 }
 
+// handleUpdatedSecretRef applies the credentials from a newly referenced
+// BMCSecret to the BMC account and records the secret as the effective one.
 func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcSecret *metalv1alpha1.BMCSecret, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("BMCSecret credentials have changed, updating BMC user")
@@ -260,6 +278,8 @@ func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *ba
 	return nil
 }
 
+// createBMCSecretForUser builds a BMCSecret (owned by the BMCUser) populated
+// with the user's name and the given password.
 func (r *BMCUserReconciler) createBMCSecretForUser(ctx context.Context, user *baseboardv1alpha1.BMCUser, password string) (*metalv1alpha1.BMCSecret, error) {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("Creating BMCSecret for User")
@@ -283,6 +303,8 @@ func (r *BMCUserReconciler) createBMCSecretForUser(ctx context.Context, user *ba
 	return secret, nil
 }
 
+// setBMCUserSecretRef patches the BMCUser to reference the given BMCSecret as
+// its desired credentials secret.
 func (r *BMCUserReconciler) setBMCUserSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, secret *metalv1alpha1.BMCSecret) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("Setting BMCSecret reference for User", "User", user.Name)
@@ -294,6 +316,8 @@ func (r *BMCUserReconciler) setBMCUserSecretRef(ctx context.Context, user *baseb
 	return nil
 }
 
+// setEffectiveSecretRef records in the BMCUser status which BMCSecret currently
+// holds the credentials that are known to work against the BMC.
 func (r *BMCUserReconciler) setEffectiveSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, secret *metalv1alpha1.BMCSecret) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("Setting effective BMCSecret")
@@ -305,6 +329,8 @@ func (r *BMCUserReconciler) setEffectiveSecretRef(ctx context.Context, user *bas
 	return nil
 }
 
+// getBMCClient builds an authenticated BMC client for the given BMC using the
+// reconciler's default protocol, certificate validation, and BMC options.
 func (r *BMCUserReconciler) getBMCClient(ctx context.Context, bmcObj *metalv1alpha1.BMC) (bmc.BMC, error) {
 	bmcClient, err := bmcutils.GetBMCClientFromBMC(ctx, r.Client, bmcObj, r.DefaultProtocol, r.SkipCertValidation, r.BMCOptions)
 	if err != nil {
@@ -313,6 +339,9 @@ func (r *BMCUserReconciler) getBMCClient(ctx context.Context, bmcObj *metalv1alp
 	return bmcClient, nil
 }
 
+// updateEffectiveSecret validates the credentials in the user's referenced
+// BMCSecret against the BMC and promotes it to the effective secret when it
+// works, so the status always points at credentials that authenticate.
 func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 	if user.Spec.BMCSecretRef == nil || user.Status.ID == "" {
@@ -361,6 +390,9 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 	return nil
 }
 
+// bmcConnectionTest reports whether the credentials in the given BMCSecret are
+// rejected by the BMC. It returns true when authentication fails (HTTP 401/403)
+// and false when the credentials are accepted.
 func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metalv1alpha1.BMCSecret, bmcObj *metalv1alpha1.BMC) (bool, error) {
 	protocolScheme := bmcutils.GetProtocolScheme(bmcObj.Spec.Protocol.Scheme, r.DefaultProtocol)
 	address, err := bmcutils.GetBMCAddressForBMC(ctx, r.Client, bmcObj)
@@ -390,6 +422,9 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 	return false, nil
 }
 
+// delete removes the BMC account for the BMCUser from its referenced BMC (if
+// still present) and clears the finalizer so the object can be garbage
+// collected.
 func (r *BMCUserReconciler) delete(ctx context.Context, user *baseboardv1alpha1.BMCUser) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if user.Spec.BMCRef == nil {

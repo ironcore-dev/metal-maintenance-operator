@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// configKey is the well-known ConfigMap data key the loader reads.
-const configKey = "config.yaml"
+// ConfigKey is the well-known ConfigMap data key the loader reads.
+const ConfigKey = "config.yaml"
 
 // ConfigLoader watches the telemetry ConfigMap and atomic-swaps a
 // *subscriptions.Config pointer on every change. The most-recent
@@ -52,6 +52,16 @@ func (l *ConfigLoader) Start(ctx context.Context) error {
 	}
 	if l.Namespace == "" || l.Name == "" {
 		return errors.New("ConfigLoader: Namespace and Name are required")
+	}
+
+	// Wait for the cache to be populated before the initial read; without
+	// this the cache-backed client returns "not ready" and the load is
+	// silently deferred until the first watch event.
+	if !l.Cache.WaitForCacheSync(ctx) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("ConfigLoader: cache sync timed out or context cancelled")
 	}
 
 	if err := l.reload(ctx); err != nil {
@@ -99,9 +109,9 @@ func (l *ConfigLoader) reload(ctx context.Context) error {
 		}
 		return fmt.Errorf("get ConfigMap %s/%s: %w", l.Namespace, l.Name, err)
 	}
-	raw, ok := cm.Data[configKey]
+	raw, ok := cm.Data[ConfigKey]
 	if !ok {
-		return fmt.Errorf("ConfigMap %s/%s is missing key %q", l.Namespace, l.Name, configKey)
+		return fmt.Errorf("ConfigMap %s/%s is missing key %q", l.Namespace, l.Name, ConfigKey)
 	}
 	cfg, errList := subscriptions.Parse([]byte(raw))
 	if len(errList) > 0 {

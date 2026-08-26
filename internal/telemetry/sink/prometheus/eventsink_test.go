@@ -110,6 +110,37 @@ func matchesEvent(m *dto.Metric, hostname, severity, messageID, component string
 
 // -- tests --
 
+func TestEventSink_SeverityFilter_DropsNonAlerts(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSink(reg)
+	if err != nil {
+		t.Fatalf("NewEventSink: %v", err)
+	}
+
+	_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		// Subscription lifecycle noise — must be dropped.
+		{EventID: "rc1", MessageID: "ResourceEvent.1.0.ResourceCreated", Severity: ""},
+		{EventID: "rc2", MessageID: "ResourceEvent.1.0.ResourceRemoved", Severity: "OK"},
+		{EventID: "rc3", MessageID: "ResourceEvent.1.0.ResourceChanged", Severity: "Info"},
+		// Real alerts — must be counted.
+		{EventID: "w1", MessageID: "Fan.Degraded", Severity: "Warning"},
+		{EventID: "c1", MessageID: "IPMI.1.0.PSGoodToBad", Severity: "Critical"},
+		// Case variants of real severities must also be counted.
+		{EventID: "w2", MessageID: "Fan.Degraded2", Severity: "warning"},
+		{EventID: "c2", MessageID: "IPMI.1.0.PSGoodToBad2", Severity: "critical"},
+	})
+
+	if got := gatherEventCount(t, reg); got != 4 {
+		t.Errorf("series count: got %d, want 4 (Warning+Critical only)", got)
+	}
+	if v := sumEventValue(t, reg, bmc1, "Warning"); v != 2 {
+		t.Errorf("Warning total: got %v, want 2", v)
+	}
+	if v := sumEventValue(t, reg, bmc1, "Critical"); v != 2 {
+		t.Errorf("Critical total: got %v, want 2", v)
+	}
+}
+
 func TestEventSink_PublishEvents_CountsOnce(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	s, err := psink.NewEventSink(reg)

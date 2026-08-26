@@ -32,3 +32,7 @@ dist/chart/charts/
 
 # Local telemetry collector binary for smoke tests; not part of the source tree.
 /telemetry-collector
+
+# Local server lists for hack/verify-test-events contain real BMC credentials.
+hack/verify-test-events/servers.local.yaml
+hack/verify-test-events/*.local.yaml

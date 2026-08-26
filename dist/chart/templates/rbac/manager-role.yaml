@@ -33,8 +33,12 @@ rules:
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
+  - bmcsettings
+  - bmcsettingssets
   - bmcusers
   - bmcusersets
+  - bmcversions
+  - bmcversionsets
   verbs:
   - create
   - delete
@@ -46,15 +50,61 @@ rules:
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
+  - bmcsettings/finalizers
+  - bmcsettingssets/finalizers
   - bmcusers/finalizers
   - bmcusersets/finalizers
+  - bmcversions/finalizers
+  - bmcversionsets/finalizers
   verbs:
   - update
 - apiGroups:
   - baseboard.metal.ironcore.dev
   resources:
+  - bmcsettings/status
+  - bmcsettingssets/status
   - bmcusers/status
   - bmcusersets/status
+  - bmcversions/status
+  - bmcversionsets/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - maintenance.metal.ironcore.dev
+  resources:
+  - servermaintenances/status
   verbs:
   - get
   - patch
@@ -63,9 +113,12 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcs
+  - servers
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - metal.ironcore.dev
@@ -77,6 +130,7 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcsecrets
+  - serverbootconfigurations
   - serverclaims
   verbs:
   - create
@@ -89,12 +143,10 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - servers
+  - endpoints
   verbs:
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - metal.ironcore.dev
@@ -126,6 +178,41 @@ rules:
   - readiness.metal.ironcore.dev
   resources:
   - serverwirings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings
+  - biossettingssets
+  - biosversions
+  - biosversionsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings/finalizers
+  - biossettingssets/finalizers
+  - biosversions/finalizers
+  - biosversionsets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - system.metal.ironcore.dev
+  resources:
+  - biossettings/status
+  - biossettingssets/status
+  - biosversions/status
+  - biosversionsets/status
   verbs:
   - get
   - patch
