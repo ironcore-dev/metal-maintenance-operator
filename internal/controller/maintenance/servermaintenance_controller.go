@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -63,7 +64,7 @@ func (r *ServerMaintenanceReconciler) reconcileExists(ctx context.Context, maint
 }
 
 func (r *ServerMaintenanceReconciler) reconcile(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	log.V(1).Info("Reconciling ServerMaintenance")
 
 	if maintenance.Spec.ServerRef == nil {
@@ -87,7 +88,7 @@ func (r *ServerMaintenanceReconciler) reconcile(ctx context.Context, maintenance
 	// and assigns it to itself, causing some other maintenance to be InMaintenance.
 	// In this case, we should not reconcile the maintenance because it is not the one holding the maintenance on server.
 	if owner, ok := server.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; ok && owner != serverMaintenanceOwnerKey(maintenance) {
-		log.V(1).Info("Server is already in maintenance with other tasks", "Server", server.Name)
+		log.V(1).Info("Server owned by another ServerMaintenance, skipping", "Server", server.Name)
 		if maintenance.Status.State != serverMaintenancev1alpha1.ServerMaintenanceStatePending {
 			if modified, err := r.patchMaintenanceState(ctx, maintenance, serverMaintenancev1alpha1.ServerMaintenanceStatePending); err != nil || modified {
 				return ctrl.Result{}, err
@@ -109,7 +110,7 @@ func (r *ServerMaintenanceReconciler) reconcile(ctx context.Context, maintenance
 }
 
 func (r *ServerMaintenanceReconciler) ensureServerMaintenanceStateTransition(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	switch maintenance.Status.State {
 	case serverMaintenancev1alpha1.ServerMaintenanceStatePending:
 		return r.handlePendingState(ctx, maintenance)
@@ -124,7 +125,7 @@ func (r *ServerMaintenanceReconciler) ensureServerMaintenanceStateTransition(ctx
 }
 
 func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (result ctrl.Result, err error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -257,7 +258,7 @@ func shouldRunBefore(a, b *serverMaintenancev1alpha1.ServerMaintenance) bool {
 }
 
 func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 
 	server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
 	if err != nil {
@@ -301,7 +302,7 @@ func serverMaintenanceOwnerKey(maintenance *serverMaintenancev1alpha1.ServerMain
 // annotation), so ownership is tracked here via controllerutils.ServerMaintenanceOwnerAnnotation
 // to preserve the same "single active claimant" semantics ServerMaintenanceRef used to give us.
 func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 
 	latest := &metalv1alpha1.Server{}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(server), latest); err != nil {
@@ -312,7 +313,21 @@ func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, mai
 	if owner, ok := latest.GetAnnotations()[controllerutils.ServerMaintenanceOwnerAnnotation]; ok {
 		*server = *latest
 		if owner == key {
-			log.V(1).Info("Server is already owned by this maintenance", "Server", latest.Name)
+			if latest.Status.State == metalv1alpha1.ServerStateParked ||
+				latest.GetAnnotations()[metalv1alpha1.OperationAnnotation] == metalv1alpha1.OperationAnnotationPark {
+				log.V(1).Info("Server is already owned by this maintenance", "Server", latest.Name)
+				return true, nil
+			}
+			metav1.SetMetaDataAnnotation(&latest.ObjectMeta, metalv1alpha1.OperationAnnotation, metalv1alpha1.OperationAnnotationPark)
+			if err := r.Update(ctx, latest); err != nil {
+				if apierrors.IsConflict(err) {
+					log.V(1).Info("Conflict while re-requesting park for owned Server, will retry", "Server", latest.Name)
+					return false, nil
+				}
+				return false, fmt.Errorf("failed to re-request park for server: %w", err)
+			}
+			*server = *latest
+			log.V(1).Info("Re-requested Server park for this maintenance", "Server", latest.Name)
 			return true, nil
 		}
 		log.V(1).Info("Server is already owned by another ServerMaintenance", "Server", latest.Name, "Owner", owner)
@@ -335,13 +350,13 @@ func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, mai
 }
 
 func (r *ServerMaintenanceReconciler) handleFailedState(ctx context.Context, _ *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	log.V(1).Info("Reconciled ServerMaintenance in Failed state")
 	return ctrl.Result{}, nil
 }
 
 func (r *ServerMaintenanceReconciler) delete(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	log.V(1).Info("Deleting ServerMaintenance")
 	if !controllerutil.ContainsFinalizer(maintenance, serverMaintenanceFinalizer) {
 		return ctrl.Result{}, nil
@@ -371,7 +386,7 @@ func (r *ServerMaintenanceReconciler) delete(ctx context.Context, maintenance *s
 }
 
 func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) error {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	if server == nil {
 		return nil
 	}
@@ -480,7 +495,7 @@ func (r *ServerMaintenanceReconciler) patchMaintenanceState(ctx context.Context,
 
 func (r *ServerMaintenanceReconciler) enqueueMaintenanceByServerRefs() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []reconcile.Request {
-		log := ctrl.LoggerFrom(ctx)
+		log := log.FromContext(ctx)
 		server, ok := object.(*metalv1alpha1.Server)
 		if !ok {
 			log.Error(nil, "Expected object to be a Server", "object", object)
@@ -516,7 +531,7 @@ func (r *ServerMaintenanceReconciler) enqueueMaintenanceByServerRefs() handler.E
 
 func (r *ServerMaintenanceReconciler) enqueueMaintenanceByClaimRefs() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []reconcile.Request {
-		log := ctrl.LoggerFrom(ctx)
+		log := log.FromContext(ctx)
 		claim, ok := object.(*metalv1alpha1.ServerClaim)
 		if !ok {
 			log.Error(nil, "Expected object to be a ServerClaim", "object", object)

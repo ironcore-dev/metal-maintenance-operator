@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	"github.com/ironcore-dev/controller-utils/conditionutils"
@@ -886,7 +887,7 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 }
 
 func (r *BMCSettingsReconciler) checkIfMaintenanceGranted(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	if settings.Spec.ServerMaintenanceRefs == nil {
 		return false, nil
 	}
@@ -914,7 +915,7 @@ func (r *BMCSettingsReconciler) checkIfMaintenanceGranted(ctx context.Context, s
 			return false, fmt.Errorf("failed to get ServerMaintenance %s/%s: %w", item.ServerMaintenanceRef.Namespace, item.ServerMaintenanceRef.Name, err)
 		}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
-			log.V(1).Info("ServerMaintenance not yet InMaintenance", "ServerMaintenance", serverMaintenance.Name, "State", serverMaintenance.Status.State)
+			log.V(1).Info("ServerMaintenance did not reach InMaintenance state", "ServerMaintenance", serverMaintenance.Name, "State", serverMaintenance.Status.State)
 			notInMaintenanceState = append(notInMaintenanceState, serverMaintenance.Name)
 		}
 	}

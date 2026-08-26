@@ -558,6 +558,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		Expect(k8sClient.Delete(ctx, maintenance01)).To(Succeed())
 
 		By("Verifying server transitions to Parked for the second maintenance (no gap)")
+		Consistently(Object(server)).Should(HaveField("Status.State", metalv1alpha1.ServerStateParked))
 		Eventually(Object(server)).Should(testutils.ServerParkedFor(maintenance02))
 		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 

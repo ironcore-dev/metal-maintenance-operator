@@ -277,7 +277,7 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// rely on Status.PowerState reflecting the change without waiting for the
 	// Server to leave the Parked state first.
 	if err := r.updateServerStatus(ctx, bmcClient, server); err != nil {
-		log.V(1).Info("sim-server: failed to update server status, will retry", "error", err)
+		log.V(1).Info("Server status update failed, will retry", "error", err)
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 
@@ -428,7 +428,7 @@ func (r *ServerReconciler) syncParkedState(ctx context.Context, bmcClient bmc.BM
 		if err := r.removeServerOperationAnnotation(ctx, server); err != nil {
 			return false, err
 		}
-		log.V(1).Info("sim-server: unparked", "Server", server.Name)
+		log.V(1).Info("Server unparked", "Server", server.Name)
 		return true, nil
 	}
 
@@ -442,7 +442,7 @@ func (r *ServerReconciler) syncParkedState(ctx context.Context, bmcClient bmc.BM
 			return true, nil
 		}
 		if server.Status.State != metalv1alpha1.ServerStateAvailable && server.Status.State != metalv1alpha1.ServerStateReserved {
-			log.V(1).Info("sim-server: park requested but server is not in a parkable state, deferring", "Server", server.Name, "State", server.Status.State)
+			log.V(1).Info("Server park deferred, not in parkable state", "Server", server.Name, "State", server.Status.State)
 			return true, nil
 		}
 		// Query the live BMC power state rather than trusting server.Status.PowerState:
@@ -452,12 +452,12 @@ func (r *ServerReconciler) syncParkedState(ctx context.Context, bmcClient bmc.BM
 		// issuing redundant PowerOff calls forever.
 		systemInfo, err := bmcClient.GetSystemInfo(ctx, server.Spec.SystemURI)
 		if err != nil {
-			log.V(1).Info("sim-server: failed to get system info while parking, will retry", "error", err)
+			log.V(1).Info("Server system info fetch failed while parking, will retry", "error", err)
 			return true, nil
 		}
 		if metalv1alpha1.ServerPowerState(systemInfo.PowerState) != metalv1alpha1.ServerOffPowerState {
 			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
-				log.V(1).Info("sim-server: failed to power off for parking, will retry", "error", err)
+				log.V(1).Info("Server power-off failed while parking, will retry", "error", err)
 			}
 			return true, nil
 		}
@@ -469,7 +469,7 @@ func (r *ServerReconciler) syncParkedState(ctx context.Context, bmcClient bmc.BM
 		if err := r.removeServerOperationAnnotation(ctx, server); err != nil {
 			return false, err
 		}
-		log.V(1).Info("sim-server: parked", "Server", server.Name)
+		log.V(1).Info("Server parked", "Server", server.Name)
 		return true, nil
 	}
 

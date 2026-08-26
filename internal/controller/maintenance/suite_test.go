@@ -166,7 +166,11 @@ func SetupTest(opts ...Option) *corev1.Namespace {
 	ns := &corev1.Namespace{}
 	BeforeEach(func(ctx SpecContext) {
 		mgrCtx, cancel := context.WithCancel(context.Background())
-		DeferCleanup(cancel)
+		mgrDone := make(chan struct{})
+		DeferCleanup(func() {
+			cancel()
+			<-mgrDone
+		})
 
 		*ns = corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{GenerateName: testGenerateName},
@@ -231,6 +235,7 @@ func SetupTest(opts ...Option) *corev1.Namespace {
 
 		go func() {
 			defer GinkgoRecover()
+			defer close(mgrDone)
 			Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start manager")
 		}()
 	})

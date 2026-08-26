@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -512,7 +513,7 @@ func (r *BMCVersionReconciler) getBMCVersionFromBMC(ctx context.Context, bmcClie
 }
 
 func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bmcClient bmc.BMC, bmcVersion *baseboardv1alpha1.BMCVersion) bool {
-	log := ctrl.LoggerFrom(ctx)
+	log := log.FromContext(ctx)
 	// todo length
 	if bmcVersion.Spec.ServerMaintenanceRefs == nil {
 		return true
@@ -539,7 +540,7 @@ func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bm
 			return false
 		}
 		if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
-			log.V(1).Info("ServerMaintenance not yet InMaintenance", "ServerMaintenance", maintenance.Name, "State", maintenance.Status.State)
+			log.V(1).Info("ServerMaintenance did not reach InMaintenance state", "ServerMaintenance", maintenance.Name, "State", maintenance.Status.State)
 			return false
 		}
 	}
