@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -513,7 +513,7 @@ func (r *BMCVersionReconciler) getBMCVersionFromBMC(ctx context.Context, bmcClie
 }
 
 func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bmcClient bmc.BMC, bmcVersion *baseboardv1alpha1.BMCVersion) bool {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	// todo length
 	if bmcVersion.Spec.ServerMaintenanceRefs == nil {
 		return true

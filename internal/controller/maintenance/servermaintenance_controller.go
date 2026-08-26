@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -64,7 +64,7 @@ func (r *ServerMaintenanceReconciler) reconcileExists(ctx context.Context, maint
 }
 
 func (r *ServerMaintenanceReconciler) reconcile(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	log.V(1).Info("Reconciling ServerMaintenance")
 
 	if maintenance.Spec.ServerRef == nil {
@@ -110,7 +110,7 @@ func (r *ServerMaintenanceReconciler) reconcile(ctx context.Context, maintenance
 }
 
 func (r *ServerMaintenanceReconciler) ensureServerMaintenanceStateTransition(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	switch maintenance.Status.State {
 	case serverMaintenancev1alpha1.ServerMaintenanceStatePending:
 		return r.handlePendingState(ctx, maintenance)
@@ -125,7 +125,7 @@ func (r *ServerMaintenanceReconciler) ensureServerMaintenanceStateTransition(ctx
 }
 
 func (r *ServerMaintenanceReconciler) handlePendingState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (result ctrl.Result, err error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -258,7 +258,7 @@ func shouldRunBefore(a, b *serverMaintenancev1alpha1.ServerMaintenance) bool {
 }
 
 func (r *ServerMaintenanceReconciler) handleInMaintenanceState(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
 	server, err := controllerutils.GetServerByName(ctx, r.Client, maintenance.Spec.ServerRef.Name)
 	if err != nil {
@@ -302,7 +302,7 @@ func serverMaintenanceOwnerKey(maintenance *serverMaintenancev1alpha1.ServerMain
 // annotation), so ownership is tracked here via controllerutils.ServerMaintenanceOwnerAnnotation
 // to preserve the same "single active claimant" semantics ServerMaintenanceRef used to give us.
 func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) (bool, error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
 	latest := &metalv1alpha1.Server{}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(server), latest); err != nil {
@@ -350,13 +350,13 @@ func (r *ServerMaintenanceReconciler) requestServerPark(ctx context.Context, mai
 }
 
 func (r *ServerMaintenanceReconciler) handleFailedState(ctx context.Context, _ *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	log.V(1).Info("Reconciled ServerMaintenance in Failed state")
 	return ctrl.Result{}, nil
 }
 
 func (r *ServerMaintenanceReconciler) delete(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	log.V(1).Info("Deleting ServerMaintenance")
 	if !controllerutil.ContainsFinalizer(maintenance, serverMaintenanceFinalizer) {
 		return ctrl.Result{}, nil
@@ -386,7 +386,7 @@ func (r *ServerMaintenanceReconciler) delete(ctx context.Context, maintenance *s
 }
 
 func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *serverMaintenancev1alpha1.ServerMaintenance, server *metalv1alpha1.Server) error {
-	log := log.FromContext(ctx)
+	log := logf.FromContext(ctx)
 	if server == nil {
 		return nil
 	}
@@ -498,7 +498,7 @@ func (r *ServerMaintenanceReconciler) patchMaintenanceState(ctx context.Context,
 
 func (r *ServerMaintenanceReconciler) enqueueMaintenanceByServerRefs() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []reconcile.Request {
-		log := log.FromContext(ctx)
+		log := logf.FromContext(ctx)
 		server, ok := object.(*metalv1alpha1.Server)
 		if !ok {
 			log.Error(nil, "Expected object to be a Server", "object", object)
@@ -534,7 +534,7 @@ func (r *ServerMaintenanceReconciler) enqueueMaintenanceByServerRefs() handler.E
 
 func (r *ServerMaintenanceReconciler) enqueueMaintenanceByClaimRefs() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []reconcile.Request {
-		log := log.FromContext(ctx)
+		log := logf.FromContext(ctx)
 		claim, ok := object.(*metalv1alpha1.ServerClaim)
 		if !ok {
 			log.Error(nil, "Expected object to be a ServerClaim", "object", object)
