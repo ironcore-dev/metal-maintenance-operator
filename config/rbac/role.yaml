@@ -29,6 +29,7 @@ rules:
   resources:
   - bmcsettings
   - bmcsettingssets
+  - bmcusers
   - bmcversions
   - bmcversionsets
   verbs:
@@ -44,6 +45,7 @@ rules:
   resources:
   - bmcsettings/finalizers
   - bmcsettingssets/finalizers
+  - bmcusers/finalizers
   - bmcversions/finalizers
   - bmcversionsets/finalizers
   verbs:
@@ -53,6 +55,7 @@ rules:
   resources:
   - bmcsettings/status
   - bmcsettingssets/status
+  - bmcusers/status
   - bmcversions/status
   - bmcversionsets/status
   verbs:
@@ -118,13 +121,6 @@ rules:
   - metal.ironcore.dev
   resources:
   - bmcsecrets
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
   - serverbootconfigurations
   - serverclaims
   verbs:
@@ -134,6 +130,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
+  - endpoints
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - metal.ironcore.dev

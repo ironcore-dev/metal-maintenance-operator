@@ -15,6 +15,7 @@ Package v1alpha1 contains API Schema definitions for the baseboard.metal.ironcor
 ### Resource Types
 - [BMCSettings](#bmcsettings)
 - [BMCSettingsSet](#bmcsettingsset)
+- [BMCUser](#bmcuser)
 - [BMCVersion](#bmcversion)
 - [BMCVersionSet](#bmcversionset)
 
@@ -195,6 +196,66 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+
+
+#### BMCUser
+
+
+
+BMCUser is the Schema for the bmcusers API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `BMCUser` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[BMCUserSpec](#bmcuserspec)_ |  |  |  |
+| `status` _[BMCUserStatus](#bmcuserstatus)_ |  |  |  |
+
+
+#### BMCUserSpec
+
+
+
+BMCUserSpec defines the desired state of BMCUser.
+
+
+
+_Appears in:_
+- [BMCUser](#bmcuser)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `userName` _string_ | UserName is the username of the BMC user. |  |  |
+| `roleID` _string_ | RoleID is the ID of the role to assign to the user. |  |  |
+| `description` _string_ | Description is a description for the BMC user. |  |  |
+| `rotationPeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | RotationPeriod defines how often the password should be rotated.<br />If not set, the password will not be rotated. |  |  |
+| `bmcSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCSecretRef references the BMCSecret containing the credentials for this user.<br />If not set, the operator will generate a secure password based on BMC manufacturer requirements. |  |  |
+| `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef references the BMC this user should be created on. |  |  |
+
+
+#### BMCUserStatus
+
+
+
+BMCUserStatus defines the observed state of BMCUser.
+
+
+
+_Appears in:_
+- [BMCUser](#bmcuser)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `effectiveBMCSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | EffectiveBMCSecretRef references the BMCSecret currently used for this user.<br />This may differ from Spec.BMCSecretRef if the operator generated a password. |  |  |
+| `lastRotation` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastRotation is the timestamp of the last password rotation. |  |  |
+| `passwordExpiration` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | PasswordExpiration is the timestamp when the password will expire. |  |  |
+| `id` _string_ | ID is the identifier of the user in the BMC system. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the current state of the BMCUser. |  |  |
 
 
 #### BMCVersion
