@@ -530,6 +530,11 @@ func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bm
 		return false
 	}
 
+	serverNames := make(map[string]struct{}, len(servers))
+	for _, s := range servers {
+		serverNames[s.Name] = struct{}{}
+	}
+
 	// The ServerMaintenance controller is solely responsible for requesting and confirming
 	// that the Server is actually Parked before moving to InMaintenance, and for keeping
 	// both in sync afterwards, so we only need to trust its reported state here.
@@ -537,6 +542,14 @@ func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bm
 		maintenance, err := utils.GetServerMaintenanceForObjectReference(ctx, r.Client, &ref)
 		if err != nil {
 			log.Error(err, "Failed to get referenced ServerMaintenance", "ServerMaintenance", ref.Name)
+			return false
+		}
+		if maintenance.Spec.ServerRef == nil || maintenance.Spec.ServerRef.Name == "" {
+			log.V(1).Info("ServerMaintenance has no ServerRef", "ServerMaintenance", maintenance.Name)
+			return false
+		}
+		if _, ok := serverNames[maintenance.Spec.ServerRef.Name]; !ok {
+			log.V(1).Info("ServerMaintenance references a server not managed by this BMC", "ServerMaintenance", maintenance.Name, "Server", maintenance.Spec.ServerRef.Name)
 			return false
 		}
 		if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {

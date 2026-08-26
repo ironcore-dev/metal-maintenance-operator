@@ -445,17 +445,9 @@ func (r *ServerReconciler) syncParkedState(ctx context.Context, bmcClient bmc.BM
 			log.V(1).Info("Server park deferred, not in parkable state", "Server", server.Name, "State", server.Status.State)
 			return true, nil
 		}
-		// Query the live BMC power state rather than trusting server.Status.PowerState:
-		// that field is only refreshed at the end of Reconcile, which never runs while
-		// a park request is pending (this function always requeues in that case), so it
-		// would otherwise never observe the power-off triggered below and would keep
-		// issuing redundant PowerOff calls forever.
-		systemInfo, err := bmcClient.GetSystemInfo(ctx, server.Spec.SystemURI)
-		if err != nil {
-			log.V(1).Info("Server system info fetch failed while parking, will retry", "error", err)
-			return true, nil
-		}
-		if metalv1alpha1.ServerPowerState(systemInfo.PowerState) != metalv1alpha1.ServerOffPowerState {
+		// server.Status.PowerState is already refreshed by updateServerStatus at the top
+		// of Reconcile before syncParkedState is called, so it reflects the current BMC state.
+		if server.Status.PowerState != metalv1alpha1.ServerOffPowerState {
 			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
 				log.V(1).Info("Server power-off failed while parking, will retry", "error", err)
 			}

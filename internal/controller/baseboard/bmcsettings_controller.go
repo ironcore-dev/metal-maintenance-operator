@@ -902,17 +902,31 @@ func (r *BMCSettingsReconciler) checkIfMaintenanceGranted(ctx context.Context, s
 		return false, nil
 	}
 
+	serverNames := make(map[string]struct{}, len(servers))
+	for _, s := range servers {
+		serverNames[s.Name] = struct{}{}
+	}
+
 	// The ServerMaintenance controller is solely responsible for requesting and confirming
 	// that each Server is actually Parked before moving to InMaintenance, and for keeping
 	// both in sync afterwards, so we only need to trust its reported state here.
 	notInMaintenanceState := make([]string, 0, len(settings.Spec.ServerMaintenanceRefs))
 	for _, item := range settings.Spec.ServerMaintenanceRefs {
 		if item.ServerMaintenanceRef == nil {
-			continue
+			log.V(1).Info("Nil ServerMaintenanceRef entry in ServerMaintenanceRefs")
+			return false, nil
 		}
 		serverMaintenance, err := utils.GetServerMaintenanceForObjectReference(ctx, r.Client, item.ServerMaintenanceRef)
 		if err != nil {
 			return false, fmt.Errorf("failed to get ServerMaintenance %s/%s: %w", item.ServerMaintenanceRef.Namespace, item.ServerMaintenanceRef.Name, err)
+		}
+		if serverMaintenance.Spec.ServerRef == nil || serverMaintenance.Spec.ServerRef.Name == "" {
+			log.V(1).Info("ServerMaintenance has no ServerRef", "ServerMaintenance", serverMaintenance.Name)
+			return false, nil
+		}
+		if _, ok := serverNames[serverMaintenance.Spec.ServerRef.Name]; !ok {
+			log.V(1).Info("ServerMaintenance references a server not managed by this BMC", "ServerMaintenance", serverMaintenance.Name, "Server", serverMaintenance.Spec.ServerRef.Name)
+			return false, nil
 		}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 			log.V(1).Info("ServerMaintenance did not reach InMaintenance state", "ServerMaintenance", serverMaintenance.Name, "State", serverMaintenance.Status.State)

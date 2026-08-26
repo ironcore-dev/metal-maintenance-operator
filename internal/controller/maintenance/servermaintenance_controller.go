@@ -395,63 +395,66 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 		if err := r.unparkServerForMaintenance(ctx, server); err != nil {
 			return fmt.Errorf("failed to request unpark for Server: %w", err)
 		}
-		if server.Spec.MaintenanceBootConfigurationRef != nil {
-			config := &metalv1alpha1.ServerBootConfiguration{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      server.Spec.MaintenanceBootConfigurationRef.Name,
-					Namespace: server.Spec.MaintenanceBootConfigurationRef.Namespace,
-				},
-			}
-			if err := r.Delete(ctx, config); err != nil {
-				if !apierrors.IsNotFound(err) {
-					return fmt.Errorf("failed to delete ServerBootConfiguration: %w", err)
-				}
-				log.V(1).Info("ServerBootConfiguration already deleted", "Config", client.ObjectKeyFromObject(config))
-			}
-			if err := r.removeBootConfigRefFromServer(ctx, config, server); err != nil {
-				return fmt.Errorf("failed to remove ServerMaintenance boot config ref from Server: %w", err)
-			}
-			log.V(1).Info("Removed ServerMaintenance boot configuration ref from Server", "Server", server.Name)
-		}
+	}
 
-		if server.Spec.ServerClaimRef == nil {
-			return nil
+	// Boot config and claim-label cleanup run outside the ownership guard so a retry
+	// after unparkServerForMaintenance removes the owner annotation still completes them.
+	if server.Spec.MaintenanceBootConfigurationRef != nil {
+		config := &metalv1alpha1.ServerBootConfiguration{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      server.Spec.MaintenanceBootConfigurationRef.Name,
+				Namespace: server.Spec.MaintenanceBootConfigurationRef.Namespace,
+			},
 		}
-		serverMaintenancesList := &serverMaintenancev1alpha1.ServerMaintenanceList{}
-		if err := r.List(ctx, serverMaintenancesList, client.MatchingFields{serverRefField: server.Name}); err != nil {
-			return fmt.Errorf("failed to list ServerMaintenances for Server %s: %w", server.Name, err)
+		if err := r.Delete(ctx, config); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete ServerBootConfiguration: %w", err)
+			}
+			log.V(1).Info("ServerBootConfiguration already deleted", "Config", client.ObjectKeyFromObject(config))
 		}
-		activeItems := serverMaintenancesList.Items[:0]
-		for i := range serverMaintenancesList.Items {
-			m := &serverMaintenancesList.Items[i]
-			if m.Name == maintenance.Name && m.Namespace == maintenance.Namespace {
-				continue
-			}
-			if !m.DeletionTimestamp.IsZero() {
-				continue
-			}
-			activeItems = append(activeItems, *m)
+		if err := r.removeBootConfigRefFromServer(ctx, config, server); err != nil {
+			return fmt.Errorf("failed to remove ServerMaintenance boot config ref from Server: %w", err)
 		}
-		serverMaintenancesList.Items = activeItems
-		if len(serverMaintenancesList.Items) == 0 {
-			serverClaim := &metalv1alpha1.ServerClaim{}
-			if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.ServerClaimRef.Name, Namespace: server.Spec.ServerClaimRef.Namespace}, serverClaim); err != nil {
-				if apierrors.IsNotFound(err) {
-					return nil
-				}
-				return fmt.Errorf("failed to get ServerClaim: %w", err)
-			}
-			serverClaimBase := serverClaim.DeepCopy()
-			metautils.DeleteLabels(serverClaim, []string{
-				serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey,
-				serverMaintenancev1alpha1.ServerMaintenanceNeededLabelKey,
-			})
-			if err := r.Patch(ctx, serverClaim, client.MergeFrom(serverClaimBase)); err != nil {
-				return fmt.Errorf("failed to patch ServerClaim labels: %w", err)
-			}
-		} else {
-			log.V(1).Info("Postponing the removal of approval labels as other maintenances are in queue", "Server", server.Name)
+		log.V(1).Info("Removed ServerMaintenance boot configuration ref from Server", "Server", server.Name)
+	}
+
+	if server.Spec.ServerClaimRef == nil {
+		return nil
+	}
+	serverMaintenancesList := &serverMaintenancev1alpha1.ServerMaintenanceList{}
+	if err := r.List(ctx, serverMaintenancesList, client.MatchingFields{serverRefField: server.Name}); err != nil {
+		return fmt.Errorf("failed to list ServerMaintenances for Server %s: %w", server.Name, err)
+	}
+	activeItems := serverMaintenancesList.Items[:0]
+	for i := range serverMaintenancesList.Items {
+		m := &serverMaintenancesList.Items[i]
+		if m.Name == maintenance.Name && m.Namespace == maintenance.Namespace {
+			continue
 		}
+		if !m.DeletionTimestamp.IsZero() {
+			continue
+		}
+		activeItems = append(activeItems, *m)
+	}
+	serverMaintenancesList.Items = activeItems
+	if len(serverMaintenancesList.Items) == 0 {
+		serverClaim := &metalv1alpha1.ServerClaim{}
+		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.ServerClaimRef.Name, Namespace: server.Spec.ServerClaimRef.Namespace}, serverClaim); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to get ServerClaim: %w", err)
+		}
+		serverClaimBase := serverClaim.DeepCopy()
+		metautils.DeleteLabels(serverClaim, []string{
+			serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey,
+			serverMaintenancev1alpha1.ServerMaintenanceNeededLabelKey,
+		})
+		if err := r.Patch(ctx, serverClaim, client.MergeFrom(serverClaimBase)); err != nil {
+			return fmt.Errorf("failed to patch ServerClaim labels: %w", err)
+		}
+	} else {
+		log.V(1).Info("Postponing the removal of approval labels as other maintenances are in queue", "Server", server.Name)
 	}
 	return nil
 }
