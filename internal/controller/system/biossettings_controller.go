@@ -1308,13 +1308,16 @@ func (r *BIOSSettingsReconciler) isServerInMaintenance(ctx context.Context, sett
 		return false
 	}
 
-	if server.Status.State == metalv1alpha1.ServerStateMaintenance {
-		if server.Spec.ServerMaintenanceRef == nil || server.Spec.ServerMaintenanceRef.Name != settings.Spec.ServerMaintenanceRef.Name || server.Spec.ServerMaintenanceRef.Namespace != settings.Spec.ServerMaintenanceRef.Namespace {
-			log.V(1).Info("Server is already in maintenance", "Server", server.Name)
-			return false
-		}
-	} else {
-		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "State", server.Status.State)
+	// The ServerMaintenance controller is solely responsible for requesting and confirming
+	// that the Server is actually Parked before moving to InMaintenance, and for keeping
+	// both in sync afterwards, so we only need to trust its reported state here.
+	maintenance, err := utils.GetServerMaintenanceForObjectReference(ctx, r.Client, settings.Spec.ServerMaintenanceRef)
+	if err != nil {
+		log.V(1).Info("Failed to get referenced ServerMaintenance", "ServerMaintenance", settings.Spec.ServerMaintenanceRef.Name, "error", err)
+		return false
+	}
+	if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
+		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "ServerMaintenanceState", maintenance.Status.State)
 		return false
 	}
 
@@ -1552,9 +1555,6 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByServerRefs(ctx context.Con
 	reqs := make([]ctrl.Request, 0, len(settingsList.Items))
 	for _, settings := range settingsList.Items {
 		if settings.Spec.ServerMaintenanceRef == nil ||
-			(server.Spec.ServerMaintenanceRef != nil &&
-				(server.Spec.ServerMaintenanceRef.Name != settings.Spec.ServerMaintenanceRef.Name ||
-					server.Spec.ServerMaintenanceRef.Namespace != settings.Spec.ServerMaintenanceRef.Namespace)) ||
 			settings.Status.State == systemv1alpha1.BIOSSettingsStateApplied ||
 			settings.Status.State == systemv1alpha1.BIOSSettingsStateFailed {
 			continue

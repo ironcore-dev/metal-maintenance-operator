@@ -7,7 +7,9 @@ import (
 	"github.com/ironcore-dev/controller-utils/metautils"
 	serverMaintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -25,28 +27,74 @@ const (
 var _ = Describe("ServerMaintenance Controller", func() {
 	ns := SetupTest(WithServerMaintenanceController())
 
-	var server *metalv1alpha1.Server
+	var (
+		server    *metalv1alpha1.Server
+		bmcObj    *metalv1alpha1.BMC
+		bmcSecret *metalv1alpha1.BMCSecret
+	)
 
 	BeforeEach(func(ctx SpecContext) {
-		By("Creating a Server")
-		server = &metalv1alpha1.Server{
+		By("Creating a BMCSecret")
+		bmcSecret = &metalv1alpha1.BMCSecret{
 			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "test-maintenance-",
+				GenerateName: "test-bmc-secret-",
 			},
-			Spec: metalv1alpha1.ServerSpec{
-				SystemUUID: "38947555-7742-3448-3784-823347823834",
+			Data: map[string][]byte{
+				metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+				metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
 			},
 		}
-		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+		Expect(k8sClient.Create(ctx, bmcSecret)).To(Succeed())
 
-		By("Patching server to a non-Initial state so the SM controller reacts")
+		By("Creating a BMC resource")
+		bmcObj = &metalv1alpha1.BMC{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-",
+			},
+			Spec: metalv1alpha1.BMCSpec{
+				Endpoint: &metalv1alpha1.InlineEndpoint{
+					IP:         metalv1alpha1.MustParseIP(BMCMockServerIP),
+					MACAddress: "23:11:8A:33:CF:EA",
+				},
+				Protocol: metalv1alpha1.Protocol{
+					Name: metalv1alpha1.ProtocolRedfishLocal,
+					Port: BMCMockServerPort,
+				},
+				BMCSecretRef: corev1.LocalObjectReference{
+					Name: bmcSecret.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcObj)).To(Succeed())
+
+		// The shared testutils.BMCReconciler/ServerReconciler test simulator
+		// (also used by the baseboard/system packages) discovers this Server from
+		// the mock Redfish server and later confirms Park/Unpark requests against
+		// it, so ServerMaintenanceReconciler's real annotation-driven handshake is
+		// exercised the same way it would be against a real cluster.
+		By("Waiting for the Server to be discovered")
+		server = &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmcObj),
+			},
+		}
+		Eventually(Get(server)).Should(Succeed())
+
+		By("Patching server to Available so the SM controller can park it")
 		Eventually(UpdateStatus(server, func() {
-			server.Status.State = metalv1alpha1.ServerStateDiscovery
+			server.Status.State = metalv1alpha1.ServerStateAvailable
 		})).Should(Succeed())
 	})
 
 	AfterEach(func(ctx SpecContext) {
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, bmcObj))).To(Succeed())
+		// The simulated BMC controller may re-discover/patch the Server while a
+		// reconcile is mid-flight, so the Server may already be gone or still
+		// being recreated by the time we get here; EnsureCleanState below
+		// converges cleanup regardless.
 		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server))).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, bmcSecret))).To(Succeed())
+		EnsureCleanState()
 	})
 
 	It("should force a Server into maintenance with Enforced policy", func(ctx SpecContext) {
@@ -71,18 +119,14 @@ var _ = Describe("ServerMaintenance Controller", func() {
 			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
 
-		By("Checking the Server has ServerMaintenanceRef set")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef.Name", serverMaintenance.Name),
-		))
+		By("Checking the Server is Parked and owned by the maintenance")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		By("Deleting the ServerMaintenance to finish the maintenance on the server")
 		Expect(k8sClient.Delete(ctx, serverMaintenance)).To(Succeed())
 
-		By("Checking the Server's ServerMaintenanceRef is cleared")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
-		))
+		By("Checking the Server is unparked")
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should wait to put a Server into maintenance until approval", func(ctx SpecContext) {
@@ -148,9 +192,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		))
 
 		By("Checking the Server is not yet in maintenance")
-		Consistently(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
-		))
+		Consistently(Object(server)).Should(testutils.ServerNotParked)
 
 		By("Approving the maintenance")
 		Eventually(Update(serverClaim, func() {
@@ -162,10 +204,8 @@ var _ = Describe("ServerMaintenance Controller", func() {
 			serverMaintenancev1alpha1.ServerMaintenanceApprovedLabelKey: trueValue,
 		}
 
-		By("Checking the Server has ServerMaintenanceRef set")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef.Name", serverMaintenance.Name),
-		))
+		By("Checking the Server is Parked and owned by the maintenance")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		By("Checking the ServerMaintenance is InMaintenance")
 		Eventually(Object(serverMaintenance)).Should(SatisfyAll(
@@ -180,10 +220,8 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		By("Deleting ServerMaintenance to finish the maintenance")
 		Expect(k8sClient.Delete(ctx, serverMaintenance)).To(Succeed())
 
-		By("Checking the Server's ServerMaintenanceRef is cleared")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
-		))
+		By("Checking the Server is unparked")
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 
 		By("Checking the ServerClaim maintenance labels are cleaned up")
 		Eventually(Object(serverClaim)).Should(SatisfyAll(
@@ -205,10 +243,8 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, serverMaintenance01)).To(Succeed())
 
-		By("Checking the first ServerMaintenance is InMaintenance and server ref is set")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef.Name", serverMaintenance01.Name),
-		))
+		By("Checking the first ServerMaintenance is InMaintenance and the Server is Parked for it")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance01))
 		Eventually(Object(serverMaintenance01)).Should(SatisfyAll(
 			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		))
@@ -242,10 +278,8 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		By("Deleting the second ServerMaintenance")
 		Expect(k8sClient.Delete(ctx, serverMaintenance02)).To(Succeed())
 
-		By("Ensuring the Server's ServerMaintenanceRef is cleared")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
-		))
+		By("Ensuring the Server is unparked")
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should prioritize higher-priority maintenance for the same server", func(ctx SpecContext) {
@@ -303,7 +337,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Ensuring high-priority maintenance starts first")
-		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", highPriorityMaintenance.Name))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(highPriorityMaintenance))
 		Eventually(Object(highPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 		Consistently(Object(lowPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
@@ -369,7 +403,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Ensuring maintenance with explicit priority runs before unset priority")
-		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", setPriorityMaintenance.Name))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(setPriorityMaintenance))
 		Eventually(Object(setPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 		Consistently(Object(unsetPriorityMaintenance)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
@@ -403,6 +437,10 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		Eventually(Object(serverMaintenance)).Should(
 			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
+
+		By("Deleting the BMC first so its discovery loop stops recreating the Server")
+		Expect(k8sClient.Delete(ctx, bmcObj)).To(Succeed())
+		Eventually(Get(bmcObj)).Should(Satisfy(apierrors.IsNotFound))
 
 		By("Deleting the Server before deleting the ServerMaintenance")
 		Expect(k8sClient.Delete(ctx, server)).To(Succeed())
@@ -440,13 +478,9 @@ var _ = Describe("ServerMaintenance Controller", func() {
 			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
-		By("Verifying the Server's ServerMaintenanceRef points to the first maintenance")
-		Eventually(Object(server)).Should(
-			HaveField("Spec.ServerMaintenanceRef.Name", serverMaintenance01.Name),
-		)
-		Consistently(Object(server)).Should(
-			HaveField("Spec.ServerMaintenanceRef.Name", serverMaintenance01.Name),
-		)
+		By("Verifying the Server is Parked for the first maintenance")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance01))
+		Consistently(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance01))
 
 		By("Creating second Enforced ServerMaintenance for the same server")
 		serverMaintenance02 := &serverMaintenancev1alpha1.ServerMaintenance{
@@ -477,10 +511,8 @@ var _ = Describe("ServerMaintenance Controller", func() {
 			HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance),
 		)
 
-		By("Verifying the Server's ServerMaintenanceRef is still held by the first maintenance")
-		Consistently(Object(server)).Should(
-			HaveField("Spec.ServerMaintenanceRef.Name", serverMaintenance01.Name),
-		)
+		By("Verifying the Server is still Parked for the first maintenance")
+		Consistently(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance01))
 
 		By("Deleting the first ServerMaintenance to release the server")
 		Expect(k8sClient.Delete(ctx, serverMaintenance01)).To(Succeed())
@@ -516,7 +548,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		Expect(k8sClient.Create(ctx, maintenance02)).To(Succeed())
 
 		By("Waiting for the first maintenance to be active")
-		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance01.Name))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(maintenance01))
 		Eventually(Object(maintenance01)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Ensuring the second maintenance is pending while first is active")
@@ -525,18 +557,17 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		By("Completing the first maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance01)).To(Succeed())
 
-		By("Verifying server's ref transitions to the second maintenance (no ref gap)")
-		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance02.Name))
+		By("Verifying server transitions to Parked for the second maintenance (no gap)")
+		Consistently(Object(server)).Should(HaveField("Status.State", metalv1alpha1.ServerStateParked))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(maintenance02))
 		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Completing the second maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance02)).To(Succeed())
 		Eventually(Get(maintenance02)).Should(Satisfy(apierrors.IsNotFound))
 
-		By("Verifying server ServerMaintenanceRef is cleared after all maintenances are done")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
-		))
+		By("Verifying Server is unparked after all maintenances are done")
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should keep reserved server in Maintenance throughout all queued OwnerApproval maintenances and return after all are done", func(ctx SpecContext) {
@@ -592,7 +623,7 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		})).Should(Succeed())
 
 		By("Ensuring the higher-priority maintenance starts first")
-		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance01.Name))
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(maintenance01))
 		Eventually(Object(maintenance01)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 		Consistently(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStatePending))
 
@@ -600,18 +631,16 @@ var _ = Describe("ServerMaintenance Controller", func() {
 		Expect(k8sClient.Delete(ctx, maintenance01)).To(Succeed())
 		Eventually(Get(maintenance01)).Should(Satisfy(apierrors.IsNotFound))
 
-		By("Verifying server ref transitions to the second maintenance (no bounce)")
-		Eventually(Object(server)).Should(HaveField("Spec.ServerMaintenanceRef.Name", maintenance02.Name))
+		By("Verifying server transitions to Parked for the second maintenance (no bounce)")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(maintenance02))
 		Eventually(Object(maintenance02)).Should(HaveField("Status.State", serverMaintenancev1alpha1.ServerMaintenanceStateInMaintenance))
 
 		By("Completing the second maintenance")
 		Expect(k8sClient.Delete(ctx, maintenance02)).To(Succeed())
 		Eventually(Get(maintenance02)).Should(Satisfy(apierrors.IsNotFound))
 
-		By("Verifying server ServerMaintenanceRef is cleared after all maintenances are done")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
-		))
+		By("Verifying Server is unparked after all maintenances are done")
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 
 		By("Verifying approval and maintenance-needed labels are cleaned up on the ServerClaim")
 		Eventually(Object(serverClaim)).Should(SatisfyAll(

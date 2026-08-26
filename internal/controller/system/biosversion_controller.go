@@ -250,26 +250,15 @@ func (r *BIOSVersionReconciler) handleServerMaintenance(ctx context.Context, bmc
 		return false, err
 	}
 
-	if server.Status.State != metalv1alpha1.ServerStateMaintenance {
-		log.V(1).Info("Server is not in maintenance, waiting", "ServerState", server.Status.State, "Server", server.Name)
-		if condition.Status != metav1.ConditionTrue {
-			if err := r.Conditions.Update(
-				condition,
-				conditionutils.UpdateStatus(corev1.ConditionTrue),
-				conditionutils.UpdateReason(constants.ReasonMaintenanceWaiting),
-				conditionutils.UpdateMessage(fmt.Sprintf("Waiting for approval of %v", biosVersion.Spec.ServerMaintenanceRef.Name)),
-			); err != nil {
-				return false, fmt.Errorf("failed to update creating ServerMaintenance condition: %w", err)
-			}
-			if err := r.updateStatus(ctx, biosVersion, biosVersion.Status.State, biosVersion.Status.UpgradeTask, condition); err != nil {
-				return false, fmt.Errorf("failed to patch BIOSVersion ServerMaintenance waiting conditions: %w", err)
-			}
-		}
-		return false, nil
+	// The ServerMaintenance controller is solely responsible for requesting and confirming
+	// that the Server is actually Parked before moving to InMaintenance, and for keeping
+	// both in sync afterwards, so we only need to trust its reported state here.
+	maintenance, err := utils.GetServerMaintenanceForObjectReference(ctx, r.Client, biosVersion.Spec.ServerMaintenanceRef)
+	if err != nil {
+		return false, fmt.Errorf("failed to get referenced ServerMaintenance: %w", err)
 	}
-
-	if server.Spec.ServerMaintenanceRef == nil || server.Spec.ServerMaintenanceRef.Name != biosVersion.Spec.ServerMaintenanceRef.Name || server.Spec.ServerMaintenanceRef.Namespace != biosVersion.Spec.ServerMaintenanceRef.Namespace {
-		log.V(1).Info("Server is already in maintenance", "Server", server.Name)
+	if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
+		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "ServerMaintenanceState", maintenance.Status.State)
 		if condition.Status != metav1.ConditionTrue {
 			if err := r.Conditions.Update(
 				condition,
@@ -1063,11 +1052,6 @@ func (r *BIOSVersionReconciler) enqueueBiosVersionByServerRefs(ctx context.Conte
 		return nil
 	}
 
-	// don't requeue if host does not have Maintenance
-	if host.Spec.ServerMaintenanceRef == nil {
-		return nil
-	}
-
 	biosVersionList := &systemv1alpha1.BIOSVersionList{}
 	if err := r.List(ctx, biosVersionList); err != nil {
 		log.Error(err, "Failed to list BIOSVersionList")
@@ -1082,9 +1066,6 @@ func (r *BIOSVersionReconciler) enqueueBiosVersionByServerRefs(ctx context.Conte
 		if biosVersion.Spec.ServerMaintenanceRef == nil ||
 			biosVersion.Status.State == systemv1alpha1.BIOSVersionStateCompleted ||
 			biosVersion.Status.State == systemv1alpha1.BIOSVersionStateFailed {
-			return nil
-		}
-		if biosVersion.Spec.ServerMaintenanceRef.Name != host.Spec.ServerMaintenanceRef.Name {
 			return nil
 		}
 		return []ctrl.Request{{

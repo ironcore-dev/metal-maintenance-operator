@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -512,7 +513,7 @@ func (r *BMCVersionReconciler) getBMCVersionFromBMC(ctx context.Context, bmcClie
 }
 
 func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bmcClient bmc.BMC, bmcVersion *baseboardv1alpha1.BMCVersion) bool {
-	log := ctrl.LoggerFrom(ctx)
+	log := logf.FromContext(ctx)
 	// todo length
 	if bmcVersion.Spec.ServerMaintenanceRefs == nil {
 		return true
@@ -529,29 +530,32 @@ func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bm
 		return false
 	}
 
-	notInMaintenanceState := make(map[string]bool, len(servers))
-	for _, server := range servers {
-		if server.Status.State == metalv1alpha1.ServerStateMaintenance {
-			if server.Spec.ServerMaintenanceRef == nil {
-				log.V(1).Info("Server is already in maintenance", "Server", server.Name)
-				notInMaintenanceState[server.Name] = false
-				continue
-			}
-			_, ok := r.getServerMaintenanceRefForServer(bmcVersion.Spec.ServerMaintenanceRefs, server.Spec.ServerMaintenanceRef.Name, server.Spec.ServerMaintenanceRef.Namespace)
-			if !ok {
-				log.V(1).Info("Server is already in maintenance", "Server", server.Name)
-				notInMaintenanceState[server.Name] = false
-			}
-		} else {
-			// we still need to wait for server to enter maintenance
-			log.V(1).Info("Server not yet in maintenance", "Server", server.Name)
-			notInMaintenanceState[server.Name] = false
-		}
+	serverNames := make(map[string]struct{}, len(servers))
+	for _, s := range servers {
+		serverNames[s.Name] = struct{}{}
 	}
 
-	if len(notInMaintenanceState) > 0 {
-		log.V(1).Info("Found at least one server not in maintenance")
-		return false
+	// The ServerMaintenance controller is solely responsible for requesting and confirming
+	// that the Server is actually Parked before moving to InMaintenance, and for keeping
+	// both in sync afterwards, so we only need to trust its reported state here.
+	for _, ref := range bmcVersion.Spec.ServerMaintenanceRefs {
+		maintenance, err := utils.GetServerMaintenanceForObjectReference(ctx, r.Client, &ref)
+		if err != nil {
+			log.Error(err, "Failed to get referenced ServerMaintenance", "ServerMaintenance", ref.Name)
+			return false
+		}
+		if maintenance.Spec.ServerRef == nil || maintenance.Spec.ServerRef.Name == "" {
+			log.V(1).Info("ServerMaintenance has no ServerRef", "ServerMaintenance", maintenance.Name)
+			return false
+		}
+		if _, ok := serverNames[maintenance.Spec.ServerRef.Name]; !ok {
+			log.V(1).Info("ServerMaintenance references a server not managed by this BMC", "ServerMaintenance", maintenance.Name, "Server", maintenance.Spec.ServerRef.Name)
+			return false
+		}
+		if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
+			log.V(1).Info("ServerMaintenance did not reach InMaintenance state", "ServerMaintenance", maintenance.Name, "State", maintenance.Status.State)
+			return false
+		}
 	}
 
 	return true
@@ -750,15 +754,6 @@ func (r *BMCVersionReconciler) getBMCFromBMCVersion(ctx context.Context, bmcVers
 	}
 
 	return bmcObj, nil
-}
-
-func (r *BMCVersionReconciler) getServerMaintenanceRefForServer(serverMaintenanceRefs []metalv1alpha1.ObjectReference, name, namespace string) (metalv1alpha1.ObjectReference, bool) {
-	for _, serverMaintenanceRef := range serverMaintenanceRefs {
-		if serverMaintenanceRef.Name == name && serverMaintenanceRef.Namespace == namespace {
-			return serverMaintenanceRef, true
-		}
-	}
-	return metalv1alpha1.ObjectReference{}, false
 }
 
 func (r *BMCVersionReconciler) patchBMCVersionStatusAndCondition(
@@ -1189,40 +1184,6 @@ func (r *BMCVersionReconciler) issueBMCUpgrade(
 	return errors.Join(errCond, err)
 }
 
-func (r *BMCVersionReconciler) enqueueBMCVersionByServerRefs(ctx context.Context, obj client.Object) []ctrl.Request {
-	log := ctrl.LoggerFrom(ctx)
-	host := obj.(*metalv1alpha1.Server)
-
-	// return early if hosts are not required states
-	if host.Status.State != metalv1alpha1.ServerStateMaintenance || host.Spec.ServerMaintenanceRef == nil {
-		return nil
-	}
-
-	bmcVersionList := &baseboardv1alpha1.BMCVersionList{}
-	if err := r.List(ctx, bmcVersionList); err != nil {
-		log.Error(err, "Failed to list BMCVersion")
-		return nil
-	}
-	var req []ctrl.Request
-
-	for _, bmcVersion := range bmcVersionList.Items {
-		// if we don't have maintenance request on this bmcVersion we do not want to enqueue changes from servers.
-		if bmcVersion.Spec.ServerMaintenanceRefs == nil {
-			continue
-		}
-		if bmcVersion.Status.State == baseboardv1alpha1.BMCVersionStateCompleted || bmcVersion.Status.State == baseboardv1alpha1.BMCVersionStateFailed {
-			continue
-		}
-		serverMaintenanceRef, ok := r.getServerMaintenanceRefForServer(bmcVersion.Spec.ServerMaintenanceRefs, host.Spec.ServerMaintenanceRef.Name, host.Spec.ServerMaintenanceRef.Namespace)
-		if ok && serverMaintenanceRef.Name != "" {
-			req = append(req, ctrl.Request{
-				NamespacedName: types.NamespacedName{Namespace: bmcVersion.Namespace, Name: bmcVersion.Name},
-			})
-		}
-	}
-	return req
-}
-
 func (r *BMCVersionReconciler) enqueueBMCVersionByBMCRefs(ctx context.Context, obj client.Object) []ctrl.Request {
 
 	log := ctrl.LoggerFrom(ctx)
@@ -1257,7 +1218,6 @@ func (r *BMCVersionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&baseboardv1alpha1.BMCVersion{}).
 		Owns(&maintenancev1alpha1.ServerMaintenance{}).
-		Watches(&metalv1alpha1.Server{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCVersionByServerRefs)).
 		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCVersionByBMCRefs)).
 		Complete(r)
 }

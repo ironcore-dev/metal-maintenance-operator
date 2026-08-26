@@ -22,6 +22,7 @@ import (
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
@@ -137,9 +138,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		By("Ensuring that the BMCVersion has been removed")
 		Eventually(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
 		Consistently(Get(bmcVersion)).Should(Satisfy(apierrors.IsNotFound))
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 
 	It("should successfully start and monitor upgrade task to completion", func(ctx SpecContext) {
@@ -200,10 +199,8 @@ var _ = Describe("BMCVersion Controller", func() {
 			),
 		)
 
-		By("Ensuring that Server in Maintenance state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		By("Ensuring that Server is Parked")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		ensureBMCVersionConditionTransition(acc, bmcVersion)
 
@@ -222,10 +219,8 @@ var _ = Describe("BMCVersion Controller", func() {
 
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
-		By("Ensuring that Server has left Maintenance state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		By("Ensuring that Server is no longer Parked")
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 
 		By("Deleting the BMCVersion")
 		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
@@ -331,10 +326,8 @@ var _ = Describe("BMCVersion Controller", func() {
 			metautils.SetLabel(serverClaim, maintenancev1alpha1.ServerMaintenanceApprovedLabelKey, trueValue)
 		})).Should(Succeed())
 
-		By("Ensuring that Server in Maintenance state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		By("Ensuring that Server is Parked")
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		ensureBMCVersionConditionTransition(acc, bmcVersion)
 
@@ -366,7 +359,7 @@ var _ = Describe("BMCVersion Controller", func() {
 			server.Spec.ServerClaimRef = nil
 		})).Should(Succeed())
 		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
+			testutils.ServerNotParked,
 			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateReserved))),
 		))
 	})
@@ -458,9 +451,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		By("Manually clearing spec.serverMaintenanceRefs while keeping the object alive")
 		Eventually(Update(bmcVersion, func() {
@@ -514,9 +505,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		By("Ensuring that spec.serverMaintenanceRefs is populated")
 		Eventually(Object(bmcVersion)).Should(
@@ -639,9 +628,7 @@ var _ = Describe("BMCVersion Controller", func() {
 		}
 		Eventually(Get(serverMaintenance)).Should(Succeed())
 
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-		)
+		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
 		By("Clearing spec.serverMaintenanceRefs")
 		Eventually(Update(bmcVersion, func() {
