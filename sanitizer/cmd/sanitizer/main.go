@@ -82,14 +82,30 @@ func dhConfigure(ctx context.Context) error {
 			notifyDone()
 		}
 	}()
-	select {
-	case <-ctx.Done():
+	if !finished(ctx, done) {
 		return ctx.Err()
+	}
+	// done is closed, so the goroutine's writes to succeeded and errs are visible.
+	if succeeded {
+		return nil
+	}
+	return errors.Join(errs...)
+}
+
+// finished reports whether the run's goroutine closed done before the context
+// ended. A completion that races with cancellation still counts, so a ready
+// context is a loss only when done is not also ready.
+func finished(ctx context.Context, done <-chan struct{}) bool {
+	select {
 	case <-done:
-		if succeeded {
-			return nil
+		return true
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return true
+		default:
+			return false
 		}
-		return errors.Join(errs...)
 	}
 }
 
