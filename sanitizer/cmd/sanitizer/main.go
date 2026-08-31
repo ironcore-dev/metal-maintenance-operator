@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
@@ -40,17 +39,9 @@ func dhConfigure(ctx context.Context) error {
 		return fmt.Errorf("getting interfaces: %w (available interfaces %v)", err, allIfaceNames)
 	}
 
-	var (
-		errs       []error
-		succeeded  bool
-		done       = make(chan struct{})
-		closeOnce  sync.Once
-		notifyDone = func() {
-			closeOnce.Do(func() { close(done) })
-		}
-	)
+	errs := make(chan error)
 	go func() {
-		defer notifyDone()
+		defer close(errs)
 
 		for res := range dhclient.SendRequests(ctx, ifs, true, true, dhclient.Config{
 			Timeout: 15 * time.Second,
@@ -64,49 +55,33 @@ func dhConfigure(ctx context.Context) error {
 				Port: dhcpv6.DefaultServerPort,
 			},
 		}, 30*time.Second) {
-			if succeeded {
-				continue
-			}
-
 			if res.Err != nil {
-				errs = append(errs, res.Err)
+				errs <- res.Err
 				continue
 			}
-
-			if err := res.Lease.Configure(); err != nil {
-				errs = append(errs, err)
-				continue
-			}
-
-			succeeded = true
-			notifyDone()
+			errs <- res.Lease.Configure()
 		}
 	}()
-	if !finished(ctx, done) {
-		return ctx.Err()
-	}
-	// done is closed, so the goroutine's writes to succeeded and errs are visible.
-	if succeeded {
-		return nil
-	}
-	return errors.Join(errs...)
-}
 
-// finished reports whether the run's goroutine closed done before the context
-// ended. A completion that races with cancellation still counts, so a ready
-// context is a loss only when done is not also ready.
-func finished(ctx context.Context, done <-chan struct{}) bool {
-	select {
-	case <-done:
-		return true
-	case <-ctx.Done():
-		select {
-		case <-done:
-			return true
-		default:
-			return false
+	// Drain the rest once we return so the goroutine never blocks on a send.
+	defer func() {
+		go func() {
+			for range errs {
+			}
+		}()
+	}()
+
+	var allErrs []error
+	for err := range errs {
+		if err == nil {
+			return nil
 		}
+		allErrs = append(allErrs, err)
 	}
+	if err := errors.Join(allErrs...); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func run(ctx context.Context, opts Options) error {
