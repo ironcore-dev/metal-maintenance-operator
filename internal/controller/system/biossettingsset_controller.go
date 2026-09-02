@@ -17,7 +17,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -238,12 +237,12 @@ func (r *BIOSSettingsSetReconciler) createMissingBIOSSettings(ctx context.Contex
 		if _, ok := serverWithSettings[server.Name]; !ok {
 			existingList := &systemv1alpha1.BIOSSettingsList{}
 			if err := r.List(ctx, existingList, client.MatchingFields{constants.ServerRefField: server.Name}); err != nil {
-				log.Error(err, "Error checking for existing BIOSSettings", "Server", server.Name)
+				log.Error(err, "Failed to list existing BIOSSettings", "Server", server.Name)
 				errs = append(errs, err)
 				continue
 			}
 			if len(existingList.Items) > 0 {
-				log.V(1).Info("Server already has a BIOSSettings", "Server", server.Name, "BIOSSettings", existingList.Items[0].Name)
+				log.V(1).Info("Found existing BIOSSettings for Server", "Server", server.Name, "BIOSSettings", existingList.Items[0].Name)
 				continue
 			}
 			// generate a deterministic k8s conform name, so that a re-reconcile on a
@@ -417,10 +416,6 @@ func (r *BIOSSettingsSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&systemv1alpha1.BIOSSettings{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueByServer),
-			builder.WithPredicates(predicate.Funcs{
-				UpdateFunc: func(e event.UpdateEvent) bool {
-					return utils.LabelChangeOrAnyFieldChangeInObject(e, []any{}, []any{})
-				},
-			})).
+			builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		Complete(r)
 }

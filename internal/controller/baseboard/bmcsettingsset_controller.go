@@ -22,7 +22,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
@@ -279,12 +278,12 @@ func (r *BMCSettingsSetReconciler) createMissingBMCSettings(
 		if _, ok := bmcWithSettings[bmc.Name]; !ok {
 			existingList := &baseboardv1alpha1.BMCSettingsList{}
 			if err := r.List(ctx, existingList, client.MatchingFields{constants.BMCRefField: bmc.Name}); err != nil {
-				log.Error(err, "Error checking for existing BMCSettings", "BMC", bmc.Name)
+				log.Error(err, "Failed to list existing BMCSettings", "BMC", bmc.Name)
 				errs = append(errs, err)
 				continue
 			}
 			if len(existingList.Items) > 0 {
-				log.V(1).Info("BMC already has a BMCSettings", "BMC", bmc.Name, "BMCSettings", existingList.Items[0].Name)
+				log.V(1).Info("Found existing BMCSettings for BMC", "BMC", bmc.Name, "BMCSettings", existingList.Items[0].Name)
 				continue
 			}
 
@@ -460,11 +459,7 @@ func (r *BMCSettingsSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// Watch BMC resources for label changes to trigger reconciliation
 			&metalv1alpha1.BMC{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueByBMC),
-			builder.WithPredicates(predicate.Funcs{
-				UpdateFunc: func(e event.UpdateEvent) bool {
-					return utils.LabelChangeOrAnyFieldChangeInObject(e, []any{}, []any{})
-				},
-			})).
+			builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		Named("bmcsettingsset").
 		Complete(r)
 }

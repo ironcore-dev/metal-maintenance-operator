@@ -413,7 +413,7 @@ func main() {
 			}
 			return nil
 		}); err != nil {
-		setupLog.Error(err, "Unable to set up BIOSSettings field indexer")
+		setupLog.Error(err, "Failed to set up BIOSSettings field indexer")
 		os.Exit(1)
 	}
 
@@ -431,7 +431,7 @@ func main() {
 			}
 			return nil
 		}); err != nil {
-		setupLog.Error(err, "Unable to set up BMCSettings field indexer")
+		setupLog.Error(err, "Failed to set up BMCSettings field indexer")
 		os.Exit(1)
 	}
 
