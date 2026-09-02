@@ -203,32 +203,8 @@ func (r *BIOSSettingsReconciler) removeServerMaintenance(ctx context.Context, se
 	return nil
 }
 
-func (r *BIOSSettingsReconciler) cleanupReferences(ctx context.Context, settings *systemv1alpha1.BIOSSettings) (err error) {
-	log := ctrl.LoggerFrom(ctx)
-	if settings.Spec.ServerRef == nil {
-		log.V(1).Info("BIOSSettings does not have a ServerRef")
-		return nil
-	}
-
-	server, err := utils.GetServerByName(ctx, r.Client, settings.Spec.ServerRef.Name)
-	if apierrors.IsNotFound(err) {
-		log.V(1).Info("Referred Server is gone")
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	if server.Spec.BIOSSettingsRef == nil {
-		log.V(1).Info("Server does not have a BIOSSettingsRef")
-		return nil
-	}
-
-	if server.Spec.BIOSSettingsRef.Name != settings.Name {
-		return nil
-	}
-
-	return r.patchBIOSSettingsRefForServer(ctx, server, nil)
+func (r *BIOSSettingsReconciler) cleanupReferences(_ context.Context, _ *systemv1alpha1.BIOSSettings) error {
+	return nil
 }
 
 func (r *BIOSSettingsReconciler) reconcile(ctx context.Context, settings *systemv1alpha1.BIOSSettings) (ctrl.Result, error) {
@@ -253,34 +229,6 @@ func (r *BIOSSettingsReconciler) reconcile(ctx context.Context, settings *system
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
-	}
-
-	if server.Spec.BIOSSettingsRef == nil {
-		if err := r.patchBIOSSettingsRefForServer(ctx, server, settings); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else if server.Spec.BIOSSettingsRef.Name != settings.Name {
-		referredBIOSSetting, err := r.getBIOSSettingsByName(ctx, server.Spec.BIOSSettingsRef.Name)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				log.V(1).Info("Referred server contains reference to non-existing BIOSSettings object, updating reference to the current BIOSSettings")
-				if err := r.patchBIOSSettingsRefForServer(ctx, server, settings); err != nil {
-					return ctrl.Result{}, err
-				}
-				// need to requeue to make sure that reconcile re-happens here. updating server object does not trigger reconcile here.
-				return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-			}
-			log.V(1).Info("Server contains a reference to a different BIOSSettings object", "BIOSSettings", server.Spec.BIOSSettingsRef.Name)
-			return ctrl.Result{}, err
-		}
-		// Check if the current BIOSSettings version is newer and update reference if it is newer
-		// todo : handle version checks correctly
-		if referredBIOSSetting.Spec.Version < settings.Spec.Version {
-			log.V(1).Info("Updating BIOSSettings reference to the latest BIOS version")
-			if err := r.patchBIOSSettingsRefForServer(ctx, server, settings); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
 	}
 
 	if modified, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, settings, biosSettingsFinalizer); err != nil || modified {
@@ -1388,34 +1336,6 @@ func (r *BIOSSettingsReconciler) requestMaintenanceForServer(ctx context.Context
 	return true, nil
 }
 
-func (r *BIOSSettingsReconciler) getBIOSSettingsByName(ctx context.Context, name string) (*systemv1alpha1.BIOSSettings, error) {
-	biosSettings := &systemv1alpha1.BIOSSettings{}
-	if err := r.Get(ctx, client.ObjectKey{Name: name}, biosSettings); err != nil {
-		return nil, fmt.Errorf("failed to get referred BIOSSetting: %w", err)
-	}
-	return biosSettings, nil
-}
-
-func (r *BIOSSettingsReconciler) patchBIOSSettingsRefForServer(ctx context.Context, server *metalv1alpha1.Server, settings *systemv1alpha1.BIOSSettings) error {
-	if server == nil {
-		return nil
-	}
-
-	current := server.Spec.BIOSSettingsRef
-	if settings != nil && current != nil && current.Name == settings.Name {
-		return nil
-	}
-
-	serverBase := server.DeepCopy()
-	if settings == nil {
-		server.Spec.BIOSSettingsRef = nil
-	} else {
-		server.Spec.BIOSSettingsRef = &corev1.LocalObjectReference{Name: settings.Name}
-	}
-
-	return r.Patch(ctx, server, client.MergeFrom(serverBase))
-}
-
 func (r *BIOSSettingsReconciler) patchMaintenanceRef(ctx context.Context, settings *systemv1alpha1.BIOSSettings, maintenance *maintenancev1alpha1.ServerMaintenance) error {
 	biosSettingsBase := settings.DeepCopy()
 
@@ -1576,21 +1496,19 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByBMC(ctx context.Context, o
 
 	var reqs []ctrl.Request
 	for _, server := range serverList.Items {
-		if server.Spec.BIOSSettingsRef == nil {
+		settingsList := &systemv1alpha1.BIOSSettingsList{}
+		if err := r.List(ctx, settingsList, client.MatchingFields{constants.ServerRefField: server.Name}); err != nil {
+			log.Error(err, "Failed to list BIOSSettings by serverRef, skipping", "server", server.Name)
 			continue
 		}
-
-		settings := &systemv1alpha1.BIOSSettings{}
-		if err := r.Get(ctx, types.NamespacedName{Name: server.Spec.BIOSSettingsRef.Name}, settings); err != nil {
-			log.Error(err, "Failed to get BIOSSettings, skipping", "name", server.Spec.BIOSSettingsRef.Name)
-			continue
-		}
-
-		// Only enqueue if BMC reset was issued but not yet completed
-		if settings.Status.State == systemv1alpha1.BIOSSettingsStateInProgress {
-			resetCond, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionResetIssued)
-			if err == nil && resetCond.Status != metav1.ConditionTrue && resetCond.Reason == constants.ReasonResetIssued {
-				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
+		for i := range settingsList.Items {
+			settings := &settingsList.Items[i]
+			// Only enqueue if BMC reset was issued but not yet completed
+			if settings.Status.State == systemv1alpha1.BIOSSettingsStateInProgress {
+				resetCond, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionResetIssued)
+				if err == nil && resetCond.Status != metav1.ConditionTrue && resetCond.Reason == constants.ReasonResetIssued {
+					reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
+				}
 			}
 		}
 	}

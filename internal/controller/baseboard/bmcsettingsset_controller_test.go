@@ -601,14 +601,6 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			HaveField("Status.FailedBMCSettings", BeNumerically("==", 0)),
 		))
 
-		By("Checking if the BMC BMCSetting Ref has not be overritten by the 2nd BMCSettingsSet")
-		Eventually(Object(bmc01)).Should(
-			HaveField("Spec.BMCSettingRef.Name", Equal(bmcSettings01.Name)),
-		)
-		Consistently(Object(bmc01)).Should(
-			HaveField("Spec.BMCSettingRef.Name", Equal(bmcSettings01.Name)),
-		)
-
 		By("Checking the status of the 2nd BMCSettingsSet")
 		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledBMCs", BeNumerically("==", 1)),
@@ -630,11 +622,6 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		Eventually(Get(bmcSettingsSet1)).Should(Satisfy(apierrors.IsNotFound))
 		Expect(k8sClient.Delete(ctx, bmcSettings01)).To(Succeed())
 		Eventually(Get(bmcSettings01)).Should(Satisfy(apierrors.IsNotFound))
-
-		By("Checking if the BMCSettingRef of the BMC is empty")
-		Eventually(Object(bmc01)).Should(
-			HaveField("Spec.BMCSettingRef", BeNil()),
-		)
 
 		By("Checking the status of the 2nd BMCSettingsSet")
 		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
@@ -664,14 +651,6 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			},
 		}
 		Eventually(Get(bmcSettings01_02)).Should(Succeed())
-
-		By("Checking if the BMCSetting Ref in the BMC objets has been set by the 2nd BMCSettingsSet")
-		Eventually(Object(bmc01)).Should(
-			HaveField("Spec.BMCSettingRef.Name", Equal(bmcSettings01_02.Name)),
-		)
-		Consistently(Object(bmc01)).Should(
-			HaveField("Spec.BMCSettingRef.Name", Equal(bmcSettings01_02.Name)),
-		)
 
 		By("Checking if the status has been updated")
 		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
