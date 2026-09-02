@@ -399,11 +399,11 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 
 	// Boot config and claim-label cleanup run outside the ownership guard so a retry
 	// after unparkServerForMaintenance removes the owner annotation still completes them.
-	if server.Spec.MaintenanceBootConfigurationRef != nil {
+	if server.Spec.BootConfigurationRef != nil {
 		config := &metalv1alpha1.ServerBootConfiguration{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      server.Spec.MaintenanceBootConfigurationRef.Name,
-				Namespace: server.Spec.MaintenanceBootConfigurationRef.Namespace,
+				Name:      server.Spec.BootConfigurationRef.Name,
+				Namespace: server.Spec.BootConfigurationRef.Namespace,
 			},
 		}
 		if err := r.Delete(ctx, config); err != nil {
@@ -460,11 +460,11 @@ func (r *ServerMaintenanceReconciler) cleanup(ctx context.Context, maintenance *
 }
 
 func (r *ServerMaintenanceReconciler) removeBootConfigRefFromServer(ctx context.Context, config *metalv1alpha1.ServerBootConfiguration, server *metalv1alpha1.Server) error {
-	if ref := server.Spec.MaintenanceBootConfigurationRef; ref == nil || ref.Name != config.Name || ref.Namespace != config.Namespace {
+	if ref := server.Spec.BootConfigurationRef; ref == nil || ref.Name != config.Name || ref.Namespace != config.Namespace {
 		return nil
 	}
 	serverBase := server.DeepCopy()
-	server.Spec.MaintenanceBootConfigurationRef = nil
+	server.Spec.BootConfigurationRef = nil
 	if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}

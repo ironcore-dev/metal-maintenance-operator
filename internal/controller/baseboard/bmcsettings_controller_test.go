@@ -118,11 +118,6 @@ var _ = Describe("BMCSettings Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
 
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
-
 		Eventually(Object(settings)).Should(SatisfyAny(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
 		))
@@ -148,22 +143,12 @@ var _ = Describe("BMCSettings Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
 
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
-
 		Eventually(Object(settings)).Should(SatisfyAll(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
 		))
 
 		By("Deleting the BMCSettings")
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMCSettings ref is empty on BMC")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", BeNil()),
-		))
 	})
 
 	It("should update the setting if BMCSettings changes requested in Available State", func(ctx SpecContext) {
@@ -192,11 +177,6 @@ var _ = Describe("BMCSettings Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
 
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
-
 		By("Ensuring that the BMCSettings has reached next state")
 		Eventually(Object(settings)).Should(SatisfyAny(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateInProgress),
@@ -216,11 +196,6 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		By("Deleting the BMCSettings")
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMCSettings ref is empty on BMC")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", BeNil()),
-		))
 
 		// cleanup
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
@@ -309,11 +284,6 @@ var _ = Describe("BMCSettings Controller", func() {
 					}}}),
 		)
 
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
-
 		Eventually(Object(settings)).Should(SatisfyAny(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateInProgress),
 		))
@@ -342,11 +312,6 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		By("Deleting the BMCSettings")
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMCSettings ref is empty on BMC")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", BeNil()),
-		))
 
 		// cleanup
 		Expect(k8sClient.Delete(ctx, serverClaim)).To(Succeed())
@@ -384,12 +349,6 @@ var _ = Describe("BMCSettings Controller", func() {
 				}},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMC has the correct BMC settings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", Not(BeNil())),
-			HaveField("Spec.BMCSettingRef.Name", settings.Name),
-		))
 
 		By("Ensuring that the BMCSettings resource state is Pending while waiting for version upgrade")
 		Eventually(Object(settings)).Should(
@@ -445,11 +404,6 @@ var _ = Describe("BMCSettings Controller", func() {
 		By("Ensuring that the BMCSettings resource is removed")
 		Eventually(Get(settings)).Should(Satisfy(apierrors.IsNotFound))
 		Consistently(Get(settings)).Should(Satisfy(apierrors.IsNotFound))
-
-		By("Ensuring that the Server BMCSettings ref is empty on BMC")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", BeNil()),
-		))
 
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
@@ -536,11 +490,6 @@ var _ = Describe("BMCSettings Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
 
-		By("Wait for the BMCSettings to be ref on the BMC")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", Not(BeNil())),
-			HaveField("Spec.BMCSettingRef.Name", settings.Name),
-		))
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 		By("Forcing deletion of the object by removing finalizers")
 		Eventually(func() error {
@@ -581,21 +530,6 @@ var _ = Describe("BMCSettings Controller", func() {
 			if err := Get(server)(); err != nil {
 				return err
 			}
-			if ref := server.Spec.ServerMaintenanceRef; ref != nil {
-				refMaintenance := &maintenancev1alpha1.ServerMaintenance{}
-				err := k8sClient.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: ref.Namespace}, refMaintenance)
-				if err != nil && !apierrors.IsNotFound(err) {
-					return err
-				}
-				if apierrors.IsNotFound(err) {
-					By(fmt.Sprintf("Clearing stale ServerMaintenanceRef %v on the Server", ref.Name))
-					if err := Update(server, func() {
-						server.Spec.ServerMaintenanceRef = nil
-					})(); err != nil {
-						return err
-					}
-				}
-			}
 			return nil
 		}
 		Eventually(cleanupStaleServerMaintenance).Should(Succeed())
@@ -617,12 +551,6 @@ var _ = Describe("BMCSettings Controller", func() {
 				}},
 		}
 		Expect(k8sClient.Create(ctx, bmcSettings2)).To(Succeed())
-
-		By("Wait for the BMCSettings2 to be ref on the BMC")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", Not(BeNil())),
-			HaveField("Spec.BMCSettingRef.Name", bmcSettings2.Name),
-		))
 
 		Eventually(Object(bmcSettings2)).Should(SatisfyAny(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateInProgress),
@@ -754,11 +682,6 @@ var _ = Describe("BMCSettings Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
 
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
-
 		By("Ensuring that the BMCSettings reaches Applied state after variable resolution")
 		Eventually(Object(settings)).Should(SatisfyAll(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
@@ -813,11 +736,6 @@ var _ = Describe("BMCSettings Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
 
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
-
 		By("Ensuring that the BMCSettings reaches Applied state after variable resolution")
 		Eventually(Object(settings)).Should(SatisfyAll(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
@@ -856,11 +774,6 @@ var _ = Describe("BMCSettings Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
 
 		By("Ensuring that the BMCSettings reaches Applied state with the field value substituted")
 		Eventually(Object(settings)).Should(SatisfyAll(
@@ -925,11 +838,6 @@ var _ = Describe("BMCSettings Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
 
 		By("Ensuring that the BMCSettings reaches Applied state with both variables substituted")
 		Eventually(Object(settings)).Should(SatisfyAll(
@@ -1004,11 +912,6 @@ var _ = Describe("BMCSettings Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
-
-		By("Ensuring that the BMC has the BMCSettings ref")
-		Eventually(Object(bmc)).Should(SatisfyAll(
-			HaveField("Spec.BMCSettingRef", &v1.LocalObjectReference{Name: settings.Name}),
-		))
 
 		By("Ensuring that the BMCSettings reaches Applied state — chained variable resolved correctly")
 		Eventually(Object(settings)).Should(SatisfyAll(

@@ -45,6 +45,7 @@ import (
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
@@ -395,6 +396,42 @@ func main() {
 			return nil
 		}); err != nil {
 		setupLog.Error(err, "Unable to set up ServerMaintenance field indexer")
+		os.Exit(1)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&systemv1alpha1.BIOSSettings{},
+		constants.ServerRefField,
+		func(rawObj client.Object) []string {
+			s, ok := rawObj.(*systemv1alpha1.BIOSSettings)
+			if !ok {
+				return nil
+			}
+			if s.Spec.ServerRef != nil && s.Spec.ServerRef.Name != "" {
+				return []string{s.Spec.ServerRef.Name}
+			}
+			return nil
+		}); err != nil {
+		setupLog.Error(err, "Failed to set up BIOSSettings field indexer")
+		os.Exit(1)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&baseboardv1alpha1.BMCSettings{},
+		constants.BMCRefField,
+		func(rawObj client.Object) []string {
+			s, ok := rawObj.(*baseboardv1alpha1.BMCSettings)
+			if !ok {
+				return nil
+			}
+			if s.Spec.BMCRef != nil && s.Spec.BMCRef.Name != "" {
+				return []string{s.Spec.BMCRef.Name}
+			}
+			return nil
+		}); err != nil {
+		setupLog.Error(err, "Failed to set up BMCSettings field indexer")
 		os.Exit(1)
 	}
 

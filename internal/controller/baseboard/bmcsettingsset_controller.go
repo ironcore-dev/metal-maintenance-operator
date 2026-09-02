@@ -11,10 +11,10 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -22,7 +22,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
@@ -277,21 +276,15 @@ func (r *BMCSettingsSetReconciler) createMissingBMCSettings(
 	var errs []error
 	for _, bmc := range bmcList.Items {
 		if _, ok := bmcWithSettings[bmc.Name]; !ok {
-			if bmc.Spec.BMCSettingRef != nil {
-				if err := r.Get(ctx, client.ObjectKey{Name: bmc.Spec.BMCSettingRef.Name}, &baseboardv1alpha1.BMCSettings{}); err != nil {
-					if apierrors.IsNotFound(err) {
-						log.V(1).Info("BMCSettings referenced by BMC not found, will create a new one", "BMC", bmc.Name, "BMCSettings", bmc.Spec.BMCSettingRef.Name)
-						// proceed to create a new BMCSettings; the ref will be updated when it is created
-					} else {
-						log.Error(err, "Failed to get BMCSettings referenced by BMC", "BMC", bmc.Name, "BMCSettings", bmc.Spec.BMCSettingRef.Name)
-						// we will try this again in next reconciliation loop
-						continue
-					}
-				} else {
-					// the referenced BMCSettings exists, so we skip creating a new one
-					log.V(1).Info("BMC already has a BMCSettings ref", "BMC", bmc.Name, "BMCSettings", bmc.Spec.BMCSettingRef.Name)
-					continue
-				}
+			existingList := &baseboardv1alpha1.BMCSettingsList{}
+			if err := r.List(ctx, existingList, client.MatchingFields{constants.BMCRefField: bmc.Name}); err != nil {
+				log.Error(err, "Failed to list existing BMCSettings", "BMC", bmc.Name)
+				errs = append(errs, err)
+				continue
+			}
+			if len(existingList.Items) > 0 {
+				log.V(1).Info("Found existing BMCSettings for BMC", "BMC", bmc.Name, "BMCSettings", existingList.Items[0].Name)
+				continue
 			}
 
 			// generate a deterministic k8s conform name for bmcsettings, so that a
@@ -466,13 +459,7 @@ func (r *BMCSettingsSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// Watch BMC resources for label changes to trigger reconciliation
 			&metalv1alpha1.BMC{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueByBMC),
-			builder.WithPredicates(predicate.Funcs{
-				UpdateFunc: func(e event.UpdateEvent) bool {
-					oldBMC := e.ObjectOld.(*metalv1alpha1.BMC)
-					newBMC := e.ObjectNew.(*metalv1alpha1.BMC)
-					return utils.LabelChangeOrAnyFieldChangeInObject(e, []any{oldBMC.Spec.BMCSettingRef}, []any{newBMC.Spec.BMCSettingRef})
-				},
-			})).
+			builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		Named("bmcsettingsset").
 		Complete(r)
 }

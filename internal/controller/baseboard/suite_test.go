@@ -241,6 +241,19 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 			},
 		)).To(Succeed())
 
+		Expect(k8sManager.GetFieldIndexer().IndexField(
+			mgrCtx,
+			&baseboardv1alpha1.BMCSettings{},
+			constants.BMCRefField,
+			func(obj client.Object) []string {
+				s := obj.(*baseboardv1alpha1.BMCSettings)
+				if s.Spec.BMCRef == nil || s.Spec.BMCRef.Name == "" {
+					return nil
+				}
+				return []string{s.Spec.BMCRef.Name}
+			},
+		)).To(Succeed())
+
 		if len(redfishMockServers) > 0 {
 			mockServers = make([]*mockserver.MockServer, 0, len(redfishMockServers))
 			for _, serverAddr := range redfishMockServers {

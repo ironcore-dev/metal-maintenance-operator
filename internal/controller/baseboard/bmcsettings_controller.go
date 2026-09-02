@@ -193,22 +193,7 @@ func (r *BMCSettingsReconciler) cleanupServerMaintenanceReferences(ctx context.C
 	return errors.Join(finalErr...)
 }
 
-func (r *BMCSettingsReconciler) cleanupReferences(ctx context.Context, settings *baseboardv1alpha1.BMCSettings) error {
-	if settings.Spec.BMCRef == nil {
-		return nil
-	}
-
-	bmcObj, err := r.getBMC(ctx, settings)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	if bmcObj.Spec.BMCSettingRef != nil && bmcObj.Spec.BMCSettingRef.Name == settings.Name {
-		return r.patchBMCSettingsRefOnBMC(ctx, bmcObj, nil)
-	}
+func (r *BMCSettingsReconciler) cleanupReferences(_ context.Context, _ *baseboardv1alpha1.BMCSettings) error {
 	return nil
 }
 
@@ -228,37 +213,6 @@ func (r *BMCSettingsReconciler) reconcile(ctx context.Context, settings *baseboa
 	if err != nil {
 		log.V(1).Info("Failed to fetch referred BMC object")
 		return ctrl.Result{}, err
-	}
-	if bmcObj.Spec.BMCSettingRef == nil {
-		if err := r.patchBMCSettingsRefOnBMC(ctx, bmcObj, &corev1.LocalObjectReference{Name: settings.Name}); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else if bmcObj.Spec.BMCSettingRef.Name != settings.Name {
-		referredBMCSettings, err := r.getReferredBMCSettings(ctx, bmcObj.Spec.BMCSettingRef)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				log.V(1).Info("Referred BMC contains reference to non-existing BMCSettings, updating reference")
-				if err := r.patchBMCSettingsRefOnBMC(ctx, bmcObj, &corev1.LocalObjectReference{Name: settings.Name}); err != nil {
-					return ctrl.Result{}, err
-				}
-				// Requeue since updating the BMC object does not trigger reconciliation here
-				return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-			}
-			log.V(1).Info("Referred BMC contains reference to different BMCSettings, unable to fetch the referenced BMCSettings")
-			return ctrl.Result{}, err
-		}
-		// TODO: Handle version checks correctly
-		if referredBMCSettings.Spec.Version < settings.Spec.Version {
-			log.V(1).Info("Updating BMCSettings reference to the latest BMC version")
-			if err := r.patchBMCSettingsRefOnBMC(ctx, bmcObj, &corev1.LocalObjectReference{Name: settings.Name}); err != nil {
-				return ctrl.Result{}, err
-			}
-			// Requeue to reconcile with the updated BMC reference
-			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-		}
-		// This BMCSettings does not own the BMC — stop reconciliation
-		log.V(1).Info("BMC is owned by a newer or equal version BMCSettings, skipping reconciliation")
-		return ctrl.Result{}, nil
 	}
 
 	if modified, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, settings, BMCSettingFinalizer); err != nil || modified {
@@ -1165,30 +1119,6 @@ func (r *BMCSettingsReconciler) getReferredServerMaintenances(ctx context.Contex
 	}
 
 	return serverMaintenances, nil
-}
-
-func (r *BMCSettingsReconciler) getReferredBMCSettings(ctx context.Context, referredBMCSettingsRef *corev1.LocalObjectReference) (*baseboardv1alpha1.BMCSettings, error) {
-	key := client.ObjectKey{Name: referredBMCSettingsRef.Name, Namespace: metav1.NamespaceNone}
-	settings := &baseboardv1alpha1.BMCSettings{}
-	if err := r.Get(ctx, key, settings); err != nil {
-		return nil, err
-	}
-	return settings, nil
-}
-
-func (r *BMCSettingsReconciler) patchBMCSettingsRefOnBMC(ctx context.Context, bmcObj *metalv1alpha1.BMC, BMCSettingsReference *corev1.LocalObjectReference) error {
-	if (bmcObj.Spec.BMCSettingRef == nil && BMCSettingsReference == nil) ||
-		(bmcObj.Spec.BMCSettingRef != nil && BMCSettingsReference != nil &&
-			bmcObj.Spec.BMCSettingRef.Name == BMCSettingsReference.Name) {
-		return nil
-	}
-
-	bmcObjBase := bmcObj.DeepCopy()
-	bmcObj.Spec.BMCSettingRef = BMCSettingsReference
-	if err := r.Patch(ctx, bmcObj, client.MergeFrom(bmcObjBase)); err != nil {
-		return fmt.Errorf("failed to patch BMC settings ref: %w", err)
-	}
-	return nil
 }
 
 func (r *BMCSettingsReconciler) patchMaintenanceRequestRefOnBMCSettings(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, ServerMaintenanceRefs []api.ServerMaintenanceRefItem) error {

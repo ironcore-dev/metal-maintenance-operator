@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,12 +17,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
@@ -236,21 +235,15 @@ func (r *BIOSSettingsSetReconciler) createMissingBIOSSettings(ctx context.Contex
 	var errs []error
 	for _, server := range servers.Items {
 		if _, ok := serverWithSettings[server.Name]; !ok {
-			if server.Spec.BIOSSettingsRef != nil {
-				if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BIOSSettingsRef.Name}, &systemv1alpha1.BIOSSettings{}); err != nil {
-					if apierrors.IsNotFound(err) {
-						log.Error(err, "Failed to get BIOSSettings referenced by Server", "Server", server.Name, "BIOSSettings", server.Spec.BIOSSettingsRef.Name)
-						// we will go ahead and create a new BIOSSettings for this server. the ref will be updated when the new BIOSSettings is created
-					} else {
-						log.Error(err, "Error when trying to get BIOSSettings referenced by Server", "Server", server.Name, "BIOSSettings", server.Spec.BIOSSettingsRef.Name)
-						// we will try this again in next reconciliation loop
-						continue
-					}
-				} else {
-					// the referenced BIOSSettings exists or unable to determining, so we skip creating a new one
-					log.V(1).Info("Server already has a BIOSSettings ref", "Server", server.Name, "BIOSSettings", server.Spec.BIOSSettingsRef.Name)
-					continue
-				}
+			existingList := &systemv1alpha1.BIOSSettingsList{}
+			if err := r.List(ctx, existingList, client.MatchingFields{constants.ServerRefField: server.Name}); err != nil {
+				log.Error(err, "Failed to list existing BIOSSettings", "Server", server.Name)
+				errs = append(errs, err)
+				continue
+			}
+			if len(existingList.Items) > 0 {
+				log.V(1).Info("Found existing BIOSSettings for Server", "Server", server.Name, "BIOSSettings", existingList.Items[0].Name)
+				continue
 			}
 			// generate a deterministic k8s conform name, so that a re-reconcile on a
 			// stale cache cannot create duplicate children.
@@ -396,16 +389,16 @@ func (r *BIOSSettingsSetReconciler) enqueueByServer(ctx context.Context, obj cli
 		}
 	}
 
-	// Additionally, check if the Server has a BIOSSettingsRef and enqueue its owner BIOSSettingsSet
-	if server.Spec.BIOSSettingsRef != nil {
-		settings := &systemv1alpha1.BIOSSettings{}
-		if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BIOSSettingsRef.Name}, settings); err != nil {
-			log.Error(err, "Failed to get BIOSSettings referenced by Server", "Server", server.Name, "BIOSSettings", server.Spec.BIOSSettingsRef.Name)
-			return nil
-		}
-		owner := metav1.GetControllerOf(settings)
-		if owner != nil && owner.Kind == "BIOSSettingsSet" {
-			reqs[client.ObjectKey{Namespace: settings.Namespace, Name: owner.Name}] = true
+	// Additionally, check if any BIOSSettings point to this Server and enqueue their owner BIOSSettingsSet
+	settingsList := &systemv1alpha1.BIOSSettingsList{}
+	if err := r.List(ctx, settingsList, client.MatchingFields{constants.ServerRefField: server.Name}); err != nil {
+		log.Error(err, "Failed to list BIOSSettings for server", "Server", server.Name)
+	} else {
+		for i := range settingsList.Items {
+			owner := metav1.GetControllerOf(&settingsList.Items[i])
+			if owner != nil && owner.Kind == "BIOSSettingsSet" {
+				reqs[client.ObjectKey{Namespace: settingsList.Items[i].Namespace, Name: owner.Name}] = true
+			}
 		}
 	}
 
@@ -423,12 +416,6 @@ func (r *BIOSSettingsSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&systemv1alpha1.BIOSSettings{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueByServer),
-			builder.WithPredicates(predicate.Funcs{
-				UpdateFunc: func(e event.UpdateEvent) bool {
-					oldServer := e.ObjectOld.(*metalv1alpha1.Server)
-					newServer := e.ObjectNew.(*metalv1alpha1.Server)
-					return utils.LabelChangeOrAnyFieldChangeInObject(e, []any{oldServer.Spec.BIOSSettingsRef}, []any{newServer.Spec.BIOSSettingsRef})
-				},
-			})).
+			builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		Complete(r)
 }
