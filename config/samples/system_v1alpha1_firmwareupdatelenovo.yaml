@@ -1,0 +1,26 @@
+apiVersion: system.metal.ironcore.dev/v1alpha1
+kind: FirmwareUpdateLenovo
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firmwareupdatelenovo-sample
+spec:
+  # The server (metal-operator Server) to update.
+  serverRef:
+    name: server-sample
+  # Maintenance policy gating the reboot-causing apply. OwnerApproval waits for the workload owner
+  # to drain and approve (ESXi/KVM/bare-metal K8s worker); Enforced proceeds without approval.
+  serverMaintenancePolicy: OwnerApproval
+  repository:
+    # Point XCC at the firmware bundle DIRECTORY (not a file). XCC reads the root <bundle>_index.json
+    # catalog itself and self-inventories the host to select applicable payloads. Supported
+    # transports: CIFS / NFS / HTTP / HTTPS / SFTP (CIFS/NFS/HTTPS are license-gated per XCC
+    # generation; plain HTTP is not).
+    repoURI: https://10.0.0.1/firmware/sr650v3
+    # Optional credentials for the repository server (maps to RepoUserName/RepoPassword).
+    # secretRef:
+    #   name: firmware-repo-credentials
+    #   namespace: default
+    # Optional CIFS/NFS mount options (maps to RepoMountOpt), e.g. "vers=3.0".
+    # mountOptions: "vers=3.0"

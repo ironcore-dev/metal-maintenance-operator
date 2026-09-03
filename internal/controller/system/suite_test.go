@@ -14,11 +14,6 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/controller-utils/modutils"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
-	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
-	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
-	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/testutil/simcontrollers"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
@@ -38,6 +33,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
+	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/testutil/simcontrollers"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -91,6 +92,9 @@ var _ = BeforeSuite(func() {
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(maintenancev1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(systemv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	err = systemv1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
