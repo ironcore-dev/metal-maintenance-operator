@@ -213,7 +213,7 @@ type FirmwareUpdateStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=fwu
+// +kubebuilder:resource:scope=Namespaced,shortName=fwu
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=`.status.state`
 // +kubebuilder:printcolumn:name="ServerRef",type=string,JSONPath=`.spec.serverRef.name`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

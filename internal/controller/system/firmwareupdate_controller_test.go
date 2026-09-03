@@ -209,7 +209,9 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
 		By("Ensuring that the Server has not entered Maintenance state")
-		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
+		Consistently(Object(server)).Should(
+			HaveField("Status.State", metalv1alpha1.ServerStateAvailable),
+		)
 
 		By("Deleting the FirmwareUpdateDell")
 		Expect(k8sClient.Delete(ctx, fwUpdate)).To(Succeed())

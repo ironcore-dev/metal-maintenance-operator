@@ -14,7 +14,7 @@ spec:
     shortNames:
     - fwu
     singular: firmwareupdate
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.state

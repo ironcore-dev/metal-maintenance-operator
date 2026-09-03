@@ -201,14 +201,14 @@ func main() {
 
 	if maxRepositoryPasses < 1 || maxRepositoryPasses > maxRepositoryPassesLimit {
 		setupLog.Error(
-			nil, "Invalid --max-repository-passes value, must be between 1 and maxRepositoryPassesLimit", "value",
-			maxRepositoryPasses, "limit", maxRepositoryPassesLimit)
+			nil, "Failed to start FirmwareUpdate controller: invalid --max-repository-passes value",
+			"value", maxRepositoryPasses, "min", 1, "max", maxRepositoryPassesLimit)
 		os.Exit(1)
 	}
 
 	if defaultFailedAutoRetryCountInt < 0 || defaultFailedAutoRetryCountInt > maxFailedAutoRetryCount {
-		setupLog.Error(nil, "Invalid --default-failed-auto-retry-count value, must be between 0 and maxFailedAutoRetryCount",
-			"value", defaultFailedAutoRetryCountInt, "limit", maxFailedAutoRetryCount)
+		setupLog.Error(nil, "Failed to start FirmwareUpdate controller: invalid --default-failed-auto-retry-count value",
+			"value", defaultFailedAutoRetryCountInt, "min", 0, "max", maxFailedAutoRetryCount)
 		os.Exit(1)
 	}
 
