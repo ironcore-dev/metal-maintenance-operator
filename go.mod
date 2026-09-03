@@ -10,7 +10,7 @@ require (
 	github.com/ironcore-dev/controller-utils v0.14.0
 	github.com/ironcore-dev/metal-operator v0.7.1-0.20260831143430-4b61b5aea983
 	github.com/onsi/ginkgo/v2 v2.32.1
-	github.com/onsi/gomega v1.42.1
+	github.com/onsi/gomega v1.43.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/spf13/pflag v1.0.10
