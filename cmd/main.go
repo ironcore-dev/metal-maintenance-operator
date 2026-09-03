@@ -56,6 +56,9 @@ import (
 	// +kubebuilder:scaffold:imports
 )
 
+const maxRepositoryPassesLimit = 5
+const maxFailedAutoRetryCount = 10
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -144,8 +147,8 @@ func main() {
 		"Timeout for BIOS settings application before the task is considered expired.")
 	flag.DurationVar(&rebootTimeoutExpiry, "reboot-timeout-expiry", 10*time.Minute,
 		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
-	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", 5,
-		"Maximum number of check->apply->track->recheck passes a FirmwareUpdateDell may take before being marked Failed.")
+	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", maxRepositoryPassesLimit,
+		"Maximum number of check->apply->track->recheck passes a FirmwareUpdate may take before being marked Failed.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -195,6 +198,19 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if maxRepositoryPasses < 1 || maxRepositoryPasses > maxRepositoryPassesLimit {
+		setupLog.Error(
+			nil, "Invalid --max-repository-passes value, must be between 1 and maxRepositoryPassesLimit", "value",
+			maxRepositoryPasses, "limit", maxRepositoryPassesLimit)
+		os.Exit(1)
+	}
+
+	if defaultFailedAutoRetryCountInt < 0 || defaultFailedAutoRetryCountInt > maxFailedAutoRetryCount {
+		setupLog.Error(nil, "Invalid --default-failed-auto-retry-count value, must be between 0 and maxFailedAutoRetryCount",
+			"value", defaultFailedAutoRetryCountInt, "limit", maxFailedAutoRetryCount)
+		os.Exit(1)
+	}
 
 	if sanitizationNamespace == "" {
 		setupLog.Error(nil, "Must specify --sanitization-namespace")
@@ -536,7 +552,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&systemctrl.FirmwareUpdateDellReconciler{
+	if err = (&systemctrl.FirmwareUpdateReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
 		DefaultProtocol:             protocol,
@@ -548,7 +564,7 @@ func main() {
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		MaxRepositoryPasses:         int32(maxRepositoryPasses),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Unable to create FirmwareUpdateDell controller")
+		setupLog.Error(err, "Unable to create FirmwareUpdate controller")
 		os.Exit(1)
 	}
 

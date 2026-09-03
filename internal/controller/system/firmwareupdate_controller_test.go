@@ -27,7 +27,7 @@ import (
 // bmc.DellRedfishBMC instead of the vendor-neutral RedfishBaseBMC.
 const dellSystemID = "437XR1138R2"
 
-var _ = Describe("FirmwareUpdateDell Controller", func() {
+var _ = Describe("FirmwareUpdate Controller", func() {
 	ns := SetupTest(nil, mockserver.WithSystemOverride(dellSystemID, map[string]any{"Manufacturer": "Dell Inc."}))
 
 	var (
@@ -102,27 +102,27 @@ var _ = Describe("FirmwareUpdateDell Controller", func() {
 		)
 
 		By("Creating a FirmwareUpdateDell")
-		fwUpdate := &systemv1alpha1.FirmwareUpdateDell{
+		fwUpdate := &systemv1alpha1.FirmwareUpdate{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: systemv1alpha1.FirmwareUpdateDellSpec{
-				FirmwareUpdateDellTemplate: systemv1alpha1.FirmwareUpdateDellTemplate{
-					Repository: systemv1alpha1.RepositorySpec{
+			Spec: systemv1alpha1.FirmwareUpdateSpec{
+				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+					Repository: &systemv1alpha1.FirmwareRepository{
 						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
 						Address:     "downloads.dell.com",
 						CatalogFile: "Catalog.xml",
 					},
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
-				ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-				ServerRef:               &v1.LocalObjectReference{Name: server.Name},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
 		}
 		Expect(k8sClient.Create(ctx, fwUpdate)).To(Succeed())
 
 		By("Ensuring that the FirmwareUpdateDell has entered InProgress state")
 		Eventually(Object(fwUpdate)).Should(
-			HaveField("Status.State", systemv1alpha1.FirmwareUpdateDellStateInProgress),
+			HaveField("Status.State", systemv1alpha1.FirmwareUpdateStateInProgress),
 		)
 
 		By("Ensuring that the ServerMaintenance resource has been created")
@@ -139,38 +139,32 @@ var _ = Describe("FirmwareUpdateDell Controller", func() {
 
 		By("Ensuring that the ServerMaintenance has been referenced by FirmwareUpdateDell")
 		Eventually(Object(fwUpdate)).Should(
-			HaveField("Spec.ServerMaintenanceRef", &metalv1alpha1.ObjectReference{
+			HaveField("Status.ServerMaintenanceRef", &metalv1alpha1.ObjectReference{
 				Namespace: serverMaintenance.Namespace,
 				Name:      serverMaintenance.Name,
 			}),
 		)
 
-		By("Ensuring that the Server is in Maintenance state")
-		Eventually(Object(server)).Should(SatisfyAll(
-			HaveField("Status.State", metalv1alpha1.ServerStateMaintenance),
-			HaveField("Spec.ServerMaintenanceRef", &metalv1alpha1.ObjectReference{
-				Namespace: serverMaintenance.Namespace,
-				Name:      serverMaintenance.Name,
-			}),
-		))
+		By("Ensuring that the ServerMaintenance is in InMaintenance state")
+		Eventually(Object(serverMaintenance)).Should(
+			HaveField("Status.State", maintenancev1alpha1.ServerMaintenanceStateInMaintenance),
+		)
 
 		By("Ensuring that the repository-based firmware update has completed")
 		Eventually(Object(fwUpdate)).Should(
-			HaveField("Status.State", systemv1alpha1.FirmwareUpdateDellStateCompleted),
+			HaveField("Status.State", systemv1alpha1.FirmwareUpdateStateCompleted),
 		)
 
 		By("Ensuring that the FirmwareUpdateDell has removed the ServerMaintenance reference")
 		Eventually(Object(fwUpdate)).Should(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
+			HaveField("Status.ServerMaintenanceRef", BeNil()),
 		)
 		Consistently(Object(fwUpdate)).Should(
-			HaveField("Spec.ServerMaintenanceRef", BeNil()),
+			HaveField("Status.ServerMaintenanceRef", BeNil()),
 		)
 
-		By("Ensuring that the Server has left Maintenance state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		By("Ensuring that the ServerMaintenance has been deleted")
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
 
 		By("Deleting the FirmwareUpdateDell")
 		Expect(k8sClient.Delete(ctx, fwUpdate)).To(Succeed())
@@ -187,27 +181,27 @@ var _ = Describe("FirmwareUpdateDell Controller", func() {
 		)
 
 		By("Creating a FirmwareUpdateDell with a catalog file that triggers a failing job")
-		fwUpdate := &systemv1alpha1.FirmwareUpdateDell{
+		fwUpdate := &systemv1alpha1.FirmwareUpdate{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
 			},
-			Spec: systemv1alpha1.FirmwareUpdateDellSpec{
-				FirmwareUpdateDellTemplate: systemv1alpha1.FirmwareUpdateDellTemplate{
-					Repository: systemv1alpha1.RepositorySpec{
+			Spec: systemv1alpha1.FirmwareUpdateSpec{
+				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+					Repository: &systemv1alpha1.FirmwareRepository{
 						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
 						Address:     "downloads.dell.com",
 						CatalogFile: "fail-catalog.xml",
 					},
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
-				ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-				ServerRef:               &v1.LocalObjectReference{Name: server.Name},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
 		}
 		Expect(k8sClient.Create(ctx, fwUpdate)).To(Succeed())
 
 		By("Ensuring that the FirmwareUpdateDell has entered Failed state")
 		Eventually(Object(fwUpdate)).Should(
-			HaveField("Status.State", systemv1alpha1.FirmwareUpdateDellStateFailed),
+			HaveField("Status.State", systemv1alpha1.FirmwareUpdateStateFailed),
 		)
 
 		By("Ensuring that no ServerMaintenance resource has been created")
@@ -215,9 +209,7 @@ var _ = Describe("FirmwareUpdateDell Controller", func() {
 		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
 		By("Ensuring that the Server has not entered Maintenance state")
-		Consistently(Object(server)).Should(
-			HaveField("Status.State", Not(Equal(metalv1alpha1.ServerStateMaintenance))),
-		)
+		Consistently(ObjectList(&serverMaintenanceList)).Should(HaveField("Items", BeEmpty()))
 
 		By("Deleting the FirmwareUpdateDell")
 		Expect(k8sClient.Delete(ctx, fwUpdate)).To(Succeed())

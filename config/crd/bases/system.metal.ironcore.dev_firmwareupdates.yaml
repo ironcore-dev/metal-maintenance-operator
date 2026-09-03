@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: firmwareupdatedells.system.metal.ironcore.dev
+  name: firmwareupdates.system.metal.ironcore.dev
 spec:
   group: system.metal.ironcore.dev
   names:
-    kind: FirmwareUpdateDell
-    listKind: FirmwareUpdateDellList
-    plural: firmwareupdatedells
+    kind: FirmwareUpdate
+    listKind: FirmwareUpdateList
+    plural: firmwareupdates
     shortNames:
-    - fwud
-    singular: firmwareupdatedell
+    - fwu
+    singular: firmwareupdate
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -23,32 +23,13 @@ spec:
     - jsonPath: .spec.serverRef.name
       name: ServerRef
       type: string
-    - jsonPath: .spec.serverMaintenanceRef.name
-      name: ServerMaintenanceRef
-      type: string
-    - jsonPath: .status.componentJobsSummary.total
-      name: ComponentJobs
-      type: integer
-    - jsonPath: .status.componentJobsSummary.completed
-      name: Completed
-      priority: 1
-      type: integer
-    - jsonPath: .status.componentJobsSummary.inProgress
-      name: InProgress
-      priority: 1
-      type: integer
-    - jsonPath: .status.componentJobsSummary.failed
-      name: Failed
-      priority: 1
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: FirmwareUpdateDell is the Schema for the firmwareupdatedells
-          API.
+        description: FirmwareUpdate is the Schema for the firmwareupdates API.
         properties:
           apiVersion:
             description: |-
@@ -68,35 +49,18 @@ spec:
           metadata:
             type: object
           spec:
-            description: FirmwareUpdateDellSpec defines the desired state of FirmwareUpdateDell.
+            description: FirmwareUpdateSpec defines the desired state of FirmwareUpdate.
             properties:
-              applyDowngradeVersions:
-                description: ApplyDowngradeVersions, if true, allows applying packages
-                  older than the currently installed version.
-                type: boolean
-              applySameVersions:
-                description: ApplySameVersions, if true, re-applies packages already
-                  at the same version.
-                type: boolean
-              repository:
-                description: Repository describes the network share hosting the update
-                  repository/catalog.
+              image:
+                description: Image describes the OTB firmware image parameters (HPE,
+                  Lenovo).
                 properties:
-                  address:
-                    description: Address is the share's IP address or hostname (e.g.
-                      downloads.dell.com).
+                  URI:
+                    description: URI is the URI of the software image to install.
                     type: string
-                  catalogFile:
-                    description: CatalogFile is the catalog file name within the share.
-                      Defaults to "Catalog.xml".
-                    type: string
-                  ignoreCertWarning:
-                    description: IgnoreCertWarning, if true, ignores certificate warnings
-                      for HTTPS shares.
-                    type: boolean
                   secretRef:
-                    description: SecretRef references the credentials used to authenticate
-                      against the share, if required.
+                    description: SecretRef is a reference to the Secret containing
+                      the credentials to access the image URI.
                     properties:
                       name:
                         description: name is unique within a namespace to reference
@@ -108,6 +72,62 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
+                  transferProtocol:
+                    description: TransferProtocol is the network protocol used to
+                      retrieve the image URI.
+                    type: string
+                required:
+                - URI
+                type: object
+              progressDeadlineSeconds:
+                default: 3600
+                description: |-
+                  ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward
+                  progress before the update is marked Failed. Defaults to 3600 (1 hour).
+                format: int32
+                type: integer
+              repository:
+                description: Repository describes the network share hosting the Dell
+                  update repository/catalog.
+                properties:
+                  address:
+                    description: Address is the share's hostname or IP address (e.g.
+                      downloads.dell.com).
+                    type: string
+                  applyDowngradeVersions:
+                    description: ApplyDowngradeVersions, if true, allows applying
+                      packages older than the currently installed version.
+                    type: boolean
+                  applySameVersions:
+                    description: ApplySameVersions, if true, re-applies packages already
+                      at the same version.
+                    type: boolean
+                  catalogFile:
+                    description: CatalogFile is the catalog file name within the share.
+                      Defaults to "Catalog.xml".
+                    type: string
+                  credentialsRef:
+                    description: CredentialsRef references the credentials used to
+                      authenticate against the share, if required.
+                    properties:
+                      name:
+                        description: name is unique within a namespace to reference
+                          a secret resource.
+                        type: string
+                      namespace:
+                        description: namespace defines the space within which the
+                          secret name must be unique.
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  ignoreCertWarning:
+                    description: IgnoreCertWarning, if true, ignores certificate warnings
+                      for HTTPS shares.
+                    type: boolean
+                  rebootNeeded:
+                    description: RebootNeeded, if true, allows the BMC to reboot the
+                      server to apply updates.
+                    type: boolean
                   shareName:
                     description: ShareName is the network share name. Not required
                       for HTTP/HTTPS catalogs.
@@ -125,7 +145,6 @@ spec:
                     description: Workgroup is the CIFS workgroup, if applicable.
                     type: string
                 required:
-                - address
                 - shareType
                 type: object
               retryPolicy:
@@ -146,23 +165,9 @@ spec:
                 description: ServerMaintenancePolicy is a maintenance policy to be
                   enforced on the server.
                 type: string
-              serverMaintenanceRef:
-                description: ServerMaintenanceRef is a reference to a ServerMaintenance
-                  object that the controller has requested for the referred server.
-                properties:
-                  name:
-                    description: Name is the name of the referenced object.
-                    type: string
-                  namespace:
-                    description: Namespace is the namespace of the referenced object.
-                    type: string
-                required:
-                - name
-                - namespace
-                type: object
               serverRef:
                 description: ServerRef is a reference to a specific server to apply
-                  the repository-based firmware update on.
+                  the firmware update on.
                 properties:
                   name:
                     default: ""
@@ -175,15 +180,22 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-                x-kubernetes-validations:
-                - message: serverRef is immutable
-                  rule: self == oldSelf
+              ttlSecondsAfterFinished:
+                description: |-
+                  TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds
+                  after it reaches Completed state. Failed objects are retained for operator inspection.
+                format: int32
+                type: integer
             required:
-            - repository
             - serverRef
             type: object
+            x-kubernetes-validations:
+            - message: serverRef is immutable
+              rule: '!has(oldSelf.serverRef) || self.serverRef == oldSelf.serverRef'
+            - message: exactly one of repository or image must be set
+              rule: has(self.repository) != has(self.image)
           status:
-            description: FirmwareUpdateDellStatus defines the observed state of FirmwareUpdateDell.
+            description: FirmwareUpdateStatus defines the observed state of FirmwareUpdate.
             properties:
               baselineJobIDs:
                 description: |-
@@ -192,29 +204,26 @@ spec:
                 items:
                   type: string
                 type: array
+              baselineJobsCaptured:
+                description: BaselineJobsCaptured is true once BaselineJobIDs has
+                  been successfully populated for the current pass.
+                type: boolean
               checkJob:
                 description: CheckJob contains the state of the dry-run catalog-check
                   job.
                 properties:
                   jobID:
-                    description: JobID is the iDRAC job identifier (e.g. "JID_...").
                     type: string
                   jobType:
-                    description: JobType is the Dell-reported job type (e.g. "RepositoryUpdate",
-                      "FirmwareUpdate").
                     type: string
                   message:
-                    description: Message is the Dell-reported status message.
                     type: string
                   name:
-                    description: Name is the job's display name.
                     type: string
                   percentComplete:
-                    description: PercentComplete is the Dell-reported completion percentage.
                     format: int32
                     type: integer
                   state:
-                    description: State is the Dell-reported raw JobState string.
                     type: string
                 type: object
               componentJobs:
@@ -223,30 +232,20 @@ spec:
                 items:
                   description: |-
                     RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
-                    operation. State is intentionally a plain string (not a gofish schemas.TaskState or
-                    schemas.JobState), mirroring bmc.DellJob, so consumers of this API do not need to depend on
-                    the gofish module.
+                    operation. State is intentionally a plain string mirroring bmc.DellJob.
                   properties:
                     jobID:
-                      description: JobID is the iDRAC job identifier (e.g. "JID_...").
                       type: string
                     jobType:
-                      description: JobType is the Dell-reported job type (e.g. "RepositoryUpdate",
-                        "FirmwareUpdate").
                       type: string
                     message:
-                      description: Message is the Dell-reported status message.
                       type: string
                     name:
-                      description: Name is the job's display name.
                       type: string
                     percentComplete:
-                      description: PercentComplete is the Dell-reported completion
-                        percentage.
                       format: int32
                       type: integer
                     state:
-                      description: State is the Dell-reported raw JobState string.
                       type: string
                   type: object
                 type: array
@@ -255,29 +254,21 @@ spec:
                   state.
                 properties:
                   completed:
-                    description: Completed is the number of component jobs that finished
-                      successfully.
                     format: int32
                     type: integer
                   failed:
-                    description: Failed is the number of component jobs that finished
-                      in a failed state.
                     format: int32
                     type: integer
                   inProgress:
-                    description: InProgress is the number of component jobs that have
-                      not yet reached a terminal state.
                     format: int32
                     type: integer
                   total:
-                    description: Total is the number of component jobs discovered
-                      so far in the current pass.
                     format: int32
                     type: integer
                 type: object
               conditions:
                 description: Conditions represents the latest available observations
-                  of the repository-based firmware update state.
+                  of the firmware update state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -338,43 +329,54 @@ spec:
                   made after failure.
                 format: int32
                 type: integer
+              lastProgressTime:
+                description: |-
+                  LastProgressTime records the last time the controller observed forward progress.
+                  Used together with ProgressDeadlineSeconds to detect stalled updates.
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
                 type: integer
               passCount:
-                description: |-
-                  PassCount is the number of check->apply->track->recheck passes completed so far. It bounds
-                  the internal convergence loop.
+                description: PassCount is the number of check->apply->track->recheck
+                  passes completed so far.
                 format: int32
                 type: integer
+              serverMaintenanceRef:
+                description: ServerMaintenanceRef is a reference to the ServerMaintenance
+                  object the controller created for this update.
+                properties:
+                  name:
+                    description: Name is the name of the referenced object.
+                    type: string
+                  namespace:
+                    description: Namespace is the namespace of the referenced object.
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
               state:
-                description: State represents the current state of the repository-based
-                  firmware update.
+                description: State represents the current state of the firmware update.
                 type: string
               updateJob:
                 description: UpdateJob contains the state of the main apply job.
                 properties:
                   jobID:
-                    description: JobID is the iDRAC job identifier (e.g. "JID_...").
                     type: string
                   jobType:
-                    description: JobType is the Dell-reported job type (e.g. "RepositoryUpdate",
-                      "FirmwareUpdate").
                     type: string
                   message:
-                    description: Message is the Dell-reported status message.
                     type: string
                   name:
-                    description: Name is the job's display name.
                     type: string
                   percentComplete:
-                    description: PercentComplete is the Dell-reported completion percentage.
                     format: int32
                     type: integer
                   state:
-                    description: State is the Dell-reported raw JobState string.
                     type: string
                 type: object
             type: object

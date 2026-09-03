@@ -186,6 +186,7 @@ rules:
   - biossettingssets
   - biosversions
   - biosversionsets
+  - firmwareupdates
   verbs:
   - create
   - delete
@@ -201,6 +202,7 @@ rules:
   - biossettingssets/finalizers
   - biosversions/finalizers
   - biosversionsets/finalizers
+  - firmwareupdates/finalizers
   verbs:
   - update
 - apiGroups:
@@ -210,6 +212,7 @@ rules:
   - biossettingssets/status
   - biosversions/status
   - biosversionsets/status
+  - firmwareupdates/status
   verbs:
   - get
   - patch

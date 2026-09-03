@@ -206,7 +206,7 @@ func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver
 			Scheme: k8sManager.GetScheme(),
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
-		Expect((&FirmwareUpdateDellReconciler{
+		Expect((&FirmwareUpdateReconciler{
 			Client:             k8sManager.GetClient(),
 			ManagerNamespace:   ns.Name,
 			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
@@ -310,7 +310,7 @@ func EnsureCleanState() {
 		&systemv1alpha1.BIOSSettingsSetList{},
 		&systemv1alpha1.BIOSVersionList{},
 		&systemv1alpha1.BIOSVersionSetList{},
-		&systemv1alpha1.FirmwareUpdateDellList{},
+		&systemv1alpha1.FirmwareUpdateList{},
 		&maintenancev1alpha1.ServerMaintenanceList{},
 	}
 
