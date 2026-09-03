@@ -180,6 +180,7 @@ rules:
   - biossettingssets
   - biosversions
   - biosversionsets
+  - firmwareupdatelenovoes
   verbs:
   - create
   - delete
@@ -195,6 +196,7 @@ rules:
   - biossettingssets/finalizers
   - biosversions/finalizers
   - biosversionsets/finalizers
+  - firmwareupdatelenovoes/finalizers
   verbs:
   - update
 - apiGroups:
@@ -204,6 +206,7 @@ rules:
   - biossettingssets/status
   - biosversions/status
   - biosversionsets/status
+  - firmwareupdatelenovoes/status
   verbs:
   - get
   - patch

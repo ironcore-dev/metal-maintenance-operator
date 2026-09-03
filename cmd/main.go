@@ -11,13 +11,14 @@ import (
 	"path/filepath"
 	"time"
 
+	metalv1alpha1bmc "github.com/ironcore-dev/metal-operator/bmc"
+
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/discovery"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
 	telemetryruntime "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
-	metalv1alpha1bmc "github.com/ironcore-dev/metal-operator/bmc"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -40,6 +41,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
@@ -49,10 +52,10 @@ import (
 	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
+	systemcontroller "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	maintenancewebhook "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
-	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -581,6 +584,19 @@ func main() {
 		BMCOptions:         bmcOpts,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUser controller")
+		os.Exit(1)
+	}
+	if err := (&systemcontroller.FirmwareUpdateLenovoReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "system-firmwareupdatelenovo")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

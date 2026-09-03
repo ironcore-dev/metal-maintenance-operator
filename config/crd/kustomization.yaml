@@ -14,6 +14,7 @@ resources:
 - bases/baseboard.metal.ironcore.dev_bmcversions.yaml
 - bases/baseboard.metal.ironcore.dev_bmcversionsets.yaml
 - bases/baseboard.metal.ironcore.dev_bmcusers.yaml
+- bases/system.metal.ironcore.dev_firmwareupdatelenovoes.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
