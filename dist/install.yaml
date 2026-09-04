@@ -3310,6 +3310,77 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: metal-maintenance-operator
+  name: metal-maintenance-operator-bmcuserset-admin-role
+rules:
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets
+  verbs:
+  - '*'
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: metal-maintenance-operator
+  name: metal-maintenance-operator-bmcuserset-editor-role
+rules:
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: metal-maintenance-operator
+  name: metal-maintenance-operator-bmcuserset-viewer-role
+rules:
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - baseboard.metal.ironcore.dev
+  resources:
+  - bmcusersets/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: metal-maintenance-operator
   name: metal-maintenance-operator-console-admin-role
 rules:
 - apiGroups:
@@ -3406,6 +3477,7 @@ rules:
   - bmcsettings
   - bmcsettingssets
   - bmcusers
+  - bmcusersets
   - bmcversions
   - bmcversionsets
   verbs:
@@ -3422,6 +3494,7 @@ rules:
   - bmcsettings/finalizers
   - bmcsettingssets/finalizers
   - bmcusers/finalizers
+  - bmcusersets/finalizers
   - bmcversions/finalizers
   - bmcversionsets/finalizers
   verbs:
@@ -3432,6 +3505,7 @@ rules:
   - bmcsettings/status
   - bmcsettingssets/status
   - bmcusers/status
+  - bmcusersets/status
   - bmcversions/status
   - bmcversionsets/status
   verbs:
