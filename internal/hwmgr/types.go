@@ -13,6 +13,9 @@ import (
 // ErrServerHasActiveProfile is returned when a server cannot be removed because it has an active profile assigned.
 var ErrServerHasActiveProfile = errors.New("server has an active profile and cannot be removed")
 
+// manufacturerFujitsu is defined locally until it is upstreamed to metal-operator.
+const manufacturerFujitsu bmc.Manufacturer = "Fsas"
+
 // Device represents a single device returned from the API
 type Device struct {
 	ID           int    `json:"Id"`
@@ -20,6 +23,7 @@ type Device struct {
 	Name         string `json:"Name"`
 	Hostname     string `json:"Hostname"`
 	Model        string `json:"Model"`
+	Serial       string `json:"SerialNumber"`
 	HealthStatus int    `json:"HealthStatus"` // 4000 = OK, 4002 = Warning, etc.
 }
 
@@ -71,6 +75,9 @@ func New(manufacturer bmc.Manufacturer, options ClientOptions) (client *Client, 
 		return
 	case bmc.ManufacturerHPE:
 		client.ClientInterface, err = NewHPEClient(options)
+		return
+	case manufacturerFujitsu:
+		client.ClientInterface, err = NewFujitsuClient(options)
 		return
 	}
 	return

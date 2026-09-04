@@ -78,7 +78,10 @@ func (c *client) DoRequest(req *http.Request, okCodes []int) ([]byte, error) {
 		return nil, errors.New("the URL is mandatory")
 	}
 	if c.basicAuth {
-		req.Header = http.Header{"Content-Type": []string{"application/json"}}
+		req.Header = http.Header{
+			"Content-Type": []string{"application/json"},
+			"Accept":       []string{"application/json"},
+		}
 		req.SetBasicAuth(c.username, c.password)
 	} else {
 		if c.token == "" {
