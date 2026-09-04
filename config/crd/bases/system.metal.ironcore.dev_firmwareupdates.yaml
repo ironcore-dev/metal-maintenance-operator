@@ -180,6 +180,9 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: serverRef is immutable
+                  rule: self == oldSelf
               ttlSecondsAfterFinished:
                 description: |-
                   TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds
@@ -190,8 +193,6 @@ spec:
             - serverRef
             type: object
             x-kubernetes-validations:
-            - message: serverRef is immutable
-              rule: '!has(oldSelf.serverRef) || self.serverRef == oldSelf.serverRef'
             - message: exactly one of repository or image must be set
               rule: has(self.repository) != has(self.image)
           status:

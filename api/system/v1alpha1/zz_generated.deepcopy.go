@@ -11,7 +11,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	apiv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )

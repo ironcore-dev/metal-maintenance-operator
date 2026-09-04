@@ -12,14 +12,14 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
-// DellShareType is the type of network share hosting the Dell update repository/catalog.
-type DellShareType string
+// RepositoryShareType is the type of network share hosting the firmware update repository/catalog.
+type RepositoryShareType string
 
 const (
-	DellShareTypeNFS   DellShareType = "NFS"
-	DellShareTypeCIFS  DellShareType = "CIFS"
-	DellShareTypeHTTP  DellShareType = "HTTP"
-	DellShareTypeHTTPS DellShareType = "HTTPS"
+	RepositoryShareTypeNFS   RepositoryShareType = "NFS"
+	RepositoryShareTypeCIFS  RepositoryShareType = "CIFS"
+	RepositoryShareTypeHTTP  RepositoryShareType = "HTTP"
+	RepositoryShareTypeHTTPS RepositoryShareType = "HTTPS"
 )
 
 // RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
@@ -71,7 +71,7 @@ type FirmwareRepository struct {
 	// ShareType is the type of network share hosting the repository.
 	// +kubebuilder:validation:Enum=NFS;CIFS;HTTP;HTTPS
 	// +required
-	ShareType DellShareType `json:"shareType"`
+	ShareType RepositoryShareType `json:"shareType"`
 
 	// Address is the share's hostname or IP address (e.g. downloads.dell.com).
 	// +optional
@@ -131,12 +131,12 @@ type FirmwareUpdateTemplate struct {
 }
 
 // FirmwareUpdateSpec defines the desired state of FirmwareUpdate.
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.serverRef) || self.serverRef == oldSelf.serverRef",message="serverRef is immutable"
 type FirmwareUpdateSpec struct {
 	// FirmwareUpdateTemplate defines the template to be applied on the server.
 	FirmwareUpdateTemplate `json:",inline"`
 
 	// ServerRef is a reference to a specific server to apply the firmware update on.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="serverRef is immutable"
 	// +required
 	ServerRef *corev1.LocalObjectReference `json:"serverRef"`
 

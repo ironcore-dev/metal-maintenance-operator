@@ -146,7 +146,9 @@ func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.Firmwa
 	fw.Status.CheckJob = nil
 	fw.Status.UpdateJob = nil
 	fw.Status.ComponentJobs = nil
+	fw.Status.ComponentJobsSummary = nil
 	fw.Status.BaselineJobIDs = nil
+	fw.Status.BaselineJobsCaptured = false
 	// PassCount is intentionally preserved (not reset) here: it is only reset
 	// once a repository check actually confirms convergence (no packages
 	// pending), so persistently-pending catalogs remain bounded by
@@ -495,6 +497,9 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 
 	var username, password string
 	if repo.CredentialsRef != nil {
+		if repo.ShareType == systemv1alpha1.RepositoryShareTypeHTTP {
+			return nil, fmt.Errorf("credentialsRef must not be used with HTTP shares: credentials would be sent in cleartext")
+		}
 		var err error
 		username, password, err = utils.GetImageCredentialsForSecretRef(ctx, r.Client, repo.CredentialsRef)
 		if err != nil {

@@ -1047,25 +1047,6 @@ _Appears in:_
 | `failed` _integer_ |  |  |  |
 
 
-#### DellShareType
-
-_Underlying type:_ _string_
-
-DellShareType is the type of network share hosting the Dell update repository/catalog.
-
-
-
-_Appears in:_
-- [FirmwareRepository](#firmwarerepository)
-
-| Field | Description |
-| --- | --- |
-| `NFS` |  |
-| `CIFS` |  |
-| `HTTP` |  |
-| `HTTPS` |  |
-
-
 #### FirmwareRepository
 
 
@@ -1081,7 +1062,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `shareType` _[DellShareType](#dellsharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
+| `shareType` _[RepositoryShareType](#repositorysharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
 | `address` _string_ | Address is the share's hostname or IP address (e.g. downloads.dell.com). |  |  |
 | `shareName` _string_ | ShareName is the network share name. Not required for HTTP/HTTPS catalogs. |  |  |
 | `catalogFile` _string_ | CatalogFile is the catalog file name within the share. Defaults to "Catalog.xml". |  |  |
@@ -1220,6 +1201,25 @@ _Appears in:_
 | `state` _string_ |  |  |  |
 | `message` _string_ |  |  |  |
 | `percentComplete` _integer_ |  |  |  |
+
+
+#### RepositoryShareType
+
+_Underlying type:_ _string_
+
+RepositoryShareType is the type of network share hosting the firmware update repository/catalog.
+
+
+
+_Appears in:_
+- [FirmwareRepository](#firmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `NFS` |  |
+| `CIFS` |  |
+| `HTTP` |  |
+| `HTTPS` |  |
 
 
 

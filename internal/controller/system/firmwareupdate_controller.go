@@ -181,6 +181,12 @@ func (r *FirmwareUpdateReconciler) reconcile(ctx context.Context, fw *systemv1al
 		return ctrl.Result{}, err
 	}
 
+	if ttlResult, deleted, err := r.handleTTL(ctx, fw); err != nil || deleted {
+		return ctrl.Result{}, err
+	} else if ttlResult.RequeueAfter > 0 {
+		return ttlResult, nil
+	}
+
 	requeue, err := r.transitionState(ctx, fw)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -239,9 +245,6 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 		}
 		return h.handlePending(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateCompleted:
-		if deleted, err := r.handleTTL(ctx, fw); err != nil || deleted {
-			return false, err
-		}
 		return h.handleCompleted(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateInProgress:
 		if exceeded, err := r.checkProgressDeadline(ctx, fw); err != nil || exceeded {
@@ -418,26 +421,27 @@ func (r *FirmwareUpdateReconciler) checkProgressDeadline(ctx context.Context, fw
 }
 
 // handleTTL deletes a completed FirmwareUpdate if TTLSecondsAfterFinished has elapsed.
-// Returns true if the object was deleted.
-func (r *FirmwareUpdateReconciler) handleTTL(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate) (bool, error) {
+// Returns the remaining TTL duration (non-zero means requeue needed), whether the object was deleted, and any error.
+func (r *FirmwareUpdateReconciler) handleTTL(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate) (ctrl.Result, bool, error) {
 	if fw.Spec.TTLSecondsAfterFinished == nil {
-		return false, nil
+		return ctrl.Result{}, false, nil
 	}
 	if fw.Status.State != systemv1alpha1.FirmwareUpdateStateCompleted {
-		return false, nil
+		return ctrl.Result{}, false, nil
 	}
 	// Use LastProgressTime as a proxy for completion time since we don't have a dedicated field.
 	if fw.Status.LastProgressTime == nil {
-		return false, nil
+		return ctrl.Result{}, false, nil
 	}
 	ttl := time.Duration(*fw.Spec.TTLSecondsAfterFinished) * time.Second
-	if time.Since(fw.Status.LastProgressTime.Time) < ttl {
-		return false, nil
+	remaining := ttl - time.Since(fw.Status.LastProgressTime.Time)
+	if remaining > 0 {
+		return ctrl.Result{RequeueAfter: remaining}, false, nil
 	}
 	if err := r.Delete(ctx, fw); err != nil {
-		return false, fmt.Errorf("failed to delete FirmwareUpdate after TTL: %w", err)
+		return ctrl.Result{}, false, fmt.Errorf("failed to delete FirmwareUpdate after TTL: %w", err)
 	}
-	return true, nil
+	return ctrl.Result{}, true, nil
 }
 
 func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate) (bool, error) {

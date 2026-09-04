@@ -105,11 +105,12 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 		fwUpdate := &systemv1alpha1.FirmwareUpdate{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
+				Namespace:    ns.Name,
 			},
 			Spec: systemv1alpha1.FirmwareUpdateSpec{
 				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
 					Repository: &systemv1alpha1.FirmwareRepository{
-						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
+						ShareType:   systemv1alpha1.RepositoryShareTypeHTTPS,
 						Address:     "downloads.dell.com",
 						CatalogFile: "Catalog.xml",
 					},
@@ -184,11 +185,12 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 		fwUpdate := &systemv1alpha1.FirmwareUpdate{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-",
+				Namespace:    ns.Name,
 			},
 			Spec: systemv1alpha1.FirmwareUpdateSpec{
 				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
 					Repository: &systemv1alpha1.FirmwareRepository{
-						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
+						ShareType:   systemv1alpha1.RepositoryShareTypeHTTPS,
 						Address:     "downloads.dell.com",
 						CatalogFile: "fail-catalog.xml",
 					},
