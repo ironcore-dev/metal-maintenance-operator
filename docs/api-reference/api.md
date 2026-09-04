@@ -462,6 +462,8 @@ _Appears in:_
 - [BMCSettingsTemplate](#bmcsettingstemplate)
 - [BMCVersionSpec](#bmcversionspec)
 - [BMCVersionTemplate](#bmcversiontemplate)
+- [FirmwareUpdateSpec](#firmwareupdatespec)
+- [FirmwareUpdateTemplate](#firmwareupdatetemplate)
 - [ServerMaintenanceSpec](#servermaintenancespec)
 - [SettingsTemplate](#settingstemplate)
 
@@ -666,6 +668,7 @@ Package v1alpha1 contains API Schema definitions for the system.metal.ironcore.d
 - [BIOSSettingsSet](#biossettingsset)
 - [BIOSVersion](#biosversion)
 - [BIOSVersionSet](#biosversionset)
+- [FirmwareUpdate](#firmwareupdate)
 
 
 
@@ -1023,6 +1026,200 @@ _Appears in:_
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BIOS version. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+
+
+#### ComponentJobsSummary
+
+
+
+ComponentJobsSummary tallies per-component jobs by completion state.
+
+
+
+_Appears in:_
+- [FirmwareUpdateStatus](#firmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `total` _integer_ |  |  |  |
+| `completed` _integer_ |  |  |  |
+| `inProgress` _integer_ |  |  |  |
+| `failed` _integer_ |  |  |  |
+
+
+#### FirmwareRepository
+
+
+
+FirmwareRepository describes the network share hosting Dell's update repository/catalog, as
+consumed by DellSoftwareInstallationService.InstallFromRepository.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSpec](#firmwareupdatespec)
+- [FirmwareUpdateTemplate](#firmwareupdatetemplate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `shareType` _[RepositoryShareType](#repositorysharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
+| `address` _string_ | Address is the share's hostname or IP address (e.g. downloads.dell.com). |  |  |
+| `shareName` _string_ | ShareName is the network share name. Not required for HTTP/HTTPS catalogs. |  |  |
+| `catalogFile` _string_ | CatalogFile is the catalog file name within the share. Defaults to "Catalog.xml". |  |  |
+| `workgroup` _string_ | Workgroup is the CIFS workgroup, if applicable. |  |  |
+| `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required. |  |  |
+| `ignoreCertWarning` _boolean_ | IgnoreCertWarning, if true, ignores certificate warnings for HTTPS shares. |  |  |
+| `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
+| `applySameVersions` _boolean_ | ApplySameVersions, if true, re-applies packages already at the same version. |  |  |
+| `applyDowngradeVersions` _boolean_ | ApplyDowngradeVersions, if true, allows applying packages older than the currently installed version. |  |  |
+
+
+#### FirmwareUpdate
+
+
+
+FirmwareUpdate is the Schema for the firmwareupdates API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `FirmwareUpdate` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[FirmwareUpdateSpec](#firmwareupdatespec)_ |  |  |  |
+| `status` _[FirmwareUpdateStatus](#firmwareupdatestatus)_ |  |  |  |
+
+
+#### FirmwareUpdateSpec
+
+
+
+FirmwareUpdateSpec defines the desired state of FirmwareUpdate.
+
+
+
+_Appears in:_
+- [FirmwareUpdate](#firmwareupdate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `repository` _[FirmwareRepository](#firmwarerepository)_ | Repository describes the network share hosting the Dell update repository/catalog. |  |  |
+| `image` _[ImageSpec](#imagespec)_ | Image describes the OTB firmware image parameters (HPE, Lenovo). |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
+| `progressDeadlineSeconds` _integer_ | ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward<br />progress before the update is marked Failed. Defaults to 3600 (1 hour). | 3600 |  |
+| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection. |  |  |
+
+
+#### FirmwareUpdateState
+
+_Underlying type:_ _string_
+
+FirmwareUpdateState describes the current state of a FirmwareUpdate.
+
+
+
+_Appears in:_
+- [FirmwareUpdateStatus](#firmwareupdatestatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | FirmwareUpdateStatePending specifies that the firmware update is waiting.<br /> |
+| `InProgress` | FirmwareUpdateStateInProgress specifies that the firmware update is in progress.<br /> |
+| `Completed` | FirmwareUpdateStateCompleted specifies that the firmware update has been completed.<br /> |
+| `Failed` | FirmwareUpdateStateFailed specifies that the firmware update has failed.<br /> |
+
+
+#### FirmwareUpdateStatus
+
+
+
+FirmwareUpdateStatus defines the observed state of FirmwareUpdate.
+
+
+
+_Appears in:_
+- [FirmwareUpdate](#firmwareupdate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[FirmwareUpdateState](#firmwareupdatestate)_ | State represents the current state of the firmware update. |  |  |
+| `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to the ServerMaintenance object the controller created for this update. |  |  |
+| `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
+| `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
+| `componentJobs` _[RepositoryJob](#repositoryjob) array_ | ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job. |  |  |
+| `componentJobsSummary` _[ComponentJobsSummary](#componentjobssummary)_ | ComponentJobsSummary tallies ComponentJobs by completion state. |  |  |
+| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. |  |  |
+| `baselineJobsCaptured` _boolean_ | BaselineJobsCaptured is true once BaselineJobIDs has been successfully populated for the current pass. |  |  |
+| `lastProgressTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastProgressTime records the last time the controller observed forward progress.<br />Used together with ProgressDeadlineSeconds to detect stalled updates. |  |  |
+| `passCount` _integer_ | PassCount is the number of check->apply->track->recheck passes completed so far. |  |  |
+| `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
+| `observedGeneration` _integer_ | ObservedGeneration is the most recent generation observed by the controller. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest available observations of the firmware update state. |  |  |
+
+
+#### FirmwareUpdateTemplate
+
+
+
+FirmwareUpdateTemplate defines the desired firmware update parameters.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSpec](#firmwareupdatespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `repository` _[FirmwareRepository](#firmwarerepository)_ | Repository describes the network share hosting the Dell update repository/catalog. |  |  |
+| `image` _[ImageSpec](#imagespec)_ | Image describes the OTB firmware image parameters (HPE, Lenovo). |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+
+
+#### RepositoryJob
+
+
+
+RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
+operation. State is intentionally a plain string mirroring bmc.DellJob.
+
+
+
+_Appears in:_
+- [FirmwareUpdateStatus](#firmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `jobID` _string_ |  |  |  |
+| `name` _string_ |  |  |  |
+| `jobType` _string_ |  |  |  |
+| `state` _string_ |  |  |  |
+| `message` _string_ |  |  |  |
+| `percentComplete` _integer_ |  |  |  |
+
+
+#### RepositoryShareType
+
+_Underlying type:_ _string_
+
+RepositoryShareType is the type of network share hosting the firmware update repository/catalog.
+
+
+
+_Appears in:_
+- [FirmwareRepository](#firmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `NFS` |  |
+| `CIFS` |  |
+| `HTTP` |  |
+| `HTTPS` |  |
 
 
 
