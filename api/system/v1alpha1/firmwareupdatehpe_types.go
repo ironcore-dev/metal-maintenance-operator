@@ -102,8 +102,9 @@ type ComponentUpdate struct {
 	// +optional
 	AvailableVersion string `json:"availableVersion,omitempty"`
 
-	// Filename is the .fwpkg payload (resolved from the manifest FileName) staged into the iLO
-	// ComponentRepository and referenced by the Install Set Sequence.
+	// Filename is the payload staged into the iLO ComponentRepository and referenced by the
+	// Install Set Sequence. Resolved from the SPP manifest's `Package.Files[].Name` (the entry
+	// whose TargetGUIDs contains Target) — not `FirmwareImages[].FileName`.
 	// +optional
 	Filename string `json:"filename,omitempty"`
 

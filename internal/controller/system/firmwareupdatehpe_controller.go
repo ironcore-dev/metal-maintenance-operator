@@ -68,9 +68,18 @@ type hpeComponentUpdate struct {
 	DeviceName       string
 	InstalledVersion string
 	AvailableVersion string
-	Filename         string // resolved on-disk .fwpkg (manifest FileName stem-matched)
-	ImageURI         string // <BaseURI>/packages/<Filename> handed to AddFromUri
-	ResetRequired    bool
+	// Filename is the on-disk payload from metadata.json `Package.Files[].Name` (the single Files
+	// entry whose TargetGUIDs contains Target) — NOT `FirmwareImages[].FileName`, which names an
+	// artifact inside the .fwpkg (e.g. …pldm.signed). Covers .fwpkg and non-fwpkg firmware
+	// (.vme/.flash/.bin) uniformly.
+	Filename string
+	// ImageURI is <BaseURI>/packages/<Filename>, handed to AddFromUri.
+	ImageURI string
+	// SHA256 and SizeBytes come from the same Package.Files[] entry — used for integrity
+	// verification and the ~1 GB ComponentRepository budget check before staging.
+	SHA256        string
+	SizeBytes     int64
+	ResetRequired bool
 }
 
 // hpeInstallSetUpdater is the HPE counterpart of the Dell/Lenovo repository updaters. It is
@@ -78,9 +87,11 @@ type hpeComponentUpdate struct {
 // iLO Install Set support and an SPP-manifest reader. Replace with the real capabilities once
 // available. TODO(hpe).
 type hpeInstallSetUpdater interface {
-	// ComputeUpdateSet reads the SPP manifest at baseURI, GETs the server's FirmwareInventory,
-	// and returns the applicable update set (join by Target GUID; gates: Updateable, Target
-	// match, UpdatableBy in {Bmc,Uefi}, version_gt). Read-only — never touches the host.
+	// ComputeUpdateSet reads the SPP manifest (metadata.json) at baseURI, GETs the server's
+	// FirmwareInventory, and returns the applicable update set. Join by Target GUID; gates:
+	// FirmwareInventory Updateable, Target match, UpdatableBy in {Bmc,Uefi}, version_gt. The
+	// payload filename/SHA256/size come from the matched component's Package.Files[] entry
+	// (whose TargetGUIDs contains the Target). Read-only — never touches the host.
 	ComputeUpdateSet(ctx context.Context, systemURI, baseURI, user, pass string) ([]hpeComponentUpdate, error)
 	// StageComponent has iLO pull one .fwpkg into its ComponentRepository (AddFromUri,
 	// UpdateRepository=true, UpdateTarget=false) — staged, not flashed.
