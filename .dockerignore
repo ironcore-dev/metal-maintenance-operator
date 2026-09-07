@@ -15,3 +15,6 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include metalprobe launch script
+!hack/metalprobe_launch.sh

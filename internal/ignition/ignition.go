@@ -18,11 +18,18 @@ var (
 	sanitizationIgnitionYAMLTemplateData string
 
 	sanitizationIgnitionYAMLTemplate *template.Template
+
+	//go:embed discovery-ignition.yaml.gotmpl
+	discoveryIgnitionYAMLTemplateData string
+
+	discoveryIgnitionYAMLTemplate *template.Template
 )
 
 func init() {
 	sanitizationIgnitionYAMLTemplate = template.Must(
 		template.New("sanitization-ignition.yaml").Parse(sanitizationIgnitionYAMLTemplateData))
+	discoveryIgnitionYAMLTemplate = template.Must(
+		template.New("discovery-ignition.yaml").Parse(discoveryIgnitionYAMLTemplateData))
 }
 
 type SanitizationProvider struct {
