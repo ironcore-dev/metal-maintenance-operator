@@ -15,7 +15,6 @@ import (
 	"github.com/ironcore-dev/metal-operator/bmc"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -145,8 +144,6 @@ func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.Firmwa
 	fw.Status.Conditions = []metav1.Condition{}
 	fw.Status.CheckJob = nil
 	fw.Status.UpdateJob = nil
-	fw.Status.ComponentJobs = nil
-	fw.Status.ComponentJobsSummary = nil
 	fw.Status.BaselineJobIDs = nil
 	fw.Status.BaselineJobsCaptured = false
 	// PassCount is intentionally preserved (not reset) here: it is only reset
@@ -261,8 +258,6 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 		fw.Status.Conditions = []metav1.Condition{*condition}
 		fw.Status.CheckJob = nil
 		fw.Status.UpdateJob = nil
-		fw.Status.ComponentJobs = nil
-		fw.Status.ComponentJobsSummary = nil
 		fw.Status.BaselineJobIDs = nil
 		fw.Status.PassCount = 0
 		return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
@@ -422,8 +417,6 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		known[fw.Status.UpdateJob.JobID] = struct{}{}
 	}
 
-	componentJobs := make([]systemv1alpha1.RepositoryJob, 0, len(jobIDs))
-	summary := &systemv1alpha1.ComponentJobsSummary{}
 	allTerminal := true
 	anyFailed := false
 	for _, id := range jobIDs {
@@ -435,16 +428,8 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 			log.V(1).Info("Failed to fetch component job, retrying", "JobID", id, "error", err)
 			return true, nil
 		}
-		componentJobs = append(componentJobs, toRepositoryJob(job))
-		summary.Total++
-		switch {
-		case job.IsFailed():
+		if job.IsFailed() {
 			anyFailed = true
-			summary.Failed++
-		case job.IsCompleted():
-			summary.Completed++
-		default:
-			summary.InProgress++
 		}
 		if !job.IsTerminal() {
 			allTerminal = false
@@ -452,10 +437,7 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	}
 
 	if !allTerminal {
-		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.ComponentJobs = componentJobs
-			status.ComponentJobsSummary = summary
-		})
+		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {})
 	}
 
 	if anyFailed {
@@ -467,10 +449,7 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		); err != nil {
 			return false, fmt.Errorf("failed to update ComponentJobsCompleted condition: %w", err)
 		}
-		return false, r.patchProgress(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.ComponentJobs = componentJobs
-			status.ComponentJobsSummary = summary
-		})
+		return false, r.patchProgress(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {})
 	}
 
 	if err := r.Conditions.Update(
@@ -481,23 +460,20 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	); err != nil {
 		return false, fmt.Errorf("failed to update ComponentJobsCompleted condition: %w", err)
 	}
-	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-		status.ComponentJobs = componentJobs
-		status.ComponentJobsSummary = summary
-	})
+	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {})
 }
 
 // buildRepositoryParameters translates the FirmwareUpdate's Repository
 // spec (and, if configured, its Secret credentials) into bmc.RepositoryUpdateParameters.
 func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler, fw *systemv1alpha1.FirmwareUpdate, applyUpdate bool) (*bmc.RepositoryUpdateParameters, error) {
-	if fw.Spec.Repository == nil {
-		return nil, fmt.Errorf("firmware update has no repository configured")
+	if fw.Spec.DellRepository == nil {
+		return nil, fmt.Errorf("firmware update has no dellRepository configured")
 	}
-	repo := fw.Spec.Repository
+	repo := fw.Spec.DellRepository
 
 	var username, password string
 	if repo.CredentialsRef != nil {
-		if repo.ShareType == systemv1alpha1.RepositoryShareTypeHTTP {
+		if repo.ShareType == systemv1alpha1.DellShareTypeHTTP {
 			return nil, fmt.Errorf("credentialsRef must not be used with HTTP shares: credentials would be sent in cleartext")
 		}
 		var err error
@@ -513,18 +489,14 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 	}
 
 	return &bmc.RepositoryUpdateParameters{
-		ShareType:              string(repo.ShareType),
-		IPAddress:              repo.Address,
-		ShareName:              repo.ShareName,
-		CatalogFile:            catalogFile,
-		UserName:               username,
-		Password:               password,
-		Workgroup:              repo.Workgroup,
-		IgnoreCertWarning:      ptr.Deref(repo.IgnoreCertWarning, false),
-		ApplyUpdate:            applyUpdate,
-		RebootNeeded:           applyUpdate && repo.RebootNeeded,
-		ApplySameVersions:      ptr.Deref(repo.ApplySameVersions, false),
-		ApplyDowngradeVersions: ptr.Deref(repo.ApplyDowngradeVersions, false),
+		ShareType:    string(repo.ShareType),
+		IPAddress:    repo.Address,
+		ShareName:    repo.ShareName,
+		CatalogFile:  catalogFile,
+		UserName:     username,
+		Password:     password,
+		ApplyUpdate:  applyUpdate,
+		RebootNeeded: applyUpdate && repo.RebootNeeded,
 	}, nil
 }
 

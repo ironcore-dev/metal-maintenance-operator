@@ -12,14 +12,14 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
-// RepositoryShareType is the type of network share hosting the firmware update repository/catalog.
-type RepositoryShareType string
+// DellShareType is the type of network share hosting the Dell update repository/catalog.
+type DellShareType string
 
 const (
-	RepositoryShareTypeNFS   RepositoryShareType = "NFS"
-	RepositoryShareTypeCIFS  RepositoryShareType = "CIFS"
-	RepositoryShareTypeHTTP  RepositoryShareType = "HTTP"
-	RepositoryShareTypeHTTPS RepositoryShareType = "HTTPS"
+	DellShareTypeNFS   DellShareType = "NFS"
+	DellShareTypeCIFS  DellShareType = "CIFS"
+	DellShareTypeHTTP  DellShareType = "HTTP"
+	DellShareTypeHTTPS DellShareType = "HTTPS"
 )
 
 // RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
@@ -39,18 +39,6 @@ type RepositoryJob struct {
 	PercentComplete int32 `json:"percentComplete,omitempty"`
 }
 
-// ComponentJobsSummary tallies per-component jobs by completion state.
-type ComponentJobsSummary struct {
-	// +optional
-	Total int32 `json:"total,omitempty"`
-	// +optional
-	Completed int32 `json:"completed,omitempty"`
-	// +optional
-	InProgress int32 `json:"inProgress,omitempty"`
-	// +optional
-	Failed int32 `json:"failed,omitempty"`
-}
-
 // FirmwareUpdateState describes the current state of a FirmwareUpdate.
 type FirmwareUpdateState string
 
@@ -65,13 +53,13 @@ const (
 	FirmwareUpdateStateFailed FirmwareUpdateState = "Failed"
 )
 
-// FirmwareRepository describes the network share hosting Dell's update repository/catalog, as
-// consumed by DellSoftwareInstallationService.InstallFromRepository.
-type FirmwareRepository struct {
+// DellFirmwareRepository describes the network share hosting Dell's update repository/catalog,
+// as consumed by DellSoftwareInstallationService.InstallFromRepository.
+type DellFirmwareRepository struct {
 	// ShareType is the type of network share hosting the repository.
 	// +kubebuilder:validation:Enum=NFS;CIFS;HTTP;HTTPS
 	// +required
-	ShareType RepositoryShareType `json:"shareType"`
+	ShareType DellShareType `json:"shareType"`
 
 	// Address is the share's hostname or IP address (e.g. downloads.dell.com).
 	// +optional
@@ -85,37 +73,22 @@ type FirmwareRepository struct {
 	// +optional
 	CatalogFile string `json:"catalogFile,omitempty"`
 
-	// Workgroup is the CIFS workgroup, if applicable.
-	// +optional
-	Workgroup string `json:"workgroup,omitempty"`
-
 	// CredentialsRef references the credentials used to authenticate against the share, if required.
+	// Must not be set when ShareType is HTTP.
 	// +optional
 	CredentialsRef *corev1.SecretReference `json:"credentialsRef,omitempty"`
-
-	// IgnoreCertWarning, if true, ignores certificate warnings for HTTPS shares.
-	// +optional
-	IgnoreCertWarning *bool `json:"ignoreCertWarning,omitempty"`
 
 	// RebootNeeded, if true, allows the BMC to reboot the server to apply updates.
 	// +optional
 	RebootNeeded bool `json:"rebootNeeded,omitempty"`
-
-	// ApplySameVersions, if true, re-applies packages already at the same version.
-	// +optional
-	ApplySameVersions *bool `json:"applySameVersions,omitempty"`
-
-	// ApplyDowngradeVersions, if true, allows applying packages older than the currently installed version.
-	// +optional
-	ApplyDowngradeVersions *bool `json:"applyDowngradeVersions,omitempty"`
 }
 
 // FirmwareUpdateTemplate defines the desired firmware update parameters.
-// +kubebuilder:validation:XValidation:rule="has(self.repository) != has(self.image)",message="exactly one of repository or image must be set"
+// +kubebuilder:validation:XValidation:rule="has(self.dellRepository) != has(self.image)",message="exactly one of dellRepository or image must be set"
 type FirmwareUpdateTemplate struct {
-	// Repository describes the network share hosting the Dell update repository/catalog.
+	// DellRepository describes the network share hosting the Dell update repository/catalog.
 	// +optional
-	Repository *FirmwareRepository `json:"repository,omitempty"`
+	DellRepository *DellFirmwareRepository `json:"dellRepository,omitempty"`
 
 	// Image describes the OTB firmware image parameters (HPE, Lenovo).
 	// +optional
@@ -169,14 +142,6 @@ type FirmwareUpdateStatus struct {
 	// UpdateJob contains the state of the main apply job.
 	// +optional
 	UpdateJob *RepositoryJob `json:"updateJob,omitempty"`
-
-	// ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job.
-	// +optional
-	ComponentJobs []RepositoryJob `json:"componentJobs,omitempty"`
-
-	// ComponentJobsSummary tallies ComponentJobs by completion state.
-	// +optional
-	ComponentJobsSummary *ComponentJobsSummary `json:"componentJobsSummary,omitempty"`
 
 	// BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
 	// current pass, used to diff and discover newly spawned component jobs.

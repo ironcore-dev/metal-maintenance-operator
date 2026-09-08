@@ -454,7 +454,6 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 		fw.Status.ObservedGeneration = fw.Generation
 		fw.Status.CheckJob = nil
 		fw.Status.UpdateJob = nil
-		fw.Status.ComponentJobs = nil
 		fw.Status.BaselineJobIDs = nil
 		fw.Status.BaselineJobsCaptured = false
 		fw.Status.LastProgressTime = nil
@@ -501,7 +500,6 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 			fw.Status.ObservedGeneration = fw.Generation
 			fw.Status.CheckJob = nil
 			fw.Status.UpdateJob = nil
-			fw.Status.ComponentJobs = nil
 			fw.Status.BaselineJobIDs = nil
 			fw.Status.BaselineJobsCaptured = false
 			fw.Status.LastProgressTime = nil
@@ -581,7 +579,6 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 		fw.Status.Conditions = []metav1.Condition{}
 		fw.Status.CheckJob = nil
 		fw.Status.UpdateJob = nil
-		fw.Status.ComponentJobs = nil
 		fw.Status.BaselineJobIDs = nil
 		fw.Status.BaselineJobsCaptured = false
 		fw.Status.LastProgressTime = nil

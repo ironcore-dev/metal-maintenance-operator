@@ -1028,31 +1028,14 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 
 
-#### ComponentJobsSummary
+
+
+#### DellFirmwareRepository
 
 
 
-ComponentJobsSummary tallies per-component jobs by completion state.
-
-
-
-_Appears in:_
-- [FirmwareUpdateStatus](#firmwareupdatestatus)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `total` _integer_ |  |  |  |
-| `completed` _integer_ |  |  |  |
-| `inProgress` _integer_ |  |  |  |
-| `failed` _integer_ |  |  |  |
-
-
-#### FirmwareRepository
-
-
-
-FirmwareRepository describes the network share hosting Dell's update repository/catalog, as
-consumed by DellSoftwareInstallationService.InstallFromRepository.
+DellFirmwareRepository describes the network share hosting Dell's update repository/catalog,
+as consumed by DellSoftwareInstallationService.InstallFromRepository.
 
 
 
@@ -1062,16 +1045,31 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `shareType` _[RepositoryShareType](#repositorysharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
+| `shareType` _[DellShareType](#dellsharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
 | `address` _string_ | Address is the share's hostname or IP address (e.g. downloads.dell.com). |  |  |
 | `shareName` _string_ | ShareName is the network share name. Not required for HTTP/HTTPS catalogs. |  |  |
 | `catalogFile` _string_ | CatalogFile is the catalog file name within the share. Defaults to "Catalog.xml". |  |  |
-| `workgroup` _string_ | Workgroup is the CIFS workgroup, if applicable. |  |  |
-| `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required. |  |  |
-| `ignoreCertWarning` _boolean_ | IgnoreCertWarning, if true, ignores certificate warnings for HTTPS shares. |  |  |
+| `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required.<br />Must not be set when ShareType is HTTP. |  |  |
 | `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
-| `applySameVersions` _boolean_ | ApplySameVersions, if true, re-applies packages already at the same version. |  |  |
-| `applyDowngradeVersions` _boolean_ | ApplyDowngradeVersions, if true, allows applying packages older than the currently installed version. |  |  |
+
+
+#### DellShareType
+
+_Underlying type:_ _string_
+
+DellShareType is the type of network share hosting the Dell update repository/catalog.
+
+
+
+_Appears in:_
+- [DellFirmwareRepository](#dellfirmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `NFS` |  |
+| `CIFS` |  |
+| `HTTP` |  |
+| `HTTPS` |  |
 
 
 #### FirmwareUpdate
@@ -1106,7 +1104,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `repository` _[FirmwareRepository](#firmwarerepository)_ | Repository describes the network share hosting the Dell update repository/catalog. |  |  |
+| `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
 | `image` _[ImageSpec](#imagespec)_ | Image describes the OTB firmware image parameters (HPE, Lenovo). |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
@@ -1151,8 +1149,6 @@ _Appears in:_
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to the ServerMaintenance object the controller created for this update. |  |  |
 | `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
 | `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
-| `componentJobs` _[RepositoryJob](#repositoryjob) array_ | ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job. |  |  |
-| `componentJobsSummary` _[ComponentJobsSummary](#componentjobssummary)_ | ComponentJobsSummary tallies ComponentJobs by completion state. |  |  |
 | `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. |  |  |
 | `baselineJobsCaptured` _boolean_ | BaselineJobsCaptured is true once BaselineJobIDs has been successfully populated for the current pass. |  |  |
 | `lastProgressTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastProgressTime records the last time the controller observed forward progress.<br />Used together with ProgressDeadlineSeconds to detect stalled updates. |  |  |
@@ -1175,7 +1171,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `repository` _[FirmwareRepository](#firmwarerepository)_ | Repository describes the network share hosting the Dell update repository/catalog. |  |  |
+| `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
 | `image` _[ImageSpec](#imagespec)_ | Image describes the OTB firmware image parameters (HPE, Lenovo). |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
@@ -1201,25 +1197,6 @@ _Appears in:_
 | `state` _string_ |  |  |  |
 | `message` _string_ |  |  |  |
 | `percentComplete` _integer_ |  |  |  |
-
-
-#### RepositoryShareType
-
-_Underlying type:_ _string_
-
-RepositoryShareType is the type of network share hosting the firmware update repository/catalog.
-
-
-
-_Appears in:_
-- [FirmwareRepository](#firmwarerepository)
-
-| Field | Description |
-| --- | --- |
-| `NFS` |  |
-| `CIFS` |  |
-| `HTTP` |  |
-| `HTTPS` |  |
 
 
 

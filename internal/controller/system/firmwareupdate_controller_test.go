@@ -109,8 +109,8 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 			},
 			Spec: systemv1alpha1.FirmwareUpdateSpec{
 				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
-					Repository: &systemv1alpha1.FirmwareRepository{
-						ShareType:   systemv1alpha1.RepositoryShareTypeHTTPS,
+					DellRepository: &systemv1alpha1.DellFirmwareRepository{
+						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
 						Address:     "downloads.dell.com",
 						CatalogFile: "Catalog.xml",
 					},
@@ -189,8 +189,8 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 			},
 			Spec: systemv1alpha1.FirmwareUpdateSpec{
 				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
-					Repository: &systemv1alpha1.FirmwareRepository{
-						ShareType:   systemv1alpha1.RepositoryShareTypeHTTPS,
+					DellRepository: &systemv1alpha1.DellFirmwareRepository{
+						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
 						Address:     "downloads.dell.com",
 						CatalogFile: "fail-catalog.xml",
 					},
