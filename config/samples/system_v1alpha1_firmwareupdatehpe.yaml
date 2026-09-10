@@ -1,0 +1,23 @@
+apiVersion: system.metal.ironcore.dev/v1alpha1
+kind: FirmwareUpdateHPE
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firmwareupdatehpe-sample
+spec:
+  # The server (metal-operator Server) to update.
+  serverRef:
+    name: server-sample
+  # Maintenance policy gating the reboot-causing apply. OwnerApproval waits for the workload owner
+  # to drain and approve (ESXi/KVM/bare-metal K8s worker); Enforced proceeds without approval.
+  serverMaintenancePolicy: OwnerApproval
+  spp:
+    # HTTP(S) base URL where the extracted HPE SPP is served (reachable by iLO). The controller
+    # reads <baseURI>/manifest/metadata.json and hands iLO <baseURI>/packages/<file>.fwpkg URIs
+    # via AddFromUri. Use the SPP matching the server's generation (e.g. Gen11).
+    baseURI: https://spp.example.com/gen11-spp
+    # Optional credentials for the SPP server.
+    # secretRef:
+    #   name: spp-repo-credentials
+    #   namespace: default
