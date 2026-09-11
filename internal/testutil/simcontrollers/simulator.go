@@ -338,12 +338,13 @@ func (r *ServerReconciler) updateServerStatus(ctx context.Context, bmcClient bmc
 	}
 
 	updatedPowerState := metalv1alpha1.ServerPowerState(systemInfo.PowerState)
-	if updatedPowerState == server.Status.PowerState {
+	if updatedPowerState == server.Status.PowerState && systemInfo.Manufacturer == server.Status.Manufacturer {
 		return nil
 	}
 
 	serverBase := server.DeepCopy()
 	server.Status.PowerState = updatedPowerState
+	server.Status.Manufacturer = systemInfo.Manufacturer
 	return r.Status().Patch(ctx, server, client.MergeFrom(serverBase))
 }
 
