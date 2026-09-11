@@ -12,7 +12,7 @@ COPY go.sum go.sum
 RUN go mod download
 
 # Copy the go source
-COPY cmd/main.go cmd/main.go
+COPY cmd/ cmd/
 COPY api/ api/
 COPY internal/ internal/
 COPY third_party/ third_party/
@@ -27,6 +27,11 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 
+FROM builder AS probe-builder
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o metalprobe cmd/metalprobe/main.go
+
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot AS manager
@@ -35,3 +40,14 @@ COPY --from=manager-builder /workspace/manager .
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
+
+FROM debian:testing-slim AS probe
+LABEL source_repository="https://github.com/ironcore-dev/metal-maintenance-operator"
+WORKDIR /
+COPY --from=probe-builder /workspace/metalprobe .
+COPY hack/metalprobe_launch.sh /launch.sh
+RUN chmod +x /launch.sh
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates bash curl iproute2 iputils-ping net-tools ethtool lldpd && \
+    rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["/launch.sh"]

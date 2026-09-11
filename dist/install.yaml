@@ -2928,6 +2928,310 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
+  name: metadata.discovery.metal.ironcore.dev
+spec:
+  group: discovery.metal.ironcore.dev
+  names:
+    kind: Metadata
+    listKind: MetadataList
+    plural: metadata
+    singular: metadata
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Metadata is a pure data object holding the hardware inventory discovered
+          during the discovery boot of a Server. By convention a Metadata object is
+          named exactly like the Server it describes.
+          The payload fields mirror what the metalprobe agent posts to the registry.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          cpu:
+            description: CPU holds the discovered CPU information.
+            items:
+              description: CPUInfo holds information about a single CPU.
+              properties:
+                capabilities:
+                  items:
+                    type: string
+                  type: array
+                id:
+                  format: int32
+                  type: integer
+                model:
+                  type: string
+                totalCores:
+                  format: int32
+                  type: integer
+                totalHardwareThreads:
+                  format: int32
+                  type: integer
+                vendor:
+                  type: string
+              type: object
+            type: array
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          lldp:
+            description: LLDP holds the discovered LLDP interface information.
+            items:
+              description: LLDPInterface holds LLDP information of a single interface.
+              properties:
+                name:
+                  type: string
+                neighbors:
+                  items:
+                    description: LLDPNeighbor describes a single LLDP neighbor.
+                    properties:
+                      capabilities:
+                        items:
+                          type: string
+                        type: array
+                      chassisId:
+                        type: string
+                      mgmtIp:
+                        type: string
+                      portDescription:
+                        type: string
+                      portId:
+                        type: string
+                      systemDescription:
+                        type: string
+                      systemName:
+                        type: string
+                      vlanId:
+                        type: string
+                    type: object
+                  type: array
+              type: object
+            type: array
+          memory:
+            description: Memory holds the discovered memory devices.
+            items:
+              description: MemoryDevice describes a discovered memory device.
+              properties:
+                assetTag:
+                  type: string
+                bankLocator:
+                  type: string
+                configuredMemorySpeed:
+                  type: string
+                configuredVoltage:
+                  type: string
+                deviceLocator:
+                  type: string
+                deviceSet:
+                  type: string
+                maximumVoltage:
+                  type: string
+                memoryType:
+                  type: string
+                minimumVoltage:
+                  type: string
+                partNumber:
+                  type: string
+                serialNumber:
+                  type: string
+                size:
+                  format: int64
+                  type: integer
+                speed:
+                  type: string
+                vendor:
+                  type: string
+              type: object
+            type: array
+          metadata:
+            type: object
+          networkInterfaces:
+            description: NetworkInterfaces holds the discovered network interfaces.
+            items:
+              description: NetworkInterface describes a discovered network interface.
+              properties:
+                carrierStatus:
+                  description: CarrierStatus is the operational carrier status of
+                    the interface.
+                  type: string
+                ipAddresses:
+                  description: IPAddresses is the list of IP addresses assigned to
+                    the interface.
+                  items:
+                    type: string
+                  type: array
+                macAddress:
+                  description: MACAddress is the MAC address of the network interface.
+                  type: string
+                name:
+                  description: Name is the name of the network interface.
+                  type: string
+              required:
+              - macAddress
+              - name
+              type: object
+            type: array
+          nics:
+            description: NICs holds the discovered NIC details.
+            items:
+              description: NIC describes a discovered network interface card.
+              properties:
+                firmwareVersion:
+                  type: string
+                linkModes:
+                  items:
+                    type: string
+                  type: array
+                mac:
+                  type: string
+                name:
+                  type: string
+                pciAddress:
+                  type: string
+                speed:
+                  type: string
+                supportedPorts:
+                  items:
+                    type: string
+                  type: array
+              type: object
+            type: array
+          pciDevices:
+            description: PCIDevices holds the discovered PCI devices.
+            items:
+              description: PCIDevice describes a discovered PCI device.
+              properties:
+                address:
+                  type: string
+                numaNodeID:
+                  format: int32
+                  type: integer
+                product:
+                  type: string
+                productID:
+                  type: string
+                vendor:
+                  type: string
+                vendorID:
+                  type: string
+              type: object
+            type: array
+          storage:
+            description: Storage holds the discovered block devices.
+            items:
+              description: BlockDevice describes a discovered block device.
+              properties:
+                hWSectorSize:
+                  format: int64
+                  type: integer
+                logicalBlockSize:
+                  format: int64
+                  type: integer
+                model:
+                  type: string
+                name:
+                  type: string
+                numaNodeID:
+                  format: int32
+                  type: integer
+                path:
+                  type: string
+                physicalBlockSize:
+                  format: int64
+                  type: integer
+                readOnly:
+                  type: boolean
+                removable:
+                  type: boolean
+                rotational:
+                  type: boolean
+                serial:
+                  type: string
+                sizeBytes:
+                  format: int64
+                  type: integer
+                vendor:
+                  type: string
+                wwid:
+                  type: string
+              type: object
+            type: array
+          systemInfo:
+            description: SystemInfo holds DMI/SMBIOS information about the system.
+            properties:
+              biosInformation:
+                description: BIOSInformation holds DMI BIOS information.
+                properties:
+                  date:
+                    type: string
+                  vendor:
+                    type: string
+                  version:
+                    type: string
+                type: object
+              boardInformation:
+                description: BoardInformation holds DMI baseboard information.
+                properties:
+                  assetTag:
+                    type: string
+                  manufacturer:
+                    type: string
+                  product:
+                    type: string
+                  serialNumber:
+                    type: string
+                  version:
+                    type: string
+                type: object
+              systemInformation:
+                description: SystemInformation holds DMI system information.
+                properties:
+                  family:
+                    type: string
+                  manufacturer:
+                    type: string
+                  productName:
+                    type: string
+                  serialNumber:
+                    type: string
+                  skuNumber:
+                    type: string
+                  uuid:
+                    type: string
+                  version:
+                    type: string
+                type: object
+            type: object
+          timestamp:
+            description: Timestamp is when the discovery data has been collected.
+            format: date-time
+            type: string
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
   name: servermaintenances.maintenance.metal.ironcore.dev
 spec:
   group: maintenance.metal.ironcore.dev
@@ -3378,6 +3682,77 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: metal-maintenance-operator
+  name: metal-maintenance-operator-discovery-metadata-admin-role
+rules:
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadata
+  verbs:
+  - '*'
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadata/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: metal-maintenance-operator
+  name: metal-maintenance-operator-discovery-metadata-editor-role
+rules:
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadata
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadata/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: metal-maintenance-operator
+  name: metal-maintenance-operator-discovery-metadata-viewer-role
+rules:
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadata
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadata/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   name: metal-maintenance-operator-manager-role
 rules:
 - apiGroups:
@@ -3442,6 +3817,18 @@ rules:
   - batch
   resources:
   - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadatas
   verbs:
   - create
   - delete

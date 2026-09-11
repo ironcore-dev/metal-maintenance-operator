@@ -81,6 +81,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - discovery.metal.ironcore.dev
+  resources:
+  - metadatas
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - maintenance.metal.ironcore.dev
   resources:
   - servermaintenances

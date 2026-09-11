@@ -1,0 +1,16 @@
+# Removes the Undiscovered taint once the maintenance-operator's discovery
+# flow has set Discovered=True on the Server, making it claimable for
+# regular workloads.
+apiVersion: metal.ironcore.dev/v1alpha1
+kind: ServerReadinessRule
+metadata:
+  name: discovery-completed
+spec:
+  serverSelector: {} # applies to all Servers
+  conditions:
+    - type: Discovered
+      requiredStatus: "True"
+  enforcementMode: BootstrapOnly
+  taint:
+    key: metal.ironcore.dev/Undiscovered
+    effect: NoBind

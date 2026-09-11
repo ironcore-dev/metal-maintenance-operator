@@ -2,6 +2,7 @@
 
 ## Packages
 - [baseboard.metal.ironcore.dev/v1alpha1](#baseboardmetalironcoredevv1alpha1)
+- [discovery.metal.ironcore.dev/v1alpha1](#discoverymetalironcoredevv1alpha1)
 - [maintenance.metal.ironcore.dev/v1alpha1](#maintenancemetalironcoredevv1alpha1)
 - [readiness.metal.ironcore.dev/v1alpha1](#readinessmetalironcoredevv1alpha1)
 - [system.metal.ironcore.dev/v1alpha1](#systemmetalironcoredevv1alpha1)
@@ -414,6 +415,304 @@ _Appears in:_
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+
+
+
+## discovery.metal.ironcore.dev/v1alpha1
+
+Package v1alpha1 contains API Schema definitions for the discovery.metal.ironcore.dev v1alpha1 API group.
+
+### Resource Types
+- [Metadata](#metadata)
+
+
+
+#### BIOSInformation
+
+
+
+BIOSInformation holds DMI BIOS information.
+
+
+
+_Appears in:_
+- [DMI](#dmi)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `vendor` _string_ |  |  |  |
+| `version` _string_ |  |  |  |
+| `date` _string_ |  |  |  |
+
+
+#### BlockDevice
+
+
+
+BlockDevice describes a discovered block device.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `path` _string_ |  |  |  |
+| `name` _string_ |  |  |  |
+| `rotational` _boolean_ |  |  |  |
+| `removable` _boolean_ |  |  |  |
+| `readOnly` _boolean_ |  |  |  |
+| `vendor` _string_ |  |  |  |
+| `model` _string_ |  |  |  |
+| `serial` _string_ |  |  |  |
+| `wwid` _string_ |  |  |  |
+| `physicalBlockSize` _integer_ |  |  |  |
+| `logicalBlockSize` _integer_ |  |  |  |
+| `hWSectorSize` _integer_ |  |  |  |
+| `sizeBytes` _integer_ |  |  |  |
+| `numaNodeID` _integer_ |  |  |  |
+
+
+#### BoardInformation
+
+
+
+BoardInformation holds DMI baseboard information.
+
+
+
+_Appears in:_
+- [DMI](#dmi)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `manufacturer` _string_ |  |  |  |
+| `product` _string_ |  |  |  |
+| `version` _string_ |  |  |  |
+| `serialNumber` _string_ |  |  |  |
+| `assetTag` _string_ |  |  |  |
+
+
+#### CPUInfo
+
+
+
+CPUInfo holds information about a single CPU.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _integer_ |  |  |  |
+| `totalCores` _integer_ |  |  |  |
+| `totalHardwareThreads` _integer_ |  |  |  |
+| `vendor` _string_ |  |  |  |
+| `model` _string_ |  |  |  |
+| `capabilities` _string array_ |  |  |  |
+
+
+#### DMI
+
+
+
+DMI holds DMI/SMBIOS information of a system.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `biosInformation` _[BIOSInformation](#biosinformation)_ |  |  |  |
+| `systemInformation` _[SystemInformation](#systeminformation)_ |  |  |  |
+| `boardInformation` _[BoardInformation](#boardinformation)_ |  |  |  |
+
+
+#### LLDPInterface
+
+
+
+LLDPInterface holds LLDP information of a single interface.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ |  |  |  |
+| `neighbors` _[LLDPNeighbor](#lldpneighbor) array_ |  |  |  |
+
+
+#### LLDPNeighbor
+
+
+
+LLDPNeighbor describes a single LLDP neighbor.
+
+
+
+_Appears in:_
+- [LLDPInterface](#lldpinterface)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `chassisId` _string_ |  |  |  |
+| `portId` _string_ |  |  |  |
+| `portDescription` _string_ |  |  |  |
+| `systemName` _string_ |  |  |  |
+| `systemDescription` _string_ |  |  |  |
+| `mgmtIp` _string_ |  |  |  |
+| `capabilities` _string array_ |  |  |  |
+| `vlanId` _string_ |  |  |  |
+
+
+#### MemoryDevice
+
+
+
+MemoryDevice describes a discovered memory device.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `size` _integer_ |  |  |  |
+| `deviceSet` _string_ |  |  |  |
+| `deviceLocator` _string_ |  |  |  |
+| `bankLocator` _string_ |  |  |  |
+| `memoryType` _string_ |  |  |  |
+| `speed` _string_ |  |  |  |
+| `vendor` _string_ |  |  |  |
+| `serialNumber` _string_ |  |  |  |
+| `assetTag` _string_ |  |  |  |
+| `partNumber` _string_ |  |  |  |
+| `configuredMemorySpeed` _string_ |  |  |  |
+| `minimumVoltage` _string_ |  |  |  |
+| `maximumVoltage` _string_ |  |  |  |
+| `configuredVoltage` _string_ |  |  |  |
+
+
+#### Metadata
+
+
+
+Metadata is a pure data object holding the hardware inventory discovered
+during the discovery boot of a Server. By convention a Metadata object is
+named exactly like the Server it describes.
+The payload fields mirror what the metalprobe agent posts to the registry.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `discovery.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `Metadata` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `timestamp` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Timestamp is when the discovery data has been collected. |  |  |
+| `systemInfo` _[DMI](#dmi)_ | SystemInfo holds DMI/SMBIOS information about the system. |  |  |
+| `cpu` _[CPUInfo](#cpuinfo) array_ | CPU holds the discovered CPU information. |  |  |
+| `networkInterfaces` _[NetworkInterface](#networkinterface) array_ | NetworkInterfaces holds the discovered network interfaces. |  |  |
+| `lldp` _[LLDPInterface](#lldpinterface) array_ | LLDP holds the discovered LLDP interface information. |  |  |
+| `storage` _[BlockDevice](#blockdevice) array_ | Storage holds the discovered block devices. |  |  |
+| `memory` _[MemoryDevice](#memorydevice) array_ | Memory holds the discovered memory devices. |  |  |
+| `nics` _[NIC](#nic) array_ | NICs holds the discovered NIC details. |  |  |
+| `pciDevices` _[PCIDevice](#pcidevice) array_ | PCIDevices holds the discovered PCI devices. |  |  |
+
+
+#### NIC
+
+
+
+NIC describes a discovered network interface card.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ |  |  |  |
+| `mac` _string_ |  |  |  |
+| `pciAddress` _string_ |  |  |  |
+| `speed` _string_ |  |  |  |
+| `linkModes` _string array_ |  |  |  |
+| `supportedPorts` _string array_ |  |  |  |
+| `firmwareVersion` _string_ |  |  |  |
+
+
+#### NetworkInterface
+
+
+
+NetworkInterface describes a discovered network interface.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the network interface. |  |  |
+| `ipAddresses` _string array_ | IPAddresses is the list of IP addresses assigned to the interface. |  |  |
+| `macAddress` _string_ | MACAddress is the MAC address of the network interface. |  |  |
+| `carrierStatus` _string_ | CarrierStatus is the operational carrier status of the interface. |  |  |
+
+
+#### PCIDevice
+
+
+
+PCIDevice describes a discovered PCI device.
+
+
+
+_Appears in:_
+- [Metadata](#metadata)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `address` _string_ |  |  |  |
+| `vendor` _string_ |  |  |  |
+| `vendorID` _string_ |  |  |  |
+| `product` _string_ |  |  |  |
+| `productID` _string_ |  |  |  |
+| `numaNodeID` _integer_ |  |  |  |
+
+
+#### SystemInformation
+
+
+
+SystemInformation holds DMI system information.
+
+
+
+_Appears in:_
+- [DMI](#dmi)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `manufacturer` _string_ |  |  |  |
+| `productName` _string_ |  |  |  |
+| `version` _string_ |  |  |  |
+| `serialNumber` _string_ |  |  |  |
+| `uuid` _string_ |  |  |  |
+| `skuNumber` _string_ |  |  |  |
+| `family` _string_ |  |  |  |
 
 
 

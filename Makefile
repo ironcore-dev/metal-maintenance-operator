@@ -1,5 +1,6 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+METALPROBE_IMG ?= metalprobe:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -115,7 +116,10 @@ check-license: addlicense ## Check that every file has a license header present.
 	find . -name '*.go' -exec $(ADDLICENSE) -check -c 'IronCore authors' {} +
 
 .PHONY: check
-check: generate manifests add-license fmt lint test # Generate manifests, code, lint, add licenses, test
+check: check-gen lint test # Generate manifests, code, lint, add licenses, test
+
+.PHONY: check-gen
+check-gen: generate manifests docs helm add-license fmt ## Check that generated code and manifests are up to date.
 
 ##@ Build
 
@@ -141,6 +145,14 @@ docker-build: ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+.PHONY: docker-build-metalprobe
+docker-build-metalprobe: ## Build the metalprobe image (discovery boot agent).
+	$(CONTAINER_TOOL) build --target probe -t ${METALPROBE_IMG} .
+
+.PHONY: docker-push-metalprobe
+docker-push-metalprobe: ## Push the metalprobe image.
+	$(CONTAINER_TOOL) push ${METALPROBE_IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:

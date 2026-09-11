@@ -1,0 +1,19 @@
+# A Server registered for discovery: the Undiscovered NoBind taint blocks
+# regular claims until the maintenance-operator's discovery flow sets the
+# Discovered condition (see serverreadinessrule-discovery.yaml).
+apiVersion: metal.ironcore.dev/v1alpha1
+kind: Server
+metadata:
+  name: node-0
+spec:
+  systemUUID: 550e8400-e29b-41d4-a716-446655440000
+  bmc:
+    address: 192.168.0.100
+    protocol:
+      name: Redfish
+      port: 443
+    bmcSecretRef:
+      name: node-0-bmc
+  taints:
+    - key: metal.ironcore.dev/Undiscovered
+      effect: NoBind
