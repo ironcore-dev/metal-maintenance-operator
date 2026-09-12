@@ -12,4 +12,5 @@ resources:
 - system_v1alpha1_biosversion.yaml
 - system_v1alpha1_biosversionset.yaml
 - baseboard_v1alpha1_bmcuser.yaml
+- baseboard_v1alpha1_bmcuserset.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

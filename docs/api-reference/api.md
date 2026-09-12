@@ -16,6 +16,7 @@ Package v1alpha1 contains API Schema definitions for the baseboard.metal.ironcor
 - [BMCSettings](#bmcsettings)
 - [BMCSettingsSet](#bmcsettingsset)
 - [BMCUser](#bmcuser)
+- [BMCUserSet](#bmcuserset)
 - [BMCVersion](#bmcversion)
 - [BMCVersionSet](#bmcversionset)
 
@@ -215,6 +216,81 @@ BMCUser is the Schema for the bmcusers API.
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[BMCUserSpec](#bmcuserspec)_ |  |  |  |
 | `status` _[BMCUserStatus](#bmcuserstatus)_ |  |  |  |
+
+
+#### BMCUserSet
+
+
+
+BMCUserSet is the Schema for the bmcusersets API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `BMCUserSet` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[BMCUserSetSpec](#bmcusersetspec)_ |  |  |  |
+| `status` _[BMCUserSetStatus](#bmcusersetstatus)_ |  |  |  |
+
+
+#### BMCUserSetSpec
+
+
+
+BMCUserSetSpec defines the desired state of BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSet](#bmcuserset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector selects the Server resources whose BMCs should receive the user. |  |  |
+| `template` _[BMCUserSetTemplate](#bmcusersettemplate)_ | Template describes the BMCUser to create on each matched server.<br />The fields mirror BMCUserSpec, except BMCRef and BMCSecretRef which are<br />managed by the controller per server. |  |  |
+
+
+#### BMCUserSetStatus
+
+
+
+BMCUserSetStatus defines the observed state of BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSet](#bmcuserset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `totalServers` _integer_ | TotalServers is the number of Server resources currently matching the selector. |  |  |
+| `readyServers` _integer_ | ReadyServers is the number of servers where the BMCUser is Ready. |  |  |
+| `pendingServers` _integer_ | PendingServers is the number of servers where the BMCUser is not yet Ready. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflect the overall state of the BMCUserSet. |  |  |
+
+
+#### BMCUserSetTemplate
+
+
+
+BMCUserSetTemplate describes the per-server BMCUser that the set creates.
+It mirrors BMCUserSpec minus the per-instance fields BMCRef and BMCSecretRef.
+
+
+
+_Appears in:_
+- [BMCUserSetSpec](#bmcusersetspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `userName` _string_ | UserName is the username of the BMC user. |  |  |
+| `roleID` _string_ | RoleID is the ID of the role to assign to the user. |  |  |
+| `description` _string_ | Description is a description for the BMC user. |  |  |
+| `rotationPeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | RotationPeriod defines how often the password should be rotated.<br />If not set, the password will not be rotated. |  |  |
 
 
 #### BMCUserSpec
