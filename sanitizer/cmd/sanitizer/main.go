@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
@@ -33,23 +32,16 @@ func dhConfigure(ctx context.Context) error {
 	ifs, err := dhclient.Interfaces("^e.*")
 	if err != nil {
 		allIfaces, _ := dhclient.Interfaces(".*")
-		allIfaceNames := make([]string, len(allIfaces))
+		allIfaceNames := make([]string, 0, len(allIfaces))
 		for _, iface := range allIfaces {
 			allIfaceNames = append(allIfaceNames, fmt.Sprintf("%#+v", iface.Attrs()))
 		}
 		return fmt.Errorf("getting interfaces: %w (available interfaces %v)", err, allIfaceNames)
 	}
 
-	var (
-		errs       []error
-		done       = make(chan struct{})
-		closeOnce  sync.Once
-		notifyDone = func() {
-			closeOnce.Do(func() { close(done) })
-		}
-	)
+	errs := make(chan error)
 	go func() {
-		defer notifyDone()
+		defer close(errs)
 
 		for res := range dhclient.SendRequests(ctx, ifs, true, true, dhclient.Config{
 			Timeout: 15 * time.Second,
@@ -64,24 +56,32 @@ func dhConfigure(ctx context.Context) error {
 			},
 		}, 30*time.Second) {
 			if res.Err != nil {
-				errs = append(errs, res.Err)
+				errs <- res.Err
 				continue
 			}
-
-			if err := res.Lease.Configure(); err != nil {
-				errs = append(errs, err)
-				continue
-			}
-
-			notifyDone()
+			errs <- res.Lease.Configure()
 		}
 	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-done:
-		return errors.Join(errs...)
+
+	// Drain the rest once we return so the goroutine never blocks on a send.
+	defer func() {
+		go func() {
+			for range errs {
+			}
+		}()
+	}()
+
+	var allErrs []error
+	for err := range errs {
+		if err == nil {
+			return nil
+		}
+		allErrs = append(allErrs, err)
 	}
+	if err := errors.Join(allErrs...); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func run(ctx context.Context, opts Options) error {
