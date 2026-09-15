@@ -385,7 +385,7 @@ func main() {
 	// (ServerMaintenance/BIOSSettings by ServerRef, BMCSettings/Server by
 	// BMCRef) in one place.
 	if err := indexers.RegisterAll(context.Background(), mgr.GetFieldIndexer()); err != nil {
-		setupLog.Error(err, "Unable to register field indexers")
+		setupLog.Error(err, "Manager failed to register field indexers")
 		os.Exit(1)
 	}
 
