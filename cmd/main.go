@@ -9,6 +9,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
@@ -92,6 +93,7 @@ func main() {
 	var reportBaseURL string
 	var sanitizedServerAddress string
 	var managerNamespace string
+	var configMapCacheNamespaces string
 	var defaultProtocol string
 	var skipCertValidation bool
 	var resyncInterval time.Duration
@@ -130,6 +132,9 @@ func main() {
 			"Sanitizers running on bare metal POST here to report completion.")
 	flag.StringVar(&managerNamespace, "manager-namespace", "",
 		"Namespace the manager runs in (used for BMC/BIOS controller secrets and boot configs).")
+	flag.StringVar(&configMapCacheNamespaces, "configmap-cache-namespaces", "",
+		"Comma-separated white-list of additional namespaces the manager's ConfigMap cache watches, "+
+			"on top of the telemetry ConfigMap.")
 	flag.StringVar(&defaultProtocol, "default-protocol", string(metalv1alpha1.HTTPProtocolScheme),
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
@@ -315,7 +320,10 @@ func main() {
 		LeaderElectionID:        "88d880f0.metal.ironcore.dev",
 		LeaderElectionNamespace: leaderElectionNamespace,
 		Cache: cache.Options{
-			ByObject: telemetryCacheByObject(enableTelemetry, telemetryConfigNamespace, telemetryConfigName),
+			ByObject: configMapCacheByObject(
+				enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
+				splitAndTrim(configMapCacheNamespaces),
+			),
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -654,21 +662,51 @@ func main() {
 	}
 }
 
-// telemetryCacheByObject returns a ByObject map that restricts the manager's
-// ConfigMap informer to the single telemetry ConfigMap. When telemetry is
-// disabled the cache is left unrestricted (nil return → no ConfigMap watch at
-// all, which is strictly better than the unconstrained cluster-wide watch).
-func telemetryCacheByObject(enabled bool, ns, name string) map[client.Object]cache.ByObject {
-	if !enabled || ns == "" || name == "" {
+// configMapCacheByObject returns a ByObject map that restricts the manager's
+// ConfigMap informer to an explicit allow-list of namespaces: the telemetry
+// ConfigMap's namespace+name (field-selector restricted, when telemetry is
+// enabled) plus extraNamespaces (e.g. "kube-system", via
+// --configmap-cache-namespaces), which BMCSettings/BIOSSettings
+// configMapKeyRef variables may reference.
+// note: leaving telemetryNS, telemetryName workflow as is for backwards
+// compatibility with existing telemetry ConfigMap deployments.
+func configMapCacheByObject(
+	telemetryEnabled bool, telemetryNS, telemetryName string, extraNamespaces []string,
+) map[client.Object]cache.ByObject {
+	namespaces := map[string]cache.Config{}
+	if telemetryEnabled && telemetryNS != "" && telemetryName != "" {
+		namespaces[telemetryNS] = cache.Config{
+			FieldSelector: fields.OneTermEqualSelector("metadata.name", telemetryName),
+		}
+	}
+	for _, ns := range extraNamespaces {
+		if ns == "" {
+			continue
+		}
+		// Overwrite any existing entry (e.g. a field-selector-restricted
+		// telemetry namespace entry) so an explicitly opted-in namespace
+		// always gets unrestricted access, even when it duplicates telemetryNS.
+		namespaces[ns] = cache.Config{}
+	}
+	if len(namespaces) == 0 {
 		return nil
 	}
 	return map[client.Object]cache.ByObject{
 		&corev1.ConfigMap{}: {
-			Namespaces: map[string]cache.Config{
-				ns: {
-					FieldSelector: fields.OneTermEqualSelector("metadata.name", name),
-				},
-			},
+			Namespaces: namespaces,
 		},
 	}
+}
+
+// splitAndTrim splits a comma-separated list, trims whitespace from each
+// element, and drops empty elements.
+func splitAndTrim(s string) []string {
+	var out []string
+	for part := range strings.SplitSeq(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
