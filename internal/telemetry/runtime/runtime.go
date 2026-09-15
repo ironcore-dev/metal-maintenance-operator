@@ -22,7 +22,6 @@ import (
 
 	"github.com/stmcginnis/gofish"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/events"
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/subscriptions"
-	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	metalbmc "github.com/ironcore-dev/metal-operator/bmc"
 )
 
@@ -85,24 +83,6 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	testSink, err := promsink.NewTestEventSink(ctrlmetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("init test-event sink: %w", err)
-	}
-
-	// Register the Server-by-BMCRef index unconditionally: the subscription
-	// reconciler uses it to look up Server.status.manufacturer/model when
-	// BMC.status.manufacturer is empty (e.g. Dell BMCs).
-	if err := mgr.GetFieldIndexer().IndexField(
-		context.Background(),
-		&metalv1alpha1.Server{},
-		criticalevent.BMCRefField,
-		func(obj client.Object) []string {
-			s := obj.(*metalv1alpha1.Server)
-			if s.Spec.BMCRef == nil {
-				return nil
-			}
-			return []string{s.Spec.BMCRef.Name}
-		},
-	); err != nil {
-		return fmt.Errorf("index Server by %s: %w", criticalevent.BMCRefField, err)
 	}
 
 	if opts.EnableCriticalEventHandler {
