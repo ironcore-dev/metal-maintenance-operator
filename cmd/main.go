@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 

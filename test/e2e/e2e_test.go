@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ironcore-dev/controller-utils/modutils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -46,6 +47,12 @@ var _ = Describe("Manager", Ordered, func() {
 			"pod-security.kubernetes.io/enforce=restricted")
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
+
+		By("installing metal-operator CRDs required by the Server field indexer")
+		metalOperatorCRDDir := modutils.Dir("github.com/ironcore-dev/metal-operator", "config", "crd", "bases")
+		cmd = exec.Command("kubectl", "apply", "-f", metalOperatorCRDDir)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to install metal-operator CRDs")
 
 		By("installing CRDs")
 		cmd = exec.Command("make", "install")
