@@ -60,8 +60,6 @@ func (c *FujitsuClient) ListServers() ([]Device, error) {
 		return nil, fmt.Errorf("error creating Redfish systems request: %w", err)
 	}
 
-	req.Header.Set("Accept", "application/json")
-
 	body, err := c.client.DoRequest(
 		req,
 		[]int{http.StatusOK},
@@ -119,8 +117,6 @@ func (c *FujitsuClient) getSystem(systemPath string) (*redfishSystem, error) {
 		)
 	}
 
-	req.Header.Set("Accept", "application/json")
-
 	body, err := c.client.DoRequest(
 		req,
 		[]int{http.StatusOK},
@@ -156,8 +152,8 @@ func (c *FujitsuClient) getSystem(systemPath string) (*redfishSystem, error) {
 func (c *FujitsuClient) ImportServer(
 	hostname string,
 	ip metalv1alpha1.IP,
-	bmcUser string,
-	bmcPassword string,
+	_ string,
+	_ string,
 ) error {
 	devices, err := c.ListServers()
 	if err != nil {
@@ -200,15 +196,10 @@ func (c *FujitsuClient) GetAuthToken() (string, error) {
 func (c *FujitsuClient) ImportServerAsync(
 	hostname string,
 	ip metalv1alpha1.IP,
-	bmcUser string,
-	bmcPassword string,
+	_ string,
+	_ string,
 ) (string, error) {
-	if err := c.ImportServer(
-		hostname,
-		ip,
-		bmcUser,
-		bmcPassword,
-	); err != nil {
+	if err := c.ImportServer(hostname, ip, "", ""); err != nil {
 		return "", err
 	}
 
@@ -228,6 +219,8 @@ func (c *FujitsuClient) RemoveServerAsync(
 }
 
 // GetJobStatus handles the synchronous Fujitsu operation model.
+// ImportServerAsync always returns an empty job ID, so this method
+// is never called in practice but is required by ClientInterface.
 func (c *FujitsuClient) GetJobStatus(jobID string) (*JobInfo, error) {
 	return &JobInfo{
 		JobID:    jobID,
