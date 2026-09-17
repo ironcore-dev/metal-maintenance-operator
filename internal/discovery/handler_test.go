@@ -9,7 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -186,8 +186,8 @@ func TestServeHTTP_GETReturnsSDJSON(t *testing.T) {
 	}
 	// Sort by name so the assertion is order-independent (the fake client
 	// returns objects in name order, but we shouldn't depend on it).
-	sort.Slice(got, func(i, j int) bool {
-		return got[i].Labels["__meta_bmc_name"] < got[j].Labels["__meta_bmc_name"]
+	slices.SortFunc(got, func(a, b discovery.Target) int {
+		return strings.Compare(a.Labels["__meta_bmc_name"], b.Labels["__meta_bmc_name"])
 	})
 	if got[0].Labels["__meta_bmc_name"] != "bmc-1" {
 		t.Errorf("first target name: %q", got[0].Labels["__meta_bmc_name"])

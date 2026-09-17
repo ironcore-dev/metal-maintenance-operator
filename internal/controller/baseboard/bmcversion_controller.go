@@ -332,8 +332,7 @@ func (r *BMCVersionReconciler) handleUpgradeInProgressState(
 	if completedCondition.Status != metav1.ConditionTrue {
 		log.V(1).Info("Check upgrade task of BMC")
 		ctrlResult, err := r.checkBMCUpgradeStatus(ctx, bmcVersion, bmcClient, BMC, completedCondition)
-		var TaskFetchFailed *utils.BMCTaskFetchFailedError
-		if errors.As(err, &TaskFetchFailed) {
+		if _, ok := errors.AsType[*utils.BMCTaskFetchFailedError](err); ok {
 			log.V(1).Info("Failed to fetch BMC upgrade task status from BMC", "error", err)
 			// some vendor detele the task details once upgrade is completed.
 			// check the current version and then proceed if version is as per spec

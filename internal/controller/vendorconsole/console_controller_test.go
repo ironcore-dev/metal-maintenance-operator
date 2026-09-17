@@ -62,8 +62,8 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
-					Hostname:    &hostname,
+					Endpoint: &metalv1alpha1.InlineEndpoint{MACAddress: "00:00:00:00:00:00"},
+					Hostname: &hostname,
 
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: bmcSecret.Name,
@@ -302,8 +302,8 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
-					Hostname:    &tlsHostname,
+					Endpoint: &metalv1alpha1.InlineEndpoint{MACAddress: "00:00:00:00:00:00"},
+					Hostname: &tlsHostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: tlsBMCSecret.Name,
 					},
@@ -422,8 +422,8 @@ var _ = Describe("Console Controller", func() {
 					Namespace:    ns.Name,
 				},
 				Spec: metalv1alpha1.BMCSpec{
-					EndpointRef: &corev1.LocalObjectReference{Name: testFoo},
-					Hostname:    &hostname,
+					Endpoint: &metalv1alpha1.InlineEndpoint{MACAddress: "00:00:00:00:00:00"},
+					Hostname: &hostname,
 					BMCSecretRef: corev1.LocalObjectReference{
 						Name: asyncBMCSecret.Name,
 					},

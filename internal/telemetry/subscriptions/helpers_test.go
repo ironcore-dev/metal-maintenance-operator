@@ -5,7 +5,7 @@ package subscriptions_test
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -140,7 +140,7 @@ func (c *fakeClient) snapshotDeletes() []string {
 	defer c.mu.Unlock()
 	out := make([]string, len(c.deleteCalls))
 	copy(out, c.deleteCalls)
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

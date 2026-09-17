@@ -488,7 +488,7 @@ func (r *ConsoleReconciler) updateStatus(
 	}
 	if totalServers > managedServers {
 		// Requeue to ensure all servers are managed
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }

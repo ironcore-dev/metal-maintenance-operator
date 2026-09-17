@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhook
+package v1alpha1
 
 import (
 	"fmt"
@@ -10,20 +10,20 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
 var _ = Describe("BMCSettings Webhook", func() {
 	var (
 		BMCSettingsV1 *baseboardv1alpha1.BMCSettings
-		validator     BMCSettingsCustomValidator
+		validator     BMCSettingsValidator
 	)
 
 	BeforeEach(func() {
@@ -42,9 +42,8 @@ var _ = Describe("BMCSettings Webhook", func() {
 		}
 		By("Creating a BMCSettings")
 		Expect(k8sClient.Create(ctx, BMCSettingsV1)).To(Succeed())
-		validator = BMCSettingsCustomValidator{Client: k8sClient}
+		validator = BMCSettingsValidator{Client: k8sClient}
 		SetClient(k8sClient)
-
 	})
 
 	AfterEach(func() {

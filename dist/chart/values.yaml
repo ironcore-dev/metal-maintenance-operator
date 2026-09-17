@@ -2,6 +2,8 @@ owner-info:
   support-group: containers
   helm-chart-url: https://github.com/ironcore-dev/metal-maintenance-operator/tree/main/dist/chart
 
+## String to partially override chart.fullname template (will maintain the release name)
+##
 # nameOverride: ""
 
 ## String to fully override chart.fullname template
@@ -28,8 +30,33 @@ manager:
   ##
   args:
     - "--leader-elect"
-    - "--metrics-bind-address=:8443"
-    - "--health-probe-bind-address=:8081"
+    - '--sanitization-namespace={{ .Values.sanitization.namespace }}'
+    - '--sanitization-image={{ .Values.sanitization.image }}'
+    - '--report-base-url={{ .Values.sanitization.reportBaseURL }}'
+
+  ## Health probes.
+  ## The manager serves the liveness (/healthz) and readiness (/readyz) endpoints on this port.
+  ##
+  healthProbe:
+    # Health probe server port
+    port: 8081
+
+  ## Additional environment variables for the manager container.
+  ##
+  ## POD_NAMESPACE is always injected so the telemetry pipeline and
+  ## leader-election can locate their ConfigMap in-cluster without
+  ## requiring explicit flag overrides.
+  ##
+  env:
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+
+  ## Env overrides (--set manager.envOverrides.VAR=value)
+  ## Same name in env above: this value takes precedence.
+  ##
+  envOverrides: {}
 
   ## Image pull secrets
   ##
@@ -61,18 +88,6 @@ manager:
     requests:
       cpu: 10m
       memory: 64Mi
-
-  ## Additional environment variables for the manager container.
-  ##
-  ## POD_NAMESPACE is always injected so the telemetry pipeline and
-  ## leader-election can locate their ConfigMap in-cluster without
-  ## requiring explicit flag overrides.
-  ##
-  env:
-    - name: POD_NAMESPACE
-      valueFrom:
-        fieldRef:
-          fieldPath: metadata.namespace
 
   ## Manager pod's affinity
   ##
@@ -134,16 +149,17 @@ rbac:
   helpers:
     ## Install convenience admin/editor/viewer roles for CRDs
     ##
-    enable: false
+    enabled: false
 
 ## ServiceAccount configuration
 ##
 serviceAccount:
   # Install default ServiceAccount provided
-  enable: true
+  enabled: true
 
-  ## Existing ServiceAccount name (only when enable=false)
-  ## Note: When enable=true, respects nameOverride/fullnameOverride
+  ## Existing ServiceAccount name (required when enabled=false)
+  ## Set to "default" to use the namespace default ServiceAccount
+  ## Note: When enabled=true, respects nameOverride/fullnameOverride
   ##
   # name: ""
 
@@ -159,7 +175,7 @@ serviceAccount:
 ##
 crd:
   # Install CRDs with the chart
-  enable: true
+  enabled: true
   # Keep CRDs when uninstalling
   keep: true
 
@@ -167,7 +183,7 @@ crd:
 ## Enable to expose /metrics endpoint
 ##
 metrics:
-  enable: true
+  enabled: true
   # Metrics server port
   port: 8443
   # Enable secure metrics: HTTPS with certs/auth (true) or HTTP (false).
@@ -178,20 +194,35 @@ metrics:
 ## Required for webhook certificates and metrics endpoint certificates.
 ##
 certManager:
-  enable: false
+  enabled: false
 
 ## Webhook server configuration.
-## Requires certManager.enable=true for TLS certificate provisioning.
+## Requires certManager.enabled=true for TLS certificate provisioning.
 ##
 webhook:
-  enable: false
+  enabled: false
+  # Webhook server port
   port: 9443
 
 ## Prometheus ServiceMonitor for metrics scraping.
 ## Requires prometheus-operator to be installed in the cluster.
 ##
 prometheus:
-  enable: false
+  enabled: false
+
+  ## Custom ServiceMonitor labels
+  ##
+  # labels: {}
+
+  ## Custom ServiceMonitor annotations
+  ##
+  # annotations: {}
+
+## Network policies for controlling traffic flow.
+## Enable to restrict ingress to the controller manager.
+##
+networkPolicy:
+  enabled: false
 
 ## Telemetry pipeline configuration.
 ##
@@ -231,6 +262,19 @@ telemetry:
 #     stringData:
 #       token: ""
 additionalSecrets: []
+
+## Sanitization configuration.
+## All three fields are required; the manager will refuse to start without them.
+##
+sanitization:
+  ## Namespace where sanitization ServerClaims are created.
+  namespace: "metal-maintenance-sanitization"
+  ## OS image for the sanitization job.
+  image: "ghcr.io/ironcore-dev/sanitizer:f7cd53a0390a0f17d4b6572c96e646918327ba60"
+  ## Base URL of the sanitization callback server
+  ## (e.g. http://metal-maintenance-operator.my-ns.svc.cluster.local:8082).
+  ## Sanitizers POST to <reportBaseURL>/<sanitizationUID> when done.
+  reportBaseURL: "http://metal-maintenance-operator.${RELEASE_NAMESPACE}.svc.cluster.local:8082"
 
 ## Ingress and Service for the sanitization report endpoint (port 8082).
 ## Enable to expose the report callback URL to the sanitizer.

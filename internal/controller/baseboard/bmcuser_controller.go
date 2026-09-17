@@ -401,8 +401,7 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 	}
 	bmcClient, err := bmcutils.CreateBMCClient(ctx, r.Client, protocolScheme, bmcObj.Spec.Protocol.Name, address, bmcObj.Spec.Protocol.Port, secret, r.BMCOptions, r.SkipCertValidation)
 	if err != nil {
-		var httpErr *schemas.Error
-		if errors.As(err, &httpErr) {
+		if httpErr, ok := errors.AsType[*schemas.Error](err); ok {
 			if httpErr.HTTPReturnedStatusCode == 401 || httpErr.HTTPReturnedStatusCode == 403 {
 				return true, nil
 			}

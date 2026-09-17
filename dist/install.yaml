@@ -11,7 +11,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: biossettings.system.metal.ironcore.dev
 spec:
   group: system.metal.ironcore.dev
@@ -460,7 +460,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: biossettingssets.system.metal.ironcore.dev
 spec:
   group: system.metal.ironcore.dev
@@ -806,7 +806,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: biosversions.system.metal.ironcore.dev
 spec:
   group: system.metal.ironcore.dev
@@ -1070,7 +1070,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: biosversionsets.system.metal.ironcore.dev
 spec:
   group: system.metal.ironcore.dev
@@ -1290,7 +1290,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: bmcsettings.baseboard.metal.ironcore.dev
 spec:
   group: baseboard.metal.ironcore.dev
@@ -1685,7 +1685,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: bmcsettingssets.baseboard.metal.ironcore.dev
 spec:
   group: baseboard.metal.ironcore.dev
@@ -2033,7 +2033,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: bmcusers.baseboard.metal.ironcore.dev
 spec:
   group: baseboard.metal.ironcore.dev
@@ -2241,7 +2241,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: bmcversions.baseboard.metal.ironcore.dev
 spec:
   group: baseboard.metal.ironcore.dev
@@ -2506,7 +2506,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: bmcversionsets.baseboard.metal.ironcore.dev
 spec:
   group: baseboard.metal.ironcore.dev
@@ -2726,7 +2726,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: consoles.vendorconsole.metal.ironcore.dev
 spec:
   group: vendorconsole.metal.ironcore.dev
@@ -2927,7 +2927,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: servermaintenances.maintenance.metal.ironcore.dev
 spec:
   group: maintenance.metal.ironcore.dev
@@ -3043,7 +3043,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: serverwirings.readiness.metal.ironcore.dev
 spec:
   group: readiness.metal.ironcore.dev
@@ -3823,11 +3823,16 @@ spec:
         - --metrics-bind-address=:8443
         - --leader-elect
         - --health-probe-bind-address=:8081
+        - --sanitization-namespace=placeholder
+        - --sanitization-image=placeholder
+        - --report-base-url=http://placeholder:8082
         command:
         - /manager
         env:
         - name: FORCE_ENV_IN_CHART
           value: "true"
+        - name: ENABLE_WEBHOOKS
+          value: "false"
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
