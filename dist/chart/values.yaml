@@ -242,13 +242,14 @@ telemetry:
     # manager.ports[*].containerPort.
     port: 9092
     # Expose the event receiver via the same Ingress as the operator.
-    # When enabled, a /serverevents path is added to the Ingress rule so
-    # BMCs outside the cluster can POST Redfish events through the
-    # nginx-ingress controller. Requires ingress.enable: true.
+    # When enabled, a /serverevents path is added to the Ingress so
+    # BMCs outside the cluster can POST Redfish events (alerts and
+    # MetricReports) through the ingress controller.
+    # Requires ingress.enabled: true.
     # Gardener automatically creates a NetworkPolicy allowing the
     # ingress controller to reach port 9092 once this path is present.
     ingress:
-      enable: false
+      enabled: false
 
 ## Additional Secret resources to render in the release namespace.
 ## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).
@@ -276,11 +277,15 @@ sanitization:
   ## Sanitizers POST to <reportBaseURL>/<sanitizationUID> when done.
   reportBaseURL: "http://metal-maintenance-operator.${RELEASE_NAMESPACE}.svc.cluster.local:8082"
 
-## Ingress and Service for the sanitization report endpoint (port 8082).
-## Enable to expose the report callback URL to the sanitizer.
+## Ingress and Service for this operator's external-facing endpoints.
+## A single Ingress on the configured domain hosts two backends:
+##   /             → port 8082 (sanitization report callback for sanitizer pods)
+##   /serverevents → port 9092 (Redfish push receiver for BMC alerts and MetricReports,
+##                              when telemetry.events.ingress.enabled is also true)
+## Set enabled: true and provide domain to deploy the Ingress.
 ##
 ingress:
-  enable: false
+  enabled: false
 
   ## Port the sanitization report handler listens on.
   ##
