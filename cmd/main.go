@@ -49,7 +49,6 @@ import (
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/indexers"
-	maintenancewebhook "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
 	webhookbaseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/baseboard/v1alpha1"
 	webhooksystemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
