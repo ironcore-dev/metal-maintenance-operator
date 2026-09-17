@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhook
+package v1alpha1
 
 import (
 	"fmt"
@@ -10,24 +10,24 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
 var _ = Describe("BMCVersion Webhook", func() {
 	var (
 		BMCVersionV1 *baseboardv1alpha1.BMCVersion
-		validator    BMCVersionCustomValidator
+		validator    BMCVersionValidator
 	)
 
 	BeforeEach(func() {
-		validator = BMCVersionCustomValidator{Client: k8sClient}
+		validator = BMCVersionValidator{Client: k8sClient}
 
 		BMCVersionV1 = &baseboardv1alpha1.BMCVersion{
 			ObjectMeta: metav1.ObjectMeta{
@@ -44,7 +44,6 @@ var _ = Describe("BMCVersion Webhook", func() {
 		By("Creating a BMCVersion")
 		Expect(k8sClient.Create(ctx, BMCVersionV1)).To(Succeed())
 		SetClient(k8sClient)
-
 	})
 
 	AfterEach(func() {
@@ -181,6 +180,10 @@ var _ = Describe("BMCVersion Webhook", func() {
 			Eventually(UpdateStatus(sm, func() {
 				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 			})).Should(Succeed())
+
+			Eventually(Update(BMCVersionV1, func() {
+				BMCVersionV1.Spec.ServerMaintenanceRefs = nil
+			})).Should(Succeed())
 		})
 
 		It("should refuse to delete while ServerMaintenance is active", func() {
@@ -215,6 +218,10 @@ var _ = Describe("BMCVersion Webhook", func() {
 			By("Deactivating the ServerMaintenance")
 			Eventually(UpdateStatus(sm, func() {
 				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
+			})).Should(Succeed())
+
+			Eventually(Update(BMCVersionV1, func() {
+				BMCVersionV1.Spec.ServerMaintenanceRefs = nil
 			})).Should(Succeed())
 		})
 	})

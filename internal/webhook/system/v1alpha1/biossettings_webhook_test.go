@@ -1,33 +1,33 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhook
+package v1alpha1
 
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
 var _ = Describe("BIOSSettings Webhook", func() {
 	var (
 		biosSettingsV1                 *systemv1alpha1.BIOSSettings
-		validator                      BIOSSettingsCustomValidator
+		validator                      BIOSSettingsValidator
 		defaultMockUpServerBiosVersion = "P79 v1.45 (12/06/2017)"
 		anotherMockUpServerBiosVersion = "P71 v1.45 (12/06/2017)"
 	)
 
 	BeforeEach(func(ctx SpecContext) {
-		validator = BIOSSettingsCustomValidator{Client: k8sClient}
+		validator = BIOSSettingsValidator{Client: k8sClient}
 		By("Creating a BIOSSettings")
 		biosSettingsV1 = &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
@@ -239,6 +239,10 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		Eventually(UpdateStatus(sm, func() {
 			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 		})).Should(Succeed())
+
+		Eventually(Update(biosSettingsV1, func() {
+			biosSettingsV1.Spec.ServerMaintenanceRef = nil
+		})).Should(Succeed())
 	})
 
 	It("should deny deletion of an in-progress BIOSSettings", func() {
@@ -278,6 +282,10 @@ var _ = Describe("BIOSSettings Webhook", func() {
 
 		Eventually(UpdateStatus(sm, func() {
 			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
+		})).Should(Succeed())
+
+		Eventually(Update(biosSettingsV1, func() {
+			biosSettingsV1.Spec.ServerMaintenanceRef = nil
 		})).Should(Succeed())
 	})
 })

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"time"
 
@@ -440,8 +439,8 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 
 	settingsFlow := append([]api.SettingsFlowItem{}, settings.Spec.SettingsFlow...)
 
-	sort.Slice(settingsFlow, func(i, j int) bool {
-		return settingsFlow[i].Priority <= settingsFlow[j].Priority
+	slices.SortFunc(settingsFlow, func(a, b api.SettingsFlowItem) int {
+		return int(a.Priority) - int(b.Priority)
 	})
 
 	// loop through all the sequence in priority order and verify/Apply the settings
@@ -619,8 +618,7 @@ func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClie
 		resetReq, err := bmcClient.CheckBiosAttributes(settingsDiff)
 		if err != nil {
 			log.Error(err, "Could not validate settings and determine if reboot needed")
-			var invalidSettingsErr *bmc.InvalidBIOSSettingsError
-			if errors.As(err, &invalidSettingsErr) {
+			if _, ok := errors.AsType[*bmc.InvalidBIOSSettingsError](err); ok {
 				inValidSettings, errCond := utils.GetCondition(r.Conditions, flowStatus.Conditions, ConditionSettingsValidationFailed)
 				if errCond != nil {
 					return false, errors.Join(fmt.Errorf("failed to get Condition for skip reboot post setting update: %w", errCond), err)

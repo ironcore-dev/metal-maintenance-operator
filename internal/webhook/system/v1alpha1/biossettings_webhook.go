@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhook
+package v1alpha1
 
 import (
 	"context"
@@ -17,47 +17,46 @@ import (
 
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
+	webhookutils "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
-// log is for logging in this package.
 var settingsLog = logf.Log.WithName("biossettings-resource")
 
 // SetupBIOSSettingsWebhookWithManager registers the webhook for BIOSSettings in the manager.
 func SetupBIOSSettingsWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &systemv1alpha1.BIOSSettings{}).
-		WithValidator(&BIOSSettingsCustomValidator{Client: mgr.GetClient()}).
+		WithValidator(&BIOSSettingsValidator{Client: mgr.GetAPIReader()}).
 		Complete()
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
-// Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
 // +kubebuilder:webhook:path=/validate-system-metal-ironcore-dev-v1alpha1-biossettings,mutating=false,failurePolicy=fail,sideEffects=None,groups=system.metal.ironcore.dev,resources=biossettings,verbs=create;update;delete,versions=v1alpha1,name=vbiossettings-v1alpha1.kb.io,admissionReviewVersions=v1
 
-// BIOSSettingsCustomValidator struct is responsible for validating the BIOSSettings resource
+// BIOSSettingsValidator struct is responsible for validating the BIOSSettings resource
 // when it is created, updated, or deleted.
-type BIOSSettingsCustomValidator struct {
-	client.Client
+//
+// NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
+// as this struct is used only for temporary operations and does not need to be deeply copied.
+type BIOSSettingsValidator struct {
+	Client client.Reader
 }
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BIOSSettings.
-func (v *BIOSSettingsCustomValidator) ValidateCreate(ctx context.Context, obj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type BIOSSettings.
+func (v *BIOSSettingsValidator) ValidateCreate(ctx context.Context, obj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	settingsLog.Info("Validation for BIOSSettings upon creation", "name", obj.GetName())
-
 	settingsList := &systemv1alpha1.BIOSSettingsList{}
-	if err := v.List(ctx, settingsList); err != nil {
+	if err := v.Client.List(ctx, settingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BIOSSettings: %w", err)
 	}
-
 	return checkForDuplicateBIOSSettingsRefToServer(settingsList, obj)
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type BIOSSettings.
-func (v *BIOSSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type BIOSSettings.
+func (v *BIOSSettingsValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	settingsLog.Info("Validation for BIOSSettings upon update", "name", newObj.GetName())
 
-	// Block updates while the referenced ServerMaintenance is InMaintenance.
-	if !ShouldAllowForceUpdateInProgress(newObj) && oldObj.Spec.ServerMaintenanceRef != nil {
+	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && oldObj.Spec.ServerMaintenanceRef != nil {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, []metalv1alpha1.ObjectReference{*oldObj.Spec.ServerMaintenanceRef})
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
@@ -71,19 +70,17 @@ func (v *BIOSSettingsCustomValidator) ValidateUpdate(ctx context.Context, oldObj
 	}
 
 	settingsList := &systemv1alpha1.BIOSSettingsList{}
-	if err := v.List(ctx, settingsList); err != nil {
+	if err := v.Client.List(ctx, settingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BIOSSettings: %w", err)
 	}
-
 	return checkForDuplicateBIOSSettingsRefToServer(settingsList, newObj)
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type BIOSSettings.
-func (v *BIOSSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type BIOSSettings.
+func (v *BIOSSettingsValidator) ValidateDelete(ctx context.Context, obj *systemv1alpha1.BIOSSettings) (admission.Warnings, error) {
 	settingsLog.Info("Validation for BIOSSettings upon deletion", "name", obj.GetName())
 
-	// Block deletion while the referenced ServerMaintenance is InMaintenance.
-	if !ShouldAllowForceDeleteInProgress(obj) && obj.Spec.ServerMaintenanceRef != nil {
+	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && obj.Spec.ServerMaintenanceRef != nil {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, []metalv1alpha1.ObjectReference{*obj.Spec.ServerMaintenanceRef})
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
@@ -92,7 +89,6 @@ func (v *BIOSSettingsCustomValidator) ValidateDelete(ctx context.Context, obj *s
 			return nil, apierrors.NewBadRequest("BIOSSettings is under active maintenance, unable to delete")
 		}
 	}
-
 	return nil, nil
 }
 
@@ -100,7 +96,6 @@ func checkForDuplicateBIOSSettingsRefToServer(settingsList *systemv1alpha1.BIOSS
 	if settings.Spec.ServerRef == nil {
 		return nil, nil
 	}
-
 	for _, bs := range settingsList.Items {
 		if settings.Name == bs.Name {
 			continue
@@ -110,10 +105,7 @@ func checkForDuplicateBIOSSettingsRefToServer(settingsList *systemv1alpha1.BIOSS
 		}
 		if settings.Spec.ServerRef.Name == bs.Spec.ServerRef.Name {
 			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s",
-				settings.Spec.ServerRef.Name,
-				settings.Name,
-				bs.Spec.ServerRef.Name,
-				bs.Name)
+				settings.Spec.ServerRef.Name, settings.Name, bs.Spec.ServerRef.Name, bs.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: settings.GroupVersionKind().Group, Kind: settings.Kind},
 				settings.GetName(), field.ErrorList{field.Duplicate(field.NewPath("spec").Child("serverRef"), err)})

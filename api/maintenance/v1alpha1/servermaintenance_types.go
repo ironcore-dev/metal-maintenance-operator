@@ -7,6 +7,7 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -102,5 +103,8 @@ type ServerMaintenanceList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ServerMaintenance{}, &ServerMaintenanceList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &ServerMaintenance{}, &ServerMaintenanceList{})
+		return nil
+	})
 }

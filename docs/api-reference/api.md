@@ -10,7 +10,7 @@
 
 ## baseboard.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the baseboard.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the baseboard v1alpha1 API group.
 
 ### Resource Types
 - [BMCSettings](#bmcsettings)
@@ -419,7 +419,7 @@ _Appears in:_
 
 ## maintenance.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the maintenance.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the maintenance v1alpha1 API group.
 
 ### Resource Types
 - [ServerMaintenance](#servermaintenance)
@@ -527,7 +527,7 @@ _Appears in:_
 
 ## readiness.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the readiness.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the readiness v1alpha1 API group.
 
 ### Resource Types
 - [ServerWiring](#serverwiring)
@@ -659,7 +659,7 @@ _Appears in:_
 
 ## system.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the system.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the system v1alpha1 API group.
 
 ### Resource Types
 - [BIOSSettings](#biossettings)
@@ -1028,7 +1028,7 @@ _Appears in:_
 
 ## vendorconsole.metal.ironcore.dev/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the vendorconsole.metal.ironcore.dev v1alpha1 API group.
+Package v1alpha1 contains API Schema definitions for the vendorconsole v1alpha1 API group.
 
 ### Resource Types
 - [Console](#console)

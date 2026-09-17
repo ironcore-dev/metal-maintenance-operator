@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhook
+package v1alpha1
 
 import (
 	. "github.com/onsi/ginkgo/v2"
@@ -9,23 +9,23 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
 var _ = Describe("BIOSVersion Webhook", func() {
 	var (
 		biosVersionV1 *systemv1alpha1.BIOSVersion
-		validator     BIOSVersionCustomValidator
+		validator     BIOSVersionValidator
 	)
 
 	BeforeEach(func() {
-		validator = BIOSVersionCustomValidator{Client: k8sClient}
+		validator = BIOSVersionValidator{Client: k8sClient}
 		By("Creating a BIOSVersion")
 		biosVersionV1 = &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{

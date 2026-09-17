@@ -63,9 +63,14 @@ spec:
           args:
             - --leader-elect
             - --health-probe-bind-address=:8081
+            - --sanitization-namespace=placeholder
+            - --sanitization-image=placeholder
+            - --report-base-url=http://placeholder:8082
           env:
             - name: FORCE_ENV_IN_CHART
               value: "true"
+            - name: ENABLE_WEBHOOKS
+              value: "false"
             # POD_NAMESPACE is the fallback that --telemetry-config-namespace
             # and --leader-election-namespace resolve to when their flags
             # are unset. Without this fieldRef the telemetry pipeline

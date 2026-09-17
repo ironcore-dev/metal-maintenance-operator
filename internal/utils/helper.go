@@ -67,7 +67,7 @@ func (e MultiErrorTracker) Unwrap() error {
 // --- ServerMaintenance helpers ---
 
 // IsAnyServerMaintenanceActive returns true if any referenced ServerMaintenance is in InMaintenance state.
-func IsAnyServerMaintenanceActive(ctx context.Context, c client.Client, refs []metalv1alpha1.ObjectReference) (bool, error) {
+func IsAnyServerMaintenanceActive(ctx context.Context, c client.Reader, refs []metalv1alpha1.ObjectReference) (bool, error) {
 	for _, ref := range refs {
 		sm := &maintenancev1alpha1.ServerMaintenance{}
 		if err := c.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: ref.Namespace}, sm); err != nil {
@@ -317,7 +317,7 @@ func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, pare
 			if statusField.IsValid() {
 				conditionsField := statusField.FieldByName("Conditions")
 				if conditionsField.IsValid() {
-					conditions, ok := conditionsField.Interface().([]metav1.Condition)
+					conditions, ok := reflect.TypeAssert[[]metav1.Condition](conditionsField)
 					if ok {
 						acc := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
 						retriedCondition, err := GetCondition(acc, conditions, constants.ConditionRetryOfFailedResourceIssued)

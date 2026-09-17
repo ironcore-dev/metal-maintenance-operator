@@ -6,6 +6,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ExpectedNeighbor defines an expected LLDP neighbor on a network interface.
@@ -95,5 +96,8 @@ type ServerWiringList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ServerWiring{}, &ServerWiringList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &ServerWiring{}, &ServerWiringList{})
+		return nil
+	})
 }

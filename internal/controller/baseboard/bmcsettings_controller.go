@@ -374,8 +374,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 			resetBMCReq, err := bmcClient.CheckBMCAttributes(ctx, bmcObj.Spec.BMCUUID, settingsDiff)
 			if err != nil {
 				log.Error(err, "could not validate settings and determine if reboot needed")
-				var invalidSettingsErr *bmc.InvalidBMCSettingsError
-				if errors.As(err, &invalidSettingsErr) {
+				if _, ok := errors.AsType[*bmc.InvalidBMCSettingsError](err); ok {
 					inValidSettings, errCond := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCSettingsValidationFailed)
 					if errCond != nil {
 						return ctrl.Result{}, fmt.Errorf("failed to get Condition for invalid BMC settings %v", errors.Join(err, errCond))

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhook
+package v1alpha1
 
 import (
 	"context"
@@ -17,31 +17,32 @@ import (
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
+	webhookutils "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
 )
 
-// log is for logging in this package.
 var bmcversionlog = logf.Log.WithName("bmcversion-resource")
 
 // SetupBMCVersionWebhookWithManager registers the webhook for BMCVersion in the manager.
 func SetupBMCVersionWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &baseboardv1alpha1.BMCVersion{}).
-		WithValidator(&BMCVersionCustomValidator{Client: mgr.GetClient()}).
+		WithValidator(&BMCVersionValidator{Client: mgr.GetAPIReader()}).
 		Complete()
 }
 
+// NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // +kubebuilder:webhook:path=/validate-baseboard-metal-ironcore-dev-v1alpha1-bmcversion,mutating=false,failurePolicy=fail,sideEffects=None,groups=baseboard.metal.ironcore.dev,resources=bmcversions,verbs=create;update;delete,versions=v1alpha1,name=vbmcversion-v1alpha1.kb.io,admissionReviewVersions=v1
 
-// BMCVersionCustomValidator struct is responsible for validating the BMCVersion resource
+// BMCVersionValidator struct is responsible for validating the BMCVersion resource
 // when it is created, updated, or deleted.
 //
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
-type BMCVersionCustomValidator struct {
-	Client client.Client
+type BMCVersionValidator struct {
+	Client client.Reader
 }
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type BMCVersion.
-func (v *BMCVersionCustomValidator) ValidateCreate(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type BMCVersion.
+func (v *BMCVersionValidator) ValidateCreate(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon creation", "name", obj.GetName())
 	bmcVersionList := &baseboardv1alpha1.BMCVersionList{}
 	if err := v.Client.List(ctx, bmcVersionList); err != nil {
@@ -50,12 +51,11 @@ func (v *BMCVersionCustomValidator) ValidateCreate(ctx context.Context, obj *bas
 	return checkForDuplicateBMCVersionsRefToBMC(bmcVersionList, obj)
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type BMCVersion.
-func (v *BMCVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type BMCVersion.
+func (v *BMCVersionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon update", "name", newObj.GetName())
 
-	// Block updates while any referenced ServerMaintenance is InMaintenance.
-	if !ShouldAllowForceUpdateInProgress(newObj) && len(oldObj.Spec.ServerMaintenanceRefs) > 0 {
+	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && len(oldObj.Spec.ServerMaintenanceRefs) > 0 {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, oldObj.Spec.ServerMaintenanceRefs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
@@ -72,16 +72,14 @@ func (v *BMCVersionCustomValidator) ValidateUpdate(ctx context.Context, oldObj, 
 	if err := v.Client.List(ctx, bmcVersionList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCVersions: %w", err)
 	}
-
 	return checkForDuplicateBMCVersionsRefToBMC(bmcVersionList, newObj)
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type BMCVersion.
-func (v *BMCVersionCustomValidator) ValidateDelete(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type BMCVersion.
+func (v *BMCVersionValidator) ValidateDelete(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon deletion", "name", obj.GetName())
 
-	// Block deletion while any referenced ServerMaintenance is InMaintenance.
-	if !ShouldAllowForceDeleteInProgress(obj) && len(obj.Spec.ServerMaintenanceRefs) > 0 {
+	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && len(obj.Spec.ServerMaintenanceRefs) > 0 {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, obj.Spec.ServerMaintenanceRefs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
@@ -90,7 +88,6 @@ func (v *BMCVersionCustomValidator) ValidateDelete(ctx context.Context, obj *bas
 			return nil, apierrors.NewBadRequest("BMCVersion is under active maintenance, unable to delete")
 		}
 	}
-
 	return nil, nil
 }
 
@@ -98,7 +95,6 @@ func checkForDuplicateBMCVersionsRefToBMC(versionList *baseboardv1alpha1.BMCVers
 	if version.Spec.BMCRef == nil {
 		return nil, nil
 	}
-
 	for _, v := range versionList.Items {
 		if version.Name == v.Name {
 			continue
@@ -108,10 +104,7 @@ func checkForDuplicateBMCVersionsRefToBMC(versionList *baseboardv1alpha1.BMCVers
 		}
 		if v.Spec.BMCRef.Name == version.Spec.BMCRef.Name {
 			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s",
-				version.Spec.BMCRef.Name,
-				version.Name,
-				v.Spec.BMCRef.Name,
-				v.Name)
+				version.Spec.BMCRef.Name, version.Name, v.Spec.BMCRef.Name, v.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: version.GroupVersionKind().Group, Kind: version.Kind},
 				version.GetName(), field.ErrorList{field.Duplicate(field.NewPath("spec").Child("bmcRef"), err)})
