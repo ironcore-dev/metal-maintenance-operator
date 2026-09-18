@@ -125,6 +125,30 @@ func IsServerParkedForOwner(server *metalv1alpha1.Server, ownerKey string) bool 
 	return server.GetAnnotations()[ServerMaintenanceOwnerAnnotation] == ownerKey
 }
 
+// GetServerPowerState queries the BMC directly for the server's current power state.
+// Server.Status.PowerState must not be used for this: metal-operator stops refreshing
+// Server.Status while the server is parked for maintenance, so it can be arbitrarily stale
+// for the entire duration of a maintenance window - exactly when callers here need to
+// observe real power transitions (e.g. confirming a reboot completed).
+func GetServerPowerState(ctx context.Context, bmcClient bmc.BMC, server *metalv1alpha1.Server) (metalv1alpha1.ServerPowerState, error) {
+	systemInfo, err := bmcClient.GetSystemInfo(ctx, server.Spec.SystemURI)
+	if err != nil {
+		return "", fmt.Errorf("failed to get system info for server %s: %w", server.Name, err)
+	}
+	return metalv1alpha1.ServerPowerState(systemInfo.PowerState), nil
+}
+
+// IsServerInPowerState reports whether the server is currently in the given power state,
+// queried live from the BMC (see GetServerPowerState for why Server.Status.PowerState
+// cannot be used here).
+func IsServerInPowerState(ctx context.Context, bmcClient bmc.BMC, server *metalv1alpha1.Server, state metalv1alpha1.ServerPowerState) (bool, error) {
+	current, err := GetServerPowerState(ctx, bmcClient, server)
+	if err != nil {
+		return false, err
+	}
+	return current == state, nil
+}
+
 // --- Deletion helpers ---
 
 // ShouldProceedWithDeletion returns true when obj should proceed with deletion.

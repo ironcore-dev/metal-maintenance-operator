@@ -190,7 +190,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 			HaveField("Status.State", systemv1alpha1.BIOSVersionStateInProgress),
 		)
 
-		ensureBiosVersionConditionTransition(acc, biosVersion, server)
+		ensureBiosVersionConditionTransition(acc, biosVersion)
 
 		By("Ensuring that BIOS upgrade has completed")
 		Eventually(Object(biosVersion)).Should(
@@ -306,7 +306,7 @@ var _ = Describe("BIOSVersion Controller", func() {
 		By("Ensuring that Server in Maintenance state")
 		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
-		ensureBiosVersionConditionTransition(acc, biosVersion, server)
+		ensureBiosVersionConditionTransition(acc, biosVersion)
 
 		By("Ensuring that BIOS upgrade has completed")
 		Eventually(Object(biosVersion)).Should(
@@ -521,7 +521,7 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 		By("Ensuring that Server in Maintenance state")
 		Eventually(Object(server)).Should(testutils.ServerParkedFor(serverMaintenance))
 
-		ensureBiosVersionConditionTransition(acc, biosVersion, server)
+		ensureBiosVersionConditionTransition(acc, biosVersion)
 
 		By("Ensuring that BIOS upgrade has completed")
 		Eventually(Object(biosVersion)).Should(
@@ -548,7 +548,7 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 	})
 })
 
-func ensureBiosVersionConditionTransition(acc *conditionutils.Accessor, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) {
+func ensureBiosVersionConditionTransition(acc *conditionutils.Accessor, biosVersion *systemv1alpha1.BIOSVersion) {
 	GinkgoHelper()
 	By("Ensuring that BIOS Conditions have reached expected state 'biosVersionUpgradeIssued'")
 	condIssue := &metav1.Condition{}
@@ -585,13 +585,6 @@ func ensureBiosVersionConditionTransition(acc *conditionutils.Accessor, biosVers
 			return condComplete.Status == metav1.ConditionTrue
 		}).Should(BeTrue())
 
-	// waiting for serverMaintenance and server to eventually update the power state is making it flaky.
-	// force turn on the server already for testing
-	By("update the server state to PoweredOff state")
-	Eventually(UpdateStatus(server, func() {
-		server.Status.PowerState = metalv1alpha1.ServerOffPowerState
-	})).Should(Succeed())
-
 	By("Ensuring that BIOS Conditions have reached expected state 'biosVersionUpgradeRebootServerPoweroff'")
 	rebootStart := &metav1.Condition{}
 	Eventually(
@@ -605,13 +598,6 @@ func ensureBiosVersionConditionTransition(acc *conditionutils.Accessor, biosVers
 			g.Expect(acc.FindSlice(biosVersion.Status.Conditions, constants.ConditionVersionUpgradeCompleted, rebootStart)).To(BeTrue())
 			return rebootStart.Status == metav1.ConditionTrue
 		}).Should(BeTrue())
-
-	// waiting for serverMaintenance and server to eventually update the power state is making it flaky.
-	// force turn on the server already for testing
-	By("update the server state to PoweredOn state")
-	Eventually(UpdateStatus(server, func() {
-		server.Status.PowerState = metalv1alpha1.ServerOnPowerState
-	})).Should(Succeed())
 
 	By("Ensuring that BIOS Conditions have reached expected state 'biosVersionUpgradeRebootServerPowerOn'")
 	rebootComplete := &metav1.Condition{}

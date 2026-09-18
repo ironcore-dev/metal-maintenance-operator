@@ -20,7 +20,10 @@
 // Only the fields tests actually rely on are synced (BMC PowerState/FirmwareVersion,
 // Server PowerState, and Server Status.State transitions to/from Parked driven by
 // the metalv1alpha1.OperationAnnotation "park"/"unpark" requests that this repo's
-// real ServerMaintenanceReconciler issues).
+// real ServerMaintenanceReconciler issues). Server.Status.PowerState refresh is
+// suspended while Status.State == Parked, mirroring metal-operator's real
+// Server controller, which freezes Status while parked (see updateServerStatus
+// in ServerReconciler.Reconcile below).
 package simcontrollers
 
 import (
@@ -269,16 +272,13 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	// Mimic metal-operator's real ServerReconciler.updateServerStatus: refresh
-	// Status.PowerState from the BMC unconditionally, on every reconcile, before
-	// any state-specific handling below - the real controller does this too,
-	// which is why other controllers (e.g. BIOSSettingsReconciler) that issue
-	// direct BMC power commands while a Server is Parked for maintenance can
-	// rely on Status.PowerState reflecting the change without waiting for the
-	// Server to leave the Parked state first.
-	if err := r.updateServerStatus(ctx, bmcClient, server); err != nil {
-		log.V(1).Info("Server status update failed, will retry", "error", err)
-		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+	// Mimic metal-operator's real ServerReconciler.updateServerStatus: refresh Status
+
+	if server.Status.State != metalv1alpha1.ServerStateParked {
+		if err := r.updateServerStatus(ctx, bmcClient, server); err != nil {
+			log.V(1).Info("Server status update failed, will retry", "error", err)
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		}
 	}
 
 	if requeue, err := r.syncParkedState(ctx, bmcClient, server); err != nil || requeue {
