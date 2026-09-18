@@ -11,6 +11,31 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 )
 
+// WriteOnlyDriftPolicy controls how the operator responds when the ETag for a
+// resource that contains a write-only key changes.
+//
+// Write-only fields (e.g. passwords) cannot be read back from the BMC, so the
+// operator cannot determine whether their values have drifted.  The policy lets
+// the operator accept the risk of an undetected drift, or always re-apply, at
+// the cost of unnecessary writes.
+//
+// Note: In conservative mode an externally changed write-only value
+// (e.g. a password changed directly on the BMC) will NOT be automatically
+// corrected unless the desired value in the referenced Secret is also changed.
+//
+// +kubebuilder:validation:Enum=Conservative;Strict
+type WriteOnlyDriftPolicy string
+
+const (
+	// WriteOnlyDriftPolicyConservative (default) — if the desired value
+	// fingerprint has not changed since the last apply, do not re-apply the
+	// write-only key even when the ETag has changed.
+	WriteOnlyDriftPolicyConservative WriteOnlyDriftPolicy = "Conservative"
+	// WriteOnlyDriftPolicyStrict — always re-apply write-only keys on every
+	// reconcile regardless of ETag or value fingerprint.
+	WriteOnlyDriftPolicyStrict WriteOnlyDriftPolicy = "Strict"
+)
+
 // BMCSettingsTemplate defines the template for BMC settings to be applied.
 // +kubebuilder:validation:XValidation:rule="!has(self.variables) || self.variables.all(v, self.variables.filter(w, w.key == v.key).size() == 1)",message="variable keys must be unique"
 type BMCSettingsTemplate struct {
@@ -31,6 +56,13 @@ type BMCSettingsSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="bmcRef is immutable"
 	// +required
 	BMCRef *corev1.LocalObjectReference `json:"bmcRef,omitempty"`
+
+	// WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for
+	// a resource containing a write-only key changes.  Defaults to Conservative.
+	// See WriteOnlyDriftPolicy for full semantics and limitations.
+	// +optional
+	// +kubebuilder:default=Conservative
+	WriteOnlyDriftPolicy WriteOnlyDriftPolicy `json:"writeOnlyDriftPolicy,omitempty"`
 }
 
 // BMCSettingsState specifies the current state of the server maintenance.
@@ -68,6 +100,12 @@ type BMCSettingsApplyResultEntry struct {
 	// of BMC-side drift.
 	// +optional
 	ValueHash string `json:"valueHash,omitempty"`
+
+	// IsPost reports that the value was applied via HTTP POST rather than PATCH.
+	// POST creates a (possibly ephemeral) resource whose URI cannot be used for
+	// ETag-based drift detection, so these keys always take the full value-map GET path.
+	// +optional
+	IsPost bool `json:"isPost,omitempty"`
 }
 
 // BMCSettingsStatus defines the observed state of BMCSettings.

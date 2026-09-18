@@ -57,6 +57,7 @@ _Appears in:_
 | `uri` _string_ | URI is the Redfish resource URI from the apply response.<br />For PATCH operations this is the request URI; for POST operations this is<br />the Location header value pointing to the created resource. |  |  |
 | `etag` _string_ | ETag is the drift-detection token captured after the last successful apply.<br />Either a real ETag returned by the BMC (e.g. W/"20B77DA6") or a SHA-256<br />hash of the GET response body prefixed with "hash:sha256:" for BMCs that<br />do not return ETag headers. |  |  |
 | `valueHash` _string_ | ValueHash is the SHA-256 hash of the effective (resolved) value at apply time.<br />Used to detect desired-state changes from ConfigMap/Secret rotation independent<br />of BMC-side drift. |  |  |
+| `isPost` _boolean_ | IsPost reports that the value was applied via HTTP POST rather than PATCH.<br />POST creates a (possibly ephemeral) resource whose URI cannot be used for<br />ETag-based drift detection, so these keys always take the full value-map GET path. |  |  |
 
 
 #### BMCSettingsSet
@@ -136,6 +137,7 @@ _Appears in:_
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each<br />server that needs to be updated with the BMC settings. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
+| `writeOnlyDriftPolicy` _[WriteOnlyDriftPolicy](#writeonlydriftpolicy)_ | WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for<br />a resource containing a write-only key changes.  Defaults to Conservative.<br />See WriteOnlyDriftPolicy for full semantics and limitations. | Conservative | Enum: [Conservative Strict] <br /> |
 
 
 #### BMCSettingsState
@@ -414,6 +416,34 @@ _Appears in:_
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+
+
+#### WriteOnlyDriftPolicy
+
+_Underlying type:_ _string_
+
+WriteOnlyDriftPolicy controls how the operator responds when the ETag for a
+resource that contains a write-only key changes.
+
+Write-only fields (e.g. passwords) cannot be read back from the BMC, so the
+operator cannot determine whether their values have drifted.  The policy lets
+the operator accept the risk of an undetected drift, or always re-apply, at
+the cost of unnecessary writes.
+
+Note: In conservative mode an externally changed write-only value
+(e.g. a password changed directly on the BMC) will NOT be automatically
+corrected unless the desired value in the referenced Secret is also changed.
+
+_Validation:_
+- Enum: [Conservative Strict]
+
+_Appears in:_
+- [BMCSettingsSpec](#bmcsettingsspec)
+
+| Field | Description |
+| --- | --- |
+| `Conservative` | WriteOnlyDriftPolicyConservative (default) — if the desired value<br />fingerprint has not changed since the last apply, do not re-apply the<br />write-only key even when the ETag has changed.<br /> |
+| `Strict` | WriteOnlyDriftPolicyStrict — always re-apply write-only keys on every<br />reconcile regardless of ETag or value fingerprint.<br /> |
 
 
 
