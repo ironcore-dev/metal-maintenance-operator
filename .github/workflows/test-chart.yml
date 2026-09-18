@@ -53,6 +53,11 @@ jobs:
         run: |
           helm lint ./dist/chart
 
+      - name: Install metal-operator CRDs required by the Server field indexer
+        run: |
+          METAL_OPERATOR_CRD_DIR="$(go list -m -f '{{.Dir}}' github.com/ironcore-dev/metal-operator)/config/crd/bases"
+          kubectl apply -f "$METAL_OPERATOR_CRD_DIR"
+
 # TODO: Uncomment if cert-manager is enabled
 #      - name: Install cert-manager via Helm (wait for readiness)
 #        run: |
