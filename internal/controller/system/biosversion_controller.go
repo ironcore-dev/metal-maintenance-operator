@@ -305,7 +305,11 @@ func (r *BIOSVersionReconciler) processInProgressState(ctx context.Context, bmcC
 
 	if issuedCondition.Status != metav1.ConditionTrue {
 		log.V(1).Info("Processing BIOS version upgrade")
-		if server.Status.PowerState != metalv1alpha1.ServerOnPowerState {
+		inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+		if err != nil {
+			return false, fmt.Errorf("failed to check server power state: %w", err)
+		}
+		if !inPowerOnState {
 			powerOnIssued, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionUpgradeServerPowerOnIssued)
 			if err != nil {
 				return false, fmt.Errorf("failed to get Condition for issued powerOn of server: %w", err)
@@ -324,8 +328,9 @@ func (r *BIOSVersionReconciler) processInProgressState(ctx context.Context, bmcC
 				}
 				return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, biosVersion.Status.UpgradeTask, powerOnIssued)
 			}
+			// no watch event to notice the power-on completing in real BMC - poll periodically instead.
 			log.V(1).Info("Server in powered off state, retrying", "Server", server.Name)
-			return false, nil
+			return true, nil
 		}
 		// Check for pending component upgrade BEFORE issuing upgrade to avoid interrupting staged firmware
 		hasPending, err := bmcClient.CheckBMCPendingComponentUpgrade(ctx, bmc.ComponentTypeBIOS)
@@ -386,7 +391,8 @@ func (r *BIOSVersionReconciler) processInProgressState(ctx context.Context, bmcC
 	}
 
 	if rebootPowerOnCondition.Status != metav1.ConditionTrue {
-		return false, r.rebootServer(ctx, bmcClient, biosVersion, server)
+		// we cannot rely on watch event to notice the reboot completing - poll periodically instead.
+		return true, r.rebootServer(ctx, bmcClient, biosVersion, server)
 	}
 
 	condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionVersionUpgradeVerification)
@@ -699,7 +705,11 @@ func (r *BIOSVersionReconciler) rebootServer(ctx context.Context, bmcClient bmc.
 	if rebootIssuedCondition.Status != metav1.ConditionTrue {
 		// only issue a reboot if the server is currently on - a server that is already off does
 		// not need a power-cycle.
-		switch server.Status.PowerState {
+		currentPowerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
+		if err != nil {
+			return fmt.Errorf("failed to check server power state: %w", err)
+		}
+		switch currentPowerState {
 		case metalv1alpha1.ServerOnPowerState:
 			if err := bmcClient.Reset(ctx, server.Spec.SystemURI, schemas.GracefulRestartResetType); err != nil {
 				return fmt.Errorf("failed to issue server reboot: %w", err)
@@ -709,7 +719,7 @@ func (r *BIOSVersionReconciler) rebootServer(ctx context.Context, bmcClient bmc.
 				return fmt.Errorf("failed to power on server: %w", err)
 			}
 		default:
-			return fmt.Errorf("server is in an unexpected power state: %s", server.Status.PowerState)
+			return fmt.Errorf("server is in an unexpected power state: %s", currentPowerState)
 		}
 		if err := r.Conditions.Update(
 			rebootIssuedCondition,
@@ -732,11 +742,16 @@ func (r *BIOSVersionReconciler) rebootServer(ctx context.Context, bmcClient bmc.
 	// the resync/watch interval may be too coarse to ever catch this transient window (e.g.
 	// controller-runtime coalesces rapid Off->On transitions into a single reconcile), and
 	// requiring it before checking PowerOn would deadlock the reboot flow in that case.
+	inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+	if err != nil {
+		return fmt.Errorf("failed to check server power state: %w", err)
+	}
+
 	rebootObservedOffCondition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionUpgradeRebootObservedOff)
 	if err != nil {
 		return fmt.Errorf("failed to get RebootObservedOff condition: %w", err)
 	}
-	if rebootObservedOffCondition.Status != metav1.ConditionTrue && server.Status.PowerState != metalv1alpha1.ServerOnPowerState {
+	if rebootObservedOffCondition.Status != metav1.ConditionTrue && !inPowerOnState {
 		if err := r.Conditions.Update(
 			rebootObservedOffCondition,
 			conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -754,7 +769,7 @@ func (r *BIOSVersionReconciler) rebootServer(ctx context.Context, bmcClient bmc.
 	}
 
 	if rebootPowerOnCondition.Status != metav1.ConditionTrue {
-		if server.Status.PowerState == metalv1alpha1.ServerOnPowerState {
+		if inPowerOnState {
 			if err := r.Conditions.Update(
 				rebootPowerOnCondition,
 				conditionutils.UpdateStatus(corev1.ConditionTrue),
