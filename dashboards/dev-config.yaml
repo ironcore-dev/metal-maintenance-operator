@@ -1,0 +1,12 @@
+# Copyright 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+database:
+  file:
+    folder: /tmp/perses-dev-data
+    extension: yaml
+provisioning:
+  enable_watch: true
+  folders:
+    - dashboards/dev-provisioning
+    - dashboards/built

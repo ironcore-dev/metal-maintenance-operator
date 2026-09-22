@@ -45,11 +45,11 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/..." paths="./internal/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
 .PHONY: fmt
 fmt: goimports ## Run goimports against code.
@@ -216,6 +216,8 @@ KUBEBUILDER ?= $(LOCALBIN)/kubebuilder
 GOIMPORTS ?= $(LOCALBIN)/goimports
 ADDLICENSE ?= $(LOCALBIN)/addlicense
 CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
+PERCLI ?= $(LOCALBIN)/percli
+PERSES_SERVER ?= $(LOCALBIN)/perses
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
@@ -236,6 +238,7 @@ KUBEBUILDER_VERSION ?= v4.16.0
 GOIMPORTS_VERSION ?= v0.45.0
 ADDLICENSE_VERSION ?= v1.1.1
 CRD_REF_DOCS_VERSION ?= v0.2.0
+PERSES_VERSION ?= v0.55.0-beta.1
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
@@ -289,6 +292,46 @@ $(CRD_REF_DOCS): $(LOCALBIN)
 addlicense: $(ADDLICENSE) ## Download addlicense locally if necessary.
 $(ADDLICENSE): $(LOCALBIN)
 	$(call go-install-tool,$(ADDLICENSE),github.com/google/addlicense,$(ADDLICENSE_VERSION))
+
+.PHONY: percli
+percli: $(PERCLI) ## Download percli locally if necessary.
+
+.PHONY: perses-server
+perses-server: $(PERSES_SERVER) ## Download perses server locally if necessary.
+
+# Both binaries are bundled in the same Perses release tarball; a single stamp file
+# serialises the download so 'make -j' cannot trigger two concurrent extractions.
+PERSES_STAMP := $(LOCALBIN)/.perses-$(PERSES_VERSION)
+
+$(PERSES_STAMP): $(LOCALBIN)
+	@[ -f "$(PERCLI)-$(PERSES_VERSION)" ] && [ -f "$(PERSES_SERVER)-$(PERSES_VERSION)" ] || { \
+		set -e; \
+		OS=$$(go env GOOS); \
+		ARCH=$$(go env GOARCH); \
+		VERSION_BARE=$$(echo "$(PERSES_VERSION)" | sed 's/^v//'); \
+		TARBALL="perses_$${VERSION_BARE}_$${OS}_$${ARCH}.tar.gz"; \
+		CHECKSUMS="perses_$${VERSION_BARE}_checksums.txt"; \
+		BASE_URL="https://github.com/perses/perses/releases/download/$(PERSES_VERSION)"; \
+		TMPDIR=$$(mktemp -d); \
+		echo "Downloading Perses $(PERSES_VERSION)..."; \
+		curl -fsSL "$${BASE_URL}/$${TARBALL}" -o "$${TMPDIR}/$${TARBALL}"; \
+		curl -fsSL "$${BASE_URL}/$${CHECKSUMS}" -o "$${TMPDIR}/$${CHECKSUMS}"; \
+		(cd "$${TMPDIR}" && grep "[[:space:]]$${TARBALL}$$" "$${CHECKSUMS}" | sha256sum --check); \
+		tar -xzf "$${TMPDIR}/$${TARBALL}" -C "$${TMPDIR}" percli perses plugins-archive; \
+		mv "$${TMPDIR}/percli" "$(PERCLI)-$(PERSES_VERSION)"; \
+		mv "$${TMPDIR}/perses" "$(PERSES_SERVER)-$(PERSES_VERSION)"; \
+		rm -rf "$(LOCALBIN)/plugins-archive"; \
+		mv "$${TMPDIR}/plugins-archive" "$(LOCALBIN)/plugins-archive"; \
+		rm -rf "$${TMPDIR}"; \
+	}
+	@ln -sfn "$$(realpath "$(LOCALBIN)/plugins-archive")" "plugins-archive"
+	@touch "$@"
+
+$(PERCLI): $(PERSES_STAMP)
+	@ln -sf "$$(realpath "$(PERCLI)-$(PERSES_VERSION)")" "$(PERCLI)"
+
+$(PERSES_SERVER): $(PERSES_STAMP)
+	@ln -sf "$$(realpath "$(PERSES_SERVER)-$(PERSES_VERSION)")" "$(PERSES_SERVER)"
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -373,3 +416,67 @@ helm-history: ## Show Helm release history.
 .PHONY: helm-rollback
 helm-rollback: ## Rollback to previous Helm release.
 	$(HELM) rollback $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
+
+##@ Dashboards
+
+## Paths for dashboard source and generated JSON output
+DASHBOARDS_SRC   ?= dashboards
+DASHBOARDS_BUILT ?= dashboards/built
+## Optional path to a topology config YAML (overrides the embedded dashboards/common/config.yaml).
+## Relative paths are resolved from the repo root.
+## Example: make dashboard-build DASHBOARD_CONFIG=dashboards/common/sci-config.yaml
+## Note: only firmware-version-compliance uses this; firmware-upgrade-fleet-status ignores it.
+DASHBOARD_CONFIG ?=
+## Perses project name — must match the shared instance
+PERSES_PROJECT   ?= metal-maintenance-operator
+## Perses server endpoint (override to target the shared instance)
+PERSES_PORT      ?= 8088
+PERSES_URL       ?= http://localhost:$(PERSES_PORT)
+
+.PHONY: dashboard-build
+dashboard-build: percli ## Build all dashboards from Go source to JSON.
+	@mkdir -p "$(DASHBOARDS_BUILT)"
+	@for json in "$(DASHBOARDS_BUILT)"/*.json; do \
+		[ -f "$${json}" ] || continue; \
+		name=$$(basename "$${json}" .json); \
+		[ -f "$(DASHBOARDS_SRC)/$${name}/main.go" ] || { echo "Removing orphaned: $${name}.json"; rm -f "$${json}"; }; \
+	done
+	@for dir in $(DASHBOARDS_SRC)/*/; do \
+		[ -f "$${dir}main.go" ] || continue; \
+		name=$$(basename "$${dir}"); \
+		echo "Building dashboard: $${name}"; \
+		tmp="$(DASHBOARDS_BUILT)/$${name}.json.tmp"; \
+		(cd "$(DASHBOARDS_SRC)" && "$(PERCLI)" dac build -f "$${name}/main.go" -ojson -m stdout $(if $(DASHBOARD_CONFIG),-- -config "$(abspath $(DASHBOARD_CONFIG))")) > "$${tmp}" \
+			|| { rm -f "$${tmp}"; exit 1; }; \
+		mv "$${tmp}" "$(DASHBOARDS_BUILT)/$${name}.json"; \
+	done
+
+.PHONY: dashboard-lint
+dashboard-lint: dashboard-build ## Lint all built dashboards.
+	"$(PERCLI)" lint -d "$(DASHBOARDS_BUILT)"
+
+.PHONY: dashboard-apply
+dashboard-apply: dashboard-build ## Apply built dashboards to a running Perses instance.
+	"$(PERCLI)" login $(if $(PERSES_TOKEN),--token "$(PERSES_TOKEN)") "$(PERSES_URL)"
+	"$(PERCLI)" apply -d "$(DASHBOARDS_BUILT)"
+
+.PHONY: dashboard-clean
+dashboard-clean: percli ## Delete all dashboards in the Perses project and remove built JSON files.
+	"$(PERCLI)" login $(if $(PERSES_TOKEN),--token "$(PERSES_TOKEN)") "$(PERSES_URL)"
+	"$(PERCLI)" delete Dashboard --all --project "$(PERSES_PROJECT)"
+	find "$(DASHBOARDS_BUILT)" -name '*.json' -delete
+
+.PHONY: dashboard-reset
+dashboard-reset: ## Delete all dashboards then reapply from source.
+	$(MAKE) dashboard-clean
+	$(MAKE) dashboard-apply
+
+.PHONY: perses-start
+perses-start: perses-server ## Start a local Perses server for dashboard development.
+	@echo "Starting local Perses at $(PERSES_URL) (plugin loading takes ~15s)..."
+	"$(PERSES_SERVER)" -config "$(DASHBOARDS_SRC)/dev-config.yaml" -web.listen-address "127.0.0.1:$(PERSES_PORT)" &
+
+.PHONY: dashboard-watch
+dashboard-watch: percli ## Watch dashboard source for changes and rebuild JSON (run alongside perses-start).
+	@echo "Watching $(DASHBOARDS_SRC) for changes (Ctrl+C to stop). Run 'make perses-start' in a separate terminal first."
+	(cd "$(DASHBOARDS_SRC)" && "$(PERCLI)" dac watch . -ojson)

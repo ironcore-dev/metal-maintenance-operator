@@ -1,0 +1,71 @@
+# Copyright 2025 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# MMO dashboard topology configuration
+#
+# ── Overview ─────────────────────────────────────────────────────────────────
+#
+# MMO dashboards display three pieces of topology information for each server:
+# a "building block" grouping, a node name, and a zone. The Prometheus metric
+# label names for these fields are fixed:
+#
+#   bb        — building block (rack, cluster, etc.)
+#   nodename  — individual node / hostname
+#   zone      — availability zone or equivalent
+#
+# These canonical names are baked into the dashboard PromQL and cannot be
+# changed without regenerating the dashboard JSON. What CAN be changed is:
+#
+#   1. The column header text shown to users in the dashboard (displayName).
+#   2. Which Kubernetes label keys on your CRs are mapped to the canonical
+#      names (labelKey here + kubeStateMetrics.topology.* in values.yaml).
+#
+# ── How the two-config system works ──────────────────────────────────────────
+#
+# Build time (this file):
+#   The dashboard generator (percli dac build) reads this YAML to determine
+#   what to display as column headers. "bb" might show as "Rack", "Zone" might
+#   show as "Datacenter", etc. The defaults below match the ironcore naming
+#   convention. Override by copying this file and passing:
+#
+#     percli dac build -f firmware-version-compliance/main.go \
+#       -ojson -m stdout -- -config "$(pwd)/your-config.yaml"
+#
+# Deploy time (your CR labels):
+#   kube-state-metrics passes all Kubernetes CR labels through to the
+#   kube_ironcore_info metric verbatim (via "labelsFromPath: *" in the chart's
+#   CustomResourceState ConfigMap). KSM sanitizes label keys — replacing "."
+#   and "/" with "_" — before emitting them as Prometheus labels. The labelKey
+#   values below must match the resulting Prometheus label names on
+#   kube_ironcore_info in your environment.
+#
+#   Example: if your BMC CRs carry the label my-org.io/rack, KSM emits it as
+#   my_org_io_rack on kube_ironcore_info. Set bb.labelKey: "my_org_io_rack".
+#
+#   This produces kube_ironcore_info metrics like:
+#     kube_ironcore_info{customresource_kind="BMC", name="bmc-abc",
+#       buildingBlock="rack-1", nodename="node-42",
+#       topology_kubernetes_io_zone="eu-de-1a"}
+#
+# ── The join pattern ─────────────────────────────────────────────────────────
+#
+# The firmware-version-compliance dashboard enriches firmware metrics with
+# topology labels using a PromQL binary join:
+#
+#   metal_maintenance_bmcversion_info
+#     * on(bmc) group_left(bb, nodename, zone)
+#     kube_ironcore_info{customresource_kind="BMC"}
+#
+# ── Display name and label key configuration ──────────────────────────────────
+
+topology:
+  bb:
+    displayName: Building Block
+    labelKey: "buildingBlock"
+  nodename:
+    displayName: Node
+    labelKey: "nodename"
+  zone:
+    displayName: Zone
+    # KSM sanitizes the Kubernetes label key topology.kubernetes.io/zone → topology_kubernetes_io_zone
+    labelKey: "topology_kubernetes_io_zone"
