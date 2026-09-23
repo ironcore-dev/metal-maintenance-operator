@@ -30,9 +30,9 @@ manager:
   ##
   args:
     - "--leader-elect"
-    - '--sanitization-namespace={{ .Values.sanitization.namespace }}'
-    - '--sanitization-image={{ .Values.sanitization.image }}'
-    - '--report-base-url={{ .Values.sanitization.reportBaseURL }}'
+    - "--sanitization-namespace={{ .Values.sanitization.namespace }}"
+    - "--sanitization-image={{ .Values.sanitization.image }}"
+    - "--report-base-url={{ .Values.sanitization.reportBaseURL }}"
 
   ## Health probes.
   ## The manager serves the liveness (/healthz) and readiness (/readyz) endpoints on this port.
@@ -249,6 +249,53 @@ telemetry:
     # ingress controller to reach port 9092 once this path is present.
     ingress:
       enable: false
+
+  ## Telemetry collector ConfigMap configuration.
+  ## Creates the ConfigMap the operator reads to configure Redfish event
+  ## subscriptions and pipeline health checks (--telemetry-config-name /
+  ## --telemetry-config-namespace flags).
+  ##
+  config:
+    ## Set to true to create the telemetry-collector-config ConfigMap.
+    ##
+    enabled: false
+    ## Name of the ConfigMap; must match --telemetry-config-name (default: telemetry-collector-config).
+    ##
+    configMapName: "telemetry-collector-config"
+    ## Namespace where the ConfigMap is deployed; must match --telemetry-config-namespace.
+    ## Defaults to the Helm release namespace when empty.
+    ##
+    namespace: ""
+    ## How often the operator re-verifies Redfish subscriptions. Bounds: 5s – 24h.
+    ##
+    subscriptionReconcileInterval: "10m"
+    ## Per-Redfish-operation deadline for subscription management. Bounds: 1s – 10m.
+    ##
+    perBMCTimeout: "30s"
+    ## End-to-end health check interval; leave empty to disable. Bounds: 1m – 7d.
+    ##
+    testEventInterval: ""
+    ## Timeout for the health check round-trip. Bounds: 5s – 5m.
+    ##
+    testEventTimeout: ""
+    ## Vendor/model rows that opt into event-based subscription.
+    ## See config/telemetry/configmap.yaml for full field documentation.
+    ##
+    eventBasedHardware: []
+    ## Example:
+    # eventBasedHardware:
+    #   - vendor: "Dell Inc."
+    #     models: ["PowerEdge R760", "PowerEdge R660"]
+    #     testMessageId: "FAN0001"
+    #     testSeverity: "Informational"
+    #   - vendor: "HPE"
+    #     models: ["*"]
+    #     testMessageId: "iLOEvents.1.0.TestAlert"
+    #     testSeverity: "OK"
+    #     testOriginOfCondition: "/redfish/v1/Managers/1"
+    #   - vendor: "Lenovo"
+    #     models: ["*"]
+    #     testMessageId: "EventRegistry.1.0.0.FQXSPCA0012I"
 
 ## Additional Secret resources to render in the release namespace.
 ## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).

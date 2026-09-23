@@ -36,3 +36,4 @@ dist/chart/charts/
 # Local server lists for hack/verify-test-events contain real BMC credentials.
 hack/verify-test-events/servers.local.yaml
 hack/verify-test-events/*.local.yaml
+plugins
