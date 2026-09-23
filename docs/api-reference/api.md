@@ -1028,8 +1028,6 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 
 
-
-
 #### DellFirmwareRepository
 
 
