@@ -3,6 +3,15 @@ global:
   tld: "example.com"
   clusterType: "k8s"
 
+sanitization:
+  namespace: "metal-maintenance-sanitization"
+  image: "placeholder"
+  reportBaseURL: "http://placeholder:8082"
+
 ingress:
   enable: true
   domain: "metal-maintenance-operator.k8s.eu-west-2.example.com"
+
+manager:
+  envOverrides:
+    ENABLE_WEBHOOKS: "false"

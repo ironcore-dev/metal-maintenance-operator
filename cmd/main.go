@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package main
@@ -8,7 +8,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
@@ -30,7 +30,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -45,13 +44,14 @@ import (
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
-	maintenancewebhook "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/indexers"
+	webhookbaseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/baseboard/v1alpha1"
+	webhooksystemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -81,6 +81,7 @@ func main() {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
+	var webhookPort int
 	var enableLeaderElection bool
 	var leaderElectionNamespace string
 	var probeAddr string
@@ -95,6 +96,7 @@ func main() {
 	var reportBaseURL string
 	var sanitizedServerAddress string
 	var managerNamespace string
+	var configMapCacheNamespaces string
 	var defaultProtocol string
 	var skipCertValidation bool
 	var resyncInterval time.Duration
@@ -114,6 +116,8 @@ func main() {
 	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
 	flag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
 	flag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key", "The name of the webhook key file.")
+	flag.IntVar(&webhookPort, "webhook-port", 9443, "Port the webhook server listens on. "+
+		"Defaults to 9443. Set -1 to disable the webhook server.")
 	flag.StringVar(&metricsCertPath, "metrics-cert-path", "",
 		"The directory that contains the metrics server certificate.")
 	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
@@ -134,6 +138,9 @@ func main() {
 			"Sanitizers running on bare metal POST here to report completion.")
 	flag.StringVar(&managerNamespace, "manager-namespace", "",
 		"Namespace the manager runs in (used for BMC/BIOS controller secrets and boot configs).")
+	flag.StringVar(&configMapCacheNamespaces, "configmap-cache-namespaces", "",
+		"Comma-separated white-list of additional namespaces the manager's ConfigMap cache watches, "+
+			"on top of the telemetry ConfigMap.")
 	flag.StringVar(&defaultProtocol, "default-protocol", string(metalv1alpha1.HTTPProtocolScheme),
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
@@ -249,40 +256,25 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	// Create watchers for metrics and webhooks certificates
-	var metricsCertWatcher, webhookCertWatcher *certwatcher.CertWatcher
-
-	// Initial webhook TLS options
-	webhookTLSOpts := tlsOpts
-
-	if len(webhookCertPath) > 0 {
-		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
-			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
-
-		var err error
-		webhookCertWatcher, err = certwatcher.New(
-			filepath.Join(webhookCertPath, webhookCertName),
-			filepath.Join(webhookCertPath, webhookCertKey),
-		)
-		if err != nil {
-			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
-			os.Exit(1)
-		}
-
-		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
-			config.GetCertificate = webhookCertWatcher.GetCertificate
-		})
-	}
 	enableWebhooks = os.Getenv("ENABLE_WEBHOOKS") != "false"
 	if enableWebhooks {
-		webhookServer = webhook.NewServer(webhook.Options{
-			TLSOpts: webhookTLSOpts,
-		})
+		webhookServerOptions := webhook.Options{
+			TLSOpts: tlsOpts,
+			Port:    webhookPort,
+		}
+		if len(webhookCertPath) > 0 {
+			setupLog.Info("Initializing webhook certificate watcher using provided certificates",
+				"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
+			webhookServerOptions.CertDir = webhookCertPath
+			webhookServerOptions.CertName = webhookCertName
+			webhookServerOptions.KeyName = webhookCertKey
+		}
+		webhookServer = webhook.NewServer(webhookServerOptions)
 	}
 
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/metrics/server
+	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.25.0/pkg/metrics/server
 	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
@@ -294,7 +286,7 @@ func main() {
 		// FilterProvider is used to protect the metrics endpoint with authn/authz.
 		// These configurations ensure that only authorized users and service accounts
 		// can access the metrics endpoint. The RBAC are configured in 'config/rbac/kustomization.yaml'. More info:
-		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
+		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.25.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
@@ -309,20 +301,9 @@ func main() {
 	if len(metricsCertPath) > 0 {
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
-
-		var err error
-		metricsCertWatcher, err = certwatcher.New(
-			filepath.Join(metricsCertPath, metricsCertName),
-			filepath.Join(metricsCertPath, metricsCertKey),
-		)
-		if err != nil {
-			setupLog.Error(err, "to initialize metrics certificate watcher", "error", err)
-			os.Exit(1)
-		}
-
-		metricsServerOptions.TLSOpts = append(metricsServerOptions.TLSOpts, func(config *tls.Config) {
-			config.GetCertificate = metricsCertWatcher.GetCertificate
-		})
+		metricsServerOptions.CertDir = metricsCertPath
+		metricsServerOptions.CertName = metricsCertName
+		metricsServerOptions.KeyName = metricsCertKey
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -334,7 +315,10 @@ func main() {
 		LeaderElectionID:        "88d880f0.metal.ironcore.dev",
 		LeaderElectionNamespace: leaderElectionNamespace,
 		Cache: cache.Options{
-			ByObject: telemetryCacheByObject(enableTelemetry, telemetryConfigNamespace, telemetryConfigName),
+			ByObject: configMapCacheByObject(
+				enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
+				splitAndTrim(configMapCacheNamespaces),
+			),
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -392,6 +376,7 @@ func main() {
 		setupLog.Error(err, "Unable to create Sanitized handler")
 		os.Exit(1)
 	}
+
 	if err = (&readinessctrl.ServerWiringReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -400,57 +385,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(
-		context.Background(),
-		&maintenancev1alpha1.ServerMaintenance{},
-		"spec.serverRef.name",
-		func(rawObj client.Object) []string {
-			m, ok := rawObj.(*maintenancev1alpha1.ServerMaintenance)
-			if !ok {
-				return nil
-			}
-			if m.Spec.ServerRef != nil && m.Spec.ServerRef.Name != "" {
-				return []string{m.Spec.ServerRef.Name}
-			}
-			return nil
-		}); err != nil {
-		setupLog.Error(err, "Unable to set up ServerMaintenance field indexer")
-		os.Exit(1)
-	}
-
-	if err := mgr.GetFieldIndexer().IndexField(
-		context.Background(),
-		&systemv1alpha1.BIOSSettings{},
-		constants.ServerRefField,
-		func(rawObj client.Object) []string {
-			s, ok := rawObj.(*systemv1alpha1.BIOSSettings)
-			if !ok {
-				return nil
-			}
-			if s.Spec.ServerRef != nil && s.Spec.ServerRef.Name != "" {
-				return []string{s.Spec.ServerRef.Name}
-			}
-			return nil
-		}); err != nil {
-		setupLog.Error(err, "Failed to set up BIOSSettings field indexer")
-		os.Exit(1)
-	}
-
-	if err := mgr.GetFieldIndexer().IndexField(
-		context.Background(),
-		&baseboardv1alpha1.BMCSettings{},
-		constants.BMCRefField,
-		func(rawObj client.Object) []string {
-			s, ok := rawObj.(*baseboardv1alpha1.BMCSettings)
-			if !ok {
-				return nil
-			}
-			if s.Spec.BMCRef != nil && s.Spec.BMCRef.Name != "" {
-				return []string{s.Spec.BMCRef.Name}
-			}
-			return nil
-		}); err != nil {
-		setupLog.Error(err, "Failed to set up BMCSettings field indexer")
+	// Registers every field indexer used across the operator's reconcilers
+	// (ServerMaintenance/BIOSSettings by ServerRef, BMCSettings/Server by
+	// BMCRef) in one place.
+	if err := indexers.RegisterAll(context.Background(), mgr.GetFieldIndexer()); err != nil {
+		setupLog.Error(err, "Manager failed to register field indexers")
 		os.Exit(1)
 	}
 
@@ -587,22 +526,22 @@ func main() {
 	}
 
 	if enableWebhooks {
-		if err = maintenancewebhook.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
+		if err = webhookbaseboardv1alpha1.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BMCSettings webhook")
 			os.Exit(1)
 		}
 
-		if err = maintenancewebhook.SetupBMCVersionWebhookWithManager(mgr); err != nil {
+		if err = webhookbaseboardv1alpha1.SetupBMCVersionWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BMCVersion webhook")
 			os.Exit(1)
 		}
 
-		if err = maintenancewebhook.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
+		if err = webhooksystemv1alpha1.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BIOSSettings webhook")
 			os.Exit(1)
 		}
 
-		if err = maintenancewebhook.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
+		if err = webhooksystemv1alpha1.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
 			os.Exit(1)
 		}
@@ -657,22 +596,6 @@ func main() {
 			"metricsBindAddress", metricsAddr)
 	}
 
-	if metricsCertWatcher != nil {
-		setupLog.Info("Adding metrics certificate watcher to manager")
-		if err := mgr.Add(metricsCertWatcher); err != nil {
-			setupLog.Error(err, "unable to add metrics certificate watcher to manager")
-			os.Exit(1)
-		}
-	}
-
-	if webhookCertWatcher != nil {
-		setupLog.Info("Adding webhook certificate watcher to manager")
-		if err := mgr.Add(webhookCertWatcher); err != nil {
-			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
-			os.Exit(1)
-		}
-	}
-
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
@@ -689,21 +612,51 @@ func main() {
 	}
 }
 
-// telemetryCacheByObject returns a ByObject map that restricts the manager's
-// ConfigMap informer to the single telemetry ConfigMap. When telemetry is
-// disabled the cache is left unrestricted (nil return → no ConfigMap watch at
-// all, which is strictly better than the unconstrained cluster-wide watch).
-func telemetryCacheByObject(enabled bool, ns, name string) map[client.Object]cache.ByObject {
-	if !enabled || ns == "" || name == "" {
+// configMapCacheByObject returns a ByObject map that restricts the manager's
+// ConfigMap informer to an explicit allow-list of namespaces: the telemetry
+// ConfigMap's namespace+name (field-selector restricted, when telemetry is
+// enabled) plus extraNamespaces (e.g. "kube-system", via
+// --configmap-cache-namespaces), which BMCSettings/BIOSSettings
+// configMapKeyRef variables may reference.
+// note: leaving telemetryNS, telemetryName workflow as is for backwards
+// compatibility with existing telemetry ConfigMap deployments.
+func configMapCacheByObject(
+	telemetryEnabled bool, telemetryNS, telemetryName string, extraNamespaces []string,
+) map[client.Object]cache.ByObject {
+	namespaces := map[string]cache.Config{}
+	if telemetryEnabled && telemetryNS != "" && telemetryName != "" {
+		namespaces[telemetryNS] = cache.Config{
+			FieldSelector: fields.OneTermEqualSelector("metadata.name", telemetryName),
+		}
+	}
+	for _, ns := range extraNamespaces {
+		if ns == "" {
+			continue
+		}
+		// Overwrite any existing entry (e.g. a field-selector-restricted
+		// telemetry namespace entry) so an explicitly opted-in namespace
+		// always gets unrestricted access, even when it duplicates telemetryNS.
+		namespaces[ns] = cache.Config{}
+	}
+	if len(namespaces) == 0 {
 		return nil
 	}
 	return map[client.Object]cache.ByObject{
 		&corev1.ConfigMap{}: {
-			Namespaces: map[string]cache.Config{
-				ns: {
-					FieldSelector: fields.OneTermEqualSelector("metadata.name", name),
-				},
-			},
+			Namespaces: namespaces,
 		},
 	}
+}
+
+// splitAndTrim splits a comma-separated list, trims whitespace from each
+// element, and drops empty elements.
+func splitAndTrim(s string) []string {
+	var out []string
+	for part := range strings.SplitSeq(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

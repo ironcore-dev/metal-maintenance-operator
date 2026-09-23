@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
 // Package simcontrollers provides lightweight, test-only stand-ins for metal-operator's
@@ -20,7 +20,10 @@
 // Only the fields tests actually rely on are synced (BMC PowerState/FirmwareVersion,
 // Server PowerState, and Server Status.State transitions to/from Parked driven by
 // the metalv1alpha1.OperationAnnotation "park"/"unpark" requests that this repo's
-// real ServerMaintenanceReconciler issues).
+// real ServerMaintenanceReconciler issues). Server.Status.PowerState refresh is
+// suspended while Status.State == Parked, mirroring metal-operator's real
+// Server controller, which freezes Status while parked (see updateServerStatus
+// in ServerReconciler.Reconcile below).
 package simcontrollers
 
 import (
@@ -269,16 +272,13 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	// Mimic metal-operator's real ServerReconciler.updateServerStatus: refresh
-	// Status.PowerState from the BMC unconditionally, on every reconcile, before
-	// any state-specific handling below - the real controller does this too,
-	// which is why other controllers (e.g. BIOSSettingsReconciler) that issue
-	// direct BMC power commands while a Server is Parked for maintenance can
-	// rely on Status.PowerState reflecting the change without waiting for the
-	// Server to leave the Parked state first.
-	if err := r.updateServerStatus(ctx, bmcClient, server); err != nil {
-		log.V(1).Info("Server status update failed, will retry", "error", err)
-		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+	// Mimic metal-operator's real ServerReconciler.updateServerStatus: refresh Status
+
+	if server.Status.State != metalv1alpha1.ServerStateParked {
+		if err := r.updateServerStatus(ctx, bmcClient, server); err != nil {
+			log.V(1).Info("Server status update failed, will retry", "error", err)
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		}
 	}
 
 	if requeue, err := r.syncParkedState(ctx, bmcClient, server); err != nil || requeue {
@@ -291,34 +291,32 @@ func (r *ServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 
-	// Mimic metal-operator's real ServerReconciler.handleAvailableState: an
-	// Available Server is force powered-off (Spec.Power set to PowerOff)
-	// whenever its observed PowerState isn't already Off, regardless of what
-	// Spec.Power currently says - Available Servers are expected to sit powered
-	// off until claimed.
-	if server.Status.State == metalv1alpha1.ServerStateAvailable &&
-		server.Status.PowerState != metalv1alpha1.ServerOffPowerState &&
-		server.Spec.Power != metalv1alpha1.PowerOff {
-		serverBase := server.DeepCopy()
-		server.Spec.Power = metalv1alpha1.PowerOff
-		if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-			return ctrl.Result{}, err
+	// Mimic metal-operator's real ServerReconciler.ensureServerPowerState: derive
+	// the desired power state from the server state and bound ServerClaim directly
+	// (rather than the deprecated Spec.Power field), then issue the corresponding
+	// BMC power command so the mock BMC's power state actually changes and callers
+	// waiting on power-state transitions don't block forever.
+	var desiredPower metalv1alpha1.Power
+	switch server.Status.State {
+	case metalv1alpha1.ServerStateAvailable:
+		// Available servers must sit powered off until claimed.
+		desiredPower = metalv1alpha1.PowerOff
+	case metalv1alpha1.ServerStateReserved:
+		if server.Spec.ServerClaimRef != nil {
+			claim := &metalv1alpha1.ServerClaim{}
+			if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.ServerClaimRef.Name, Namespace: server.Spec.ServerClaimRef.Namespace}, claim); err == nil {
+				desiredPower = claim.Spec.Power
+			}
 		}
 	}
 
-	// Mimic metal-operator's real ServerReconciler.ensureServerPowerState: act on
-	// Server.Spec.Power (set e.g. by ServerMaintenanceReconciler when powering a
-	// Server off/on for maintenance) by issuing the corresponding BMC power
-	// command, since without this the mock BMC's power state never actually
-	// changes and callers waiting on Server/BIOS power transitions would block
-	// forever.
-	if server.Spec.Power == metalv1alpha1.PowerOn &&
+	if desiredPower == metalv1alpha1.PowerOn &&
 		server.Status.PowerState != metalv1alpha1.ServerOnPowerState {
 		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
 			log.V(1).Info("sim-server: failed to power on server, will retry", "error", err)
 			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
-	} else if server.Spec.Power == metalv1alpha1.PowerOff &&
+	} else if desiredPower == metalv1alpha1.PowerOff &&
 		server.Status.PowerState != metalv1alpha1.ServerOffPowerState {
 		if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
 			log.V(1).Info("sim-server: failed to power off server, will retry", "error", err)
@@ -524,14 +522,6 @@ func (r *ServerClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-	}
-
-	if server.Status.State == metalv1alpha1.ServerStateReserved && server.Spec.Power != claim.Spec.Power {
-		serverBase := server.DeepCopy()
-		server.Spec.Power = claim.Spec.Power
-		if err := r.Patch(ctx, server, client.MergeFrom(serverBase)); err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil

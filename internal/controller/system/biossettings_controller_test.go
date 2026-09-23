@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package system
@@ -18,6 +18,7 @@ import (
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -393,9 +394,11 @@ var _ = Describe("BIOSSettings Controller", func() {
 		)
 
 		By("Ensuring that the Server is in correct power state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.PowerState", metalv1alpha1.ServerOnPowerState),
-		)
+		Eventually(func(g Gomega) metalv1alpha1.ServerPowerState {
+			state, err := testutils.LiveServerPowerState(ctx, k8sClient, server, metalv1alpha1.HTTPProtocolScheme, true, bmc.Options{BasicAuth: true})
+			g.Expect(err).NotTo(HaveOccurred())
+			return state
+		}).Should(Equal(metalv1alpha1.ServerOnPowerState))
 
 		// because of how we mock the setting update, it applied immediately and hence will not go through reboots to apply setting
 		// this is the eventual state we would need to reach
@@ -1103,10 +1106,14 @@ var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {
 			HaveField("Status.LastAppliedTime", BeNil()),
 		))
 
+		// Server is Parked here, so Status.PowerState is frozen (metal-operator
+		// stops refreshing it while parked) - query the BMC directly instead.
 		By("Ensuring that the Server is in correct power state")
-		Eventually(Object(server)).Should(
-			HaveField("Status.PowerState", metalv1alpha1.ServerOnPowerState),
-		)
+		Eventually(func(g Gomega) metalv1alpha1.ServerPowerState {
+			state, err := testutils.LiveServerPowerState(ctx, k8sClient, server, metalv1alpha1.HTTPProtocolScheme, true, bmc.Options{BasicAuth: true})
+			g.Expect(err).NotTo(HaveOccurred())
+			return state
+		}).Should(Equal(metalv1alpha1.ServerOnPowerState))
 
 		// because of how we mock the setting update, it applied immediately and hence will not go through reboots to apply setting
 		// this is the eventual state we would need to reach

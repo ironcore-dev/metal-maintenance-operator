@@ -1,6 +1,8 @@
-{{- if .Values.ingress.enable }}
+{{- if .Values.ingress.enabled }}
 {{- $domain := tpl .Values.ingress.domain . }}
 ---
+# Service backing the sanitization report endpoint (port 8082). BMCs and
+# sanitizer pods POST to this via the Ingress rule at path /.
 apiVersion: v1
 kind: Service
 metadata:
@@ -16,6 +18,9 @@ spec:
     app.kubernetes.io/instance: {{ .Release.Name }}
   type: ClusterIP
 ---
+# Single Ingress for both backends on this operator's hostname:
+#   /             → port 8082 (sanitization report callback)
+#   /serverevents → port 9092 (Redfish push event receiver, when telemetry enabled)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -42,7 +47,7 @@ spec:
             name: {{ include "metal-maintenance-operator.fullname" . }}
             port:
               number: {{ .Values.ingress.port }}
-{{- if and .Values.telemetry.events.ingress.enable .Values.telemetry.events.serviceEnabled }}
+{{- if and .Values.telemetry.events.ingress.enabled .Values.telemetry.events.serviceEnabled }}
       - path: /serverevents
         pathType: Prefix
         backend:

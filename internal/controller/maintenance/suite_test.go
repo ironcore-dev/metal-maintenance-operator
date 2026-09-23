@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package maintenance
@@ -53,7 +53,7 @@ const (
 	// baseboard/system packages' test setup so Server objects backed by a real
 	// (mocked) BMC progress through Parked state the same way everywhere.
 	BMCMockServerIP   = "127.0.0.1"
-	BMCMockServerPort = int32(8101)
+	BMCMockServerPort = int32(8300)
 )
 
 var (

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package subscriptions_test
@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -115,7 +114,7 @@ func TestReconcile_EventBased_NoExisting_CreatesBoth(t *testing.T) {
 		t.Fatalf("create calls: got %d, want 2", len(creates))
 	}
 	formats := []string{string(creates[0].format), string(creates[1].format)}
-	sort.Strings(formats)
+	slices.Sort(formats)
 	want := []string{string(schemas.EventEventFormatType), string(schemas.MetricReportEventFormatType)}
 	for i := range want {
 		if formats[i] != want[i] {

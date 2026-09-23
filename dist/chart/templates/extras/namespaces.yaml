@@ -1,0 +1,14 @@
+# Server Readiness Namespaces
+{{- range .Values.serverReadinessNamespaces }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ . }}
+{{- end }}
+--- 
+# Sanitization Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.sanitization.namespace }}

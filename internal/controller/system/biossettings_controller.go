@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package system
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"time"
 
@@ -440,8 +439,8 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 
 	settingsFlow := append([]api.SettingsFlowItem{}, settings.Spec.SettingsFlow...)
 
-	sort.Slice(settingsFlow, func(i, j int) bool {
-		return settingsFlow[i].Priority <= settingsFlow[j].Priority
+	slices.SortFunc(settingsFlow, func(a, b api.SettingsFlowItem) int {
+		return int(a.Priority) - int(b.Priority)
 	})
 
 	// loop through all the sequence in priority order and verify/Apply the settings
@@ -506,6 +505,11 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 				return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
 			}
 			return ctrl.Result{}, err
+		} else if err == nil {
+			// Still waiting on a live BMC condition (e.g. power-on or reboot confirmation).
+			// Server.Status is frozen while parked, so we cannot rely on a Server watch
+			// event to re-trigger reconciliation here - poll periodically instead.
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		} else {
 			return ctrl.Result{}, err
 		}
@@ -577,7 +581,11 @@ func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClie
 	}
 
 	if turnOnServer.Status != metav1.ConditionTrue {
-		if r.isServerInPowerState(server, metalv1alpha1.ServerOnPowerState) {
+		inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+		if err != nil {
+			return false, fmt.Errorf("failed to check server power state: %w", err)
+		}
+		if inPowerOnState {
 			if err := r.Conditions.Update(
 				turnOnServer,
 				conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -619,8 +627,7 @@ func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClie
 		resetReq, err := bmcClient.CheckBiosAttributes(settingsDiff)
 		if err != nil {
 			log.Error(err, "Could not validate settings and determine if reboot needed")
-			var invalidSettingsErr *bmc.InvalidBIOSSettingsError
-			if errors.As(err, &invalidSettingsErr) {
+			if _, ok := errors.AsType[*bmc.InvalidBIOSSettingsError](err); ok {
 				inValidSettings, errCond := utils.GetCondition(r.Conditions, flowStatus.Conditions, ConditionSettingsValidationFailed)
 				if errCond != nil {
 					return false, errors.Join(fmt.Errorf("failed to get Condition for skip reboot post setting update: %w", errCond), err)
@@ -827,16 +834,21 @@ func (r *BIOSSettingsReconciler) rebootServer(ctx context.Context, bmcClient bmc
 	if rebootIssuedCondition.Status != metav1.ConditionTrue {
 		// only issue a reboot if the server is currently on - a server that is already off does
 		// not need a power-cycle.
-		if r.isServerInPowerState(server, metalv1alpha1.ServerOnPowerState) {
+		currentPowerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
+		if err != nil {
+			return fmt.Errorf("failed to check server power state: %w", err)
+		}
+		switch currentPowerState {
+		case metalv1alpha1.ServerOnPowerState:
 			if err := bmcClient.Reset(ctx, server.Spec.SystemURI, schemas.GracefulRestartResetType); err != nil {
 				return fmt.Errorf("failed to issue server reboot: %w", err)
 			}
-		} else if r.isServerInPowerState(server, metalv1alpha1.ServerOffPowerState) {
+		case metalv1alpha1.ServerOffPowerState:
 			if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
 				return fmt.Errorf("failed to power on server: %w", err)
 			}
-		} else {
-			return fmt.Errorf("server is in an unexpected power state: %s", server.Status.PowerState)
+		default:
+			return fmt.Errorf("server is in an unexpected power state: %s", currentPowerState)
 		}
 		if err := r.Conditions.Update(
 			rebootIssuedCondition,
@@ -859,11 +871,16 @@ func (r *BIOSSettingsReconciler) rebootServer(ctx context.Context, bmcClient bmc
 	// the resync/watch interval may be too coarse to ever catch this transient window (e.g.
 	// controller-runtime coalesces rapid Off->On transitions into a single reconcile), and
 	// requiring it before checking PowerOn would deadlock the reboot flow in that case.
+	inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+	if err != nil {
+		return fmt.Errorf("failed to check server power state: %w", err)
+	}
+
 	rebootObservedOffCondition, err := utils.GetCondition(r.Conditions, flowStatus.Conditions, ConditionSettingsRebootObservedOff)
 	if err != nil {
 		return fmt.Errorf("failed to get RebootObservedOff condition: %w", err)
 	}
-	if rebootObservedOffCondition.Status != metav1.ConditionTrue && !r.isServerInPowerState(server, metalv1alpha1.ServerOnPowerState) {
+	if rebootObservedOffCondition.Status != metav1.ConditionTrue && !inPowerOnState {
 		if err := r.Conditions.Update(
 			rebootObservedOffCondition,
 			conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -881,7 +898,7 @@ func (r *BIOSSettingsReconciler) rebootServer(ctx context.Context, bmcClient bmc
 	}
 
 	if rebootPowerOnCondition.Status != metav1.ConditionTrue {
-		if r.isServerInPowerState(server, metalv1alpha1.ServerOnPowerState) {
+		if inPowerOnState {
 			if err := r.Conditions.Update(
 				rebootPowerOnCondition,
 				conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -1244,10 +1261,6 @@ func (r *BIOSSettingsReconciler) getBIOSVersionAndSettingsDiff(ctx context.Conte
 	}
 
 	return version, diff, nil
-}
-
-func (r *BIOSSettingsReconciler) isServerInPowerState(server *metalv1alpha1.Server, state metalv1alpha1.ServerPowerState) bool {
-	return server.Status.PowerState == state
 }
 
 func (r *BIOSSettingsReconciler) isServerInMaintenance(ctx context.Context, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) bool {
