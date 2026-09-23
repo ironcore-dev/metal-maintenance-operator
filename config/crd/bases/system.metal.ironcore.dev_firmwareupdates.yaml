@@ -59,6 +59,15 @@ spec:
                     description: Address is the share's hostname or IP address (e.g.
                       downloads.dell.com).
                     type: string
+                  applyVersionPolicy:
+                    description: |-
+                      ApplyVersionPolicy controls whether packages already at the same version and/or older
+                      than the currently installed version are applied. If unset, only genuine upgrades are applied.
+                    enum:
+                    - AllowSameVersion
+                    - AllowDowngradeVersion
+                    - AllowSameAndDowngradeVersion
+                    type: string
                   catalogFile:
                     description: CatalogFile is the catalog file name within the share.
                       Defaults to "Catalog.xml".
@@ -97,34 +106,6 @@ spec:
                     type: string
                 required:
                 - shareType
-                type: object
-              image:
-                description: Image describes the OTB firmware image parameters (HPE,
-                  Lenovo).
-                properties:
-                  URI:
-                    description: URI is the URI of the software image to install.
-                    type: string
-                  secretRef:
-                    description: SecretRef is a reference to the Secret containing
-                      the credentials to access the image URI.
-                    properties:
-                      name:
-                        description: name is unique within a namespace to reference
-                          a secret resource.
-                        type: string
-                      namespace:
-                        description: namespace defines the space within which the
-                          secret name must be unique.
-                        type: string
-                    type: object
-                    x-kubernetes-map-type: atomic
-                  transferProtocol:
-                    description: TransferProtocol is the network protocol used to
-                      retrieve the image URI.
-                    type: string
-                required:
-                - URI
                 type: object
               progressDeadlineSeconds:
                 default: 3600
@@ -176,25 +157,20 @@ spec:
                 format: int32
                 type: integer
             required:
+            - dellRepository
             - serverRef
             type: object
-            x-kubernetes-validations:
-            - message: exactly one of dellRepository or image must be set
-              rule: has(self.dellRepository) != has(self.image)
           status:
             description: FirmwareUpdateStatus defines the observed state of FirmwareUpdate.
             properties:
               baselineJobIDs:
                 description: |-
                   BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
-                  current pass, used to diff and discover newly spawned component jobs.
+                  current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly
+                  empty) slice indicates the baseline has been captured for the current pass.
                 items:
                   type: string
                 type: array
-              baselineJobsCaptured:
-                description: BaselineJobsCaptured is true once BaselineJobIDs has
-                  been successfully populated for the current pass.
-                type: boolean
               checkJob:
                 description: CheckJob contains the state of the dry-run catalog-check
                   job.

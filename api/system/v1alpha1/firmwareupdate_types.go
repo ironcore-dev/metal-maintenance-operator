@@ -23,6 +23,20 @@ const (
 	DellShareTypeHTTPS DellShareType = "HTTPS"
 )
 
+// DellVersionApplyPolicy controls whether Dell's InstallFromRepository job applies packages
+// that are already at the same version and/or older than the currently installed version.
+// If unset, only genuine upgrades (newer than the installed version) are applied.
+type DellVersionApplyPolicy string
+
+const (
+	// DellVersionApplyPolicyAllowSameVersion re-applies packages already at the same version.
+	DellVersionApplyPolicyAllowSameVersion DellVersionApplyPolicy = "AllowSameVersion"
+	// DellVersionApplyPolicyAllowDowngradeVersion allows applying packages older than the currently installed version.
+	DellVersionApplyPolicyAllowDowngradeVersion DellVersionApplyPolicy = "AllowDowngradeVersion"
+	// DellVersionApplyPolicyAllowSameAndDowngradeVersion allows both re-applying same-version packages and downgrades.
+	DellVersionApplyPolicyAllowSameAndDowngradeVersion DellVersionApplyPolicy = "AllowSameAndDowngradeVersion"
+)
+
 // RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
 // operation. State is intentionally a plain string mirroring bmc.DellJob.
 type RepositoryJob struct {
@@ -82,18 +96,20 @@ type DellFirmwareRepository struct {
 	// RebootNeeded, if true, allows the BMC to reboot the server to apply updates.
 	// +optional
 	RebootNeeded bool `json:"rebootNeeded,omitempty"`
+
+	// ApplyVersionPolicy controls whether packages already at the same version and/or older
+	// than the currently installed version are applied. If unset, only genuine upgrades are applied.
+	// +kubebuilder:validation:Enum=AllowSameVersion;AllowDowngradeVersion;AllowSameAndDowngradeVersion
+	// +optional
+	ApplyVersionPolicy *DellVersionApplyPolicy `json:"applyVersionPolicy,omitempty"`
 }
 
 // FirmwareUpdateTemplate defines the desired firmware update parameters.
-// +kubebuilder:validation:XValidation:rule="has(self.dellRepository) != has(self.image)",message="exactly one of dellRepository or image must be set"
+// TODO: Add support for HPE and Lenovo firmware update images, which are not repository-based.
 type FirmwareUpdateTemplate struct {
 	// DellRepository describes the network share hosting the Dell update repository/catalog.
-	// +optional
-	DellRepository *DellFirmwareRepository `json:"dellRepository,omitempty"`
-
-	// Image describes the OTB firmware image parameters (HPE, Lenovo).
-	// +optional
-	Image *api.ImageSpec `json:"image,omitempty"`
+	// +required
+	DellRepository *DellFirmwareRepository `json:"dellRepository"`
 
 	// ServerMaintenancePolicy is a maintenance policy to be enforced on the server.
 	// +optional
@@ -145,13 +161,10 @@ type FirmwareUpdateStatus struct {
 	UpdateJob *RepositoryJob `json:"updateJob,omitempty"`
 
 	// BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
-	// current pass, used to diff and discover newly spawned component jobs.
+	// current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly
+	// empty) slice indicates the baseline has been captured for the current pass.
 	// +optional
-	BaselineJobIDs []string `json:"baselineJobIDs,omitempty"`
-
-	// BaselineJobsCaptured is true once BaselineJobIDs has been successfully populated for the current pass.
-	// +optional
-	BaselineJobsCaptured bool `json:"baselineJobsCaptured,omitempty"`
+	BaselineJobIDs []string `json:"baselineJobIDs"`
 
 	// LastProgressTime records the last time the controller observed forward progress.
 	// Used together with ProgressDeadlineSeconds to detect stalled updates.

@@ -455,7 +455,6 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 		fw.Status.CheckJob = nil
 		fw.Status.UpdateJob = nil
 		fw.Status.BaselineJobIDs = nil
-		fw.Status.BaselineJobsCaptured = false
 		fw.Status.LastProgressTime = nil
 		fw.Status.PassCount = 0
 		annotations := fw.GetAnnotations()
@@ -501,7 +500,7 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 			fw.Status.CheckJob = nil
 			fw.Status.UpdateJob = nil
 			fw.Status.BaselineJobIDs = nil
-			fw.Status.BaselineJobsCaptured = false
+
 			fw.Status.LastProgressTime = nil
 			fw.Status.PassCount = 0
 			retryCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionRetryOfFailedResourceIssued)
@@ -580,7 +579,6 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 		fw.Status.CheckJob = nil
 		fw.Status.UpdateJob = nil
 		fw.Status.BaselineJobIDs = nil
-		fw.Status.BaselineJobsCaptured = false
 		fw.Status.LastProgressTime = nil
 		fw.Status.PassCount = 0
 	}

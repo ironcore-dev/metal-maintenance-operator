@@ -15,6 +15,7 @@ import (
 	"github.com/ironcore-dev/metal-operator/bmc"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -145,7 +146,6 @@ func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.Firmwa
 	fw.Status.CheckJob = nil
 	fw.Status.UpdateJob = nil
 	fw.Status.BaselineJobIDs = nil
-	fw.Status.BaselineJobsCaptured = false
 	// PassCount is intentionally preserved (not reset) here: it is only reset
 	// once a repository check actually confirms convergence (no packages
 	// pending), so persistently-pending catalogs remain bounded by
@@ -304,7 +304,14 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 	// Snapshot the jobs known to the BMC before issuing the apply call, so
 	// newly spawned component jobs can be discovered by diffing against this
 	// baseline once the apply job itself completes.
-	if !fw.Status.BaselineJobsCaptured {
+	//
+	// The baseline is captured here, immediately before issuing the apply
+	// call below, rather than in a separate prior reconcile: if it were
+	// persisted a reconcile ahead of the apply call, any job spawned on the
+	// BMC in that window (e.g. unrelated background LC-log jobs) would be
+	// mistaken for one of our own component jobs by trackComponentJobs.
+	baselineJobIDs := fw.Status.BaselineJobIDs
+	if baselineJobIDs == nil {
 		jobIDs, err := updater.ListJobs(ctx, "")
 		if err != nil {
 			log.V(1).Info("Failed to list jobs for baseline snapshot, retrying", "error", err)
@@ -313,10 +320,7 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 		if jobIDs == nil {
 			jobIDs = []string{}
 		}
-		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.BaselineJobIDs = jobIDs
-			status.BaselineJobsCaptured = true
-		})
+		baselineJobIDs = jobIDs
 	}
 
 	parameters, err := buildRepositoryParameters(ctx, r, fw, true)
@@ -338,7 +342,11 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 			}
 			return false, r.updateStatus(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition)
 		}
-		return false, err
+		// Persist the baseline captured above so a retry doesn't need to
+		// re-list jobs; harmless if it does, since apply hasn't succeeded yet.
+		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
+			status.BaselineJobIDs = baselineJobIDs
+		})
 	}
 
 	if err := r.Conditions.Update(
@@ -351,6 +359,7 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 	}
 
 	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
+		status.BaselineJobIDs = baselineJobIDs
 		status.UpdateJob = &systemv1alpha1.RepositoryJob{JobID: jobID}
 	})
 }
@@ -488,15 +497,28 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 		catalogFile = "Catalog.xml"
 	}
 
+	var applySameVersions, applyDowngradeVersions bool
+	switch ptr.Deref(repo.ApplyVersionPolicy, "") {
+	case systemv1alpha1.DellVersionApplyPolicyAllowSameVersion:
+		applySameVersions = true
+	case systemv1alpha1.DellVersionApplyPolicyAllowDowngradeVersion:
+		applyDowngradeVersions = true
+	case systemv1alpha1.DellVersionApplyPolicyAllowSameAndDowngradeVersion:
+		applySameVersions = true
+		applyDowngradeVersions = true
+	}
+
 	return &bmc.RepositoryUpdateParameters{
-		ShareType:    string(repo.ShareType),
-		IPAddress:    repo.Address,
-		ShareName:    repo.ShareName,
-		CatalogFile:  catalogFile,
-		UserName:     username,
-		Password:     password,
-		ApplyUpdate:  applyUpdate,
-		RebootNeeded: applyUpdate && repo.RebootNeeded,
+		ShareType:              string(repo.ShareType),
+		IPAddress:              repo.Address,
+		ShareName:              repo.ShareName,
+		CatalogFile:            catalogFile,
+		UserName:               username,
+		Password:               password,
+		ApplyUpdate:            applyUpdate,
+		RebootNeeded:           applyUpdate && repo.RebootNeeded,
+		ApplySameVersions:      applySameVersions,
+		ApplyDowngradeVersions: applyDowngradeVersions,
 	}, nil
 }
 

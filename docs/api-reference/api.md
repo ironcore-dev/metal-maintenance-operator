@@ -1049,6 +1049,7 @@ _Appears in:_
 | `catalogFile` _string_ | CatalogFile is the catalog file name within the share. Defaults to "Catalog.xml". |  |  |
 | `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required.<br />Must not be set when ShareType is HTTP. |  |  |
 | `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
+| `applyVersionPolicy` _[DellVersionApplyPolicy](#dellversionapplypolicy)_ | ApplyVersionPolicy controls whether packages already at the same version and/or older<br />than the currently installed version are applied. If unset, only genuine upgrades are applied. |  | Enum: [AllowSameVersion AllowDowngradeVersion AllowSameAndDowngradeVersion] <br /> |
 
 
 #### DellShareType
@@ -1068,6 +1069,26 @@ _Appears in:_
 | `CIFS` |  |
 | `HTTP` |  |
 | `HTTPS` |  |
+
+
+#### DellVersionApplyPolicy
+
+_Underlying type:_ _string_
+
+DellVersionApplyPolicy controls whether Dell's InstallFromRepository job applies packages
+that are already at the same version and/or older than the currently installed version.
+If unset, only genuine upgrades (newer than the installed version) are applied.
+
+
+
+_Appears in:_
+- [DellFirmwareRepository](#dellfirmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `AllowSameVersion` | DellVersionApplyPolicyAllowSameVersion re-applies packages already at the same version.<br /> |
+| `AllowDowngradeVersion` | DellVersionApplyPolicyAllowDowngradeVersion allows applying packages older than the currently installed version.<br /> |
+| `AllowSameAndDowngradeVersion` | DellVersionApplyPolicyAllowSameAndDowngradeVersion allows both re-applying same-version packages and downgrades.<br /> |
 
 
 #### FirmwareUpdate
@@ -1103,7 +1124,6 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
-| `image` _[ImageSpec](#imagespec)_ | Image describes the OTB firmware image parameters (HPE, Lenovo). |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
@@ -1147,8 +1167,7 @@ _Appears in:_
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to the ServerMaintenance object the controller created for this update. |  |  |
 | `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
 | `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
-| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. |  |  |
-| `baselineJobsCaptured` _boolean_ | BaselineJobsCaptured is true once BaselineJobIDs has been successfully populated for the current pass. |  |  |
+| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly<br />empty) slice indicates the baseline has been captured for the current pass. |  |  |
 | `lastProgressTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastProgressTime records the last time the controller observed forward progress.<br />Used together with ProgressDeadlineSeconds to detect stalled updates. |  |  |
 | `passCount` _integer_ | PassCount is the number of check->apply->track->recheck passes completed so far. |  |  |
 | `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
@@ -1170,7 +1189,6 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
-| `image` _[ImageSpec](#imagespec)_ | Image describes the OTB firmware image parameters (HPE, Lenovo). |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 
