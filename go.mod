@@ -14,7 +14,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/spf13/pflag v1.0.10
-	github.com/stmcginnis/gofish v0.25.0
+	github.com/stmcginnis/gofish v0.26.0
 	go.yaml.in/yaml/v3 v3.0.5
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
