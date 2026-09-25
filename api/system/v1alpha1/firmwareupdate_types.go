@@ -54,6 +54,56 @@ type RepositoryJob struct {
 	PercentComplete int32 `json:"percentComplete,omitempty"`
 }
 
+// ComponentJobsSummary tallies the current pass's per-component jobs (ComponentJobs) by
+// completion state, computed by the controller purely for observability (e.g. printcolumns);
+// controller logic drives off ComponentJobs directly rather than this summary.
+type ComponentJobsSummary struct {
+	// Total is the number of component jobs discovered so far in the current pass.
+	// +optional
+	Total int32 `json:"total,omitempty"`
+
+	// Completed is the number of component jobs that finished successfully.
+	// +optional
+	Completed int32 `json:"completed,omitempty"`
+
+	// InProgress is the number of component jobs that have not yet reached a terminal state.
+	// +optional
+	InProgress int32 `json:"inProgress,omitempty"`
+
+	// Failed is the number of component jobs that finished in a failed state.
+	// +optional
+	Failed int32 `json:"failed,omitempty"`
+}
+
+// DellFirmwareUpdateStatus contains status fields specific to Dell's repository-based firmware
+// update mechanism (DellSoftwareInstallationService.InstallFromRepository). Keeping these fields
+// vendor-namespaced (rather than flat on FirmwareUpdateStatus) mirrors DellFirmwareRepository in
+// the spec and leaves room for sibling vendor-specific status structs (e.g. for Fujitsu/Lenovo
+// image-based updates) to be added to FirmwareUpdateStatus without colliding field names.
+type DellFirmwareUpdateStatus struct {
+	// CheckJob contains the state of the dry-run catalog-check job.
+	// +optional
+	CheckJob *RepositoryJob `json:"checkJob,omitempty"`
+
+	// UpdateJob contains the state of the main apply job.
+	// +optional
+	UpdateJob *RepositoryJob `json:"updateJob,omitempty"`
+
+	// ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job.
+	// +optional
+	ComponentJobs []RepositoryJob `json:"componentJobs,omitempty"`
+
+	// ComponentJobsSummary tallies ComponentJobs by completion state.
+	// +optional
+	ComponentJobsSummary *ComponentJobsSummary `json:"componentJobsSummary,omitempty"`
+
+	// BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
+	// current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly
+	// empty) slice indicates the baseline has been captured for the current pass.
+	// +optional
+	BaselineJobIDs []string `json:"baselineJobIDs"`
+}
+
 // FirmwareUpdateState describes the current state of a FirmwareUpdate.
 type FirmwareUpdateState string
 
@@ -152,19 +202,10 @@ type FirmwareUpdateStatus struct {
 	// +optional
 	ServerMaintenanceRef *metalv1alpha1.ObjectReference `json:"serverMaintenanceRef,omitempty"`
 
-	// CheckJob contains the state of the dry-run catalog-check job.
+	// DellStatus contains status fields specific to Dell's repository-based firmware update
+	// mechanism. Populated only when Spec.DellRepository is set.
 	// +optional
-	CheckJob *RepositoryJob `json:"checkJob,omitempty"`
-
-	// UpdateJob contains the state of the main apply job.
-	// +optional
-	UpdateJob *RepositoryJob `json:"updateJob,omitempty"`
-
-	// BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
-	// current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly
-	// empty) slice indicates the baseline has been captured for the current pass.
-	// +optional
-	BaselineJobIDs []string `json:"baselineJobIDs"`
+	DellStatus *DellFirmwareUpdateStatus `json:"dellStatus,omitempty"`
 
 	// LastProgressTime records the last time the controller observed forward progress.
 	// Used together with ProgressDeadlineSeconds to detect stalled updates.

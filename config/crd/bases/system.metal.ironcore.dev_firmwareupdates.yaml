@@ -163,32 +163,6 @@ spec:
           status:
             description: FirmwareUpdateStatus defines the observed state of FirmwareUpdate.
             properties:
-              baselineJobIDs:
-                description: |-
-                  BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
-                  current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly
-                  empty) slice indicates the baseline has been captured for the current pass.
-                items:
-                  type: string
-                type: array
-              checkJob:
-                description: CheckJob contains the state of the dry-run catalog-check
-                  job.
-                properties:
-                  jobID:
-                    type: string
-                  jobType:
-                    type: string
-                  message:
-                    type: string
-                  name:
-                    type: string
-                  percentComplete:
-                    format: int32
-                    type: integer
-                  state:
-                    type: string
-                type: object
               conditions:
                 description: Conditions represents the latest available observations
                   of the firmware update state.
@@ -247,6 +221,103 @@ spec:
                   - type
                   type: object
                 type: array
+              dellStatus:
+                description: |-
+                  DellStatus contains status fields specific to Dell's repository-based firmware update
+                  mechanism. Populated only when Spec.DellRepository is set.
+                properties:
+                  baselineJobIDs:
+                    description: |-
+                      BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the
+                      current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly
+                      empty) slice indicates the baseline has been captured for the current pass.
+                    items:
+                      type: string
+                    type: array
+                  checkJob:
+                    description: CheckJob contains the state of the dry-run catalog-check
+                      job.
+                    properties:
+                      jobID:
+                        type: string
+                      jobType:
+                        type: string
+                      message:
+                        type: string
+                      name:
+                        type: string
+                      percentComplete:
+                        format: int32
+                        type: integer
+                      state:
+                        type: string
+                    type: object
+                  componentJobs:
+                    description: ComponentJobs contains the state of the per-component
+                      jobs spawned by the current pass's apply job.
+                    items:
+                      description: |-
+                        RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
+                        operation. State is intentionally a plain string mirroring bmc.DellJob.
+                      properties:
+                        jobID:
+                          type: string
+                        jobType:
+                          type: string
+                        message:
+                          type: string
+                        name:
+                          type: string
+                        percentComplete:
+                          format: int32
+                          type: integer
+                        state:
+                          type: string
+                      type: object
+                    type: array
+                  componentJobsSummary:
+                    description: ComponentJobsSummary tallies ComponentJobs by completion
+                      state.
+                    properties:
+                      completed:
+                        description: Completed is the number of component jobs that
+                          finished successfully.
+                        format: int32
+                        type: integer
+                      failed:
+                        description: Failed is the number of component jobs that finished
+                          in a failed state.
+                        format: int32
+                        type: integer
+                      inProgress:
+                        description: InProgress is the number of component jobs that
+                          have not yet reached a terminal state.
+                        format: int32
+                        type: integer
+                      total:
+                        description: Total is the number of component jobs discovered
+                          so far in the current pass.
+                        format: int32
+                        type: integer
+                    type: object
+                  updateJob:
+                    description: UpdateJob contains the state of the main apply job.
+                    properties:
+                      jobID:
+                        type: string
+                      jobType:
+                        type: string
+                      message:
+                        type: string
+                      name:
+                        type: string
+                      percentComplete:
+                        format: int32
+                        type: integer
+                      state:
+                        type: string
+                    type: object
+                type: object
               failedAttempts:
                 description: FailedAttempts is the number of automatic retry attempts
                   made after failure.
@@ -285,23 +356,6 @@ spec:
               state:
                 description: State represents the current state of the firmware update.
                 type: string
-              updateJob:
-                description: UpdateJob contains the state of the main apply job.
-                properties:
-                  jobID:
-                    type: string
-                  jobType:
-                    type: string
-                  message:
-                    type: string
-                  name:
-                    type: string
-                  percentComplete:
-                    format: int32
-                    type: integer
-                  state:
-                    type: string
-                type: object
             type: object
         type: object
     served: true

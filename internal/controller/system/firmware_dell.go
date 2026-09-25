@@ -49,6 +49,15 @@ const (
 
 type dellHandler struct{}
 
+// dellStatus returns status.DellStatus, lazily initializing it if nil. Callers use this from
+// within patchProgress mutate closures to safely set Dell-specific status fields.
+func dellStatus(status *systemv1alpha1.FirmwareUpdateStatus) *systemv1alpha1.DellFirmwareUpdateStatus {
+	if status.DellStatus == nil {
+		status.DellStatus = &systemv1alpha1.DellFirmwareUpdateStatus{}
+	}
+	return status.DellStatus
+}
+
 func (dh *dellHandler) handlePending(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, bmcClient bmc.BMC, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
 	updater, ok := bmcClient.(bmc.FirmwareUpdaterDell)
 	if !ok {
@@ -143,9 +152,7 @@ func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.Firmwa
 	fw.Status.State = systemv1alpha1.FirmwareUpdateStateCompleted
 	fw.Status.ObservedGeneration = fw.Generation
 	fw.Status.Conditions = []metav1.Condition{}
-	fw.Status.CheckJob = nil
-	fw.Status.UpdateJob = nil
-	fw.Status.BaselineJobIDs = nil
+	fw.Status.DellStatus = nil
 	// PassCount is intentionally preserved (not reset) here: it is only reset
 	// once a repository check actually confirms convergence (no packages
 	// pending), so persistently-pending catalogs remain bounded by
@@ -187,17 +194,17 @@ func (dh *dellHandler) issueRepositoryCheck(ctx context.Context, updater bmc.Fir
 	}
 
 	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-		status.CheckJob = &systemv1alpha1.RepositoryJob{JobID: jobID}
+		dellStatus(status).CheckJob = &systemv1alpha1.RepositoryJob{JobID: jobID}
 	})
 }
 
 func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server, condition *metav1.Condition) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if fw.Status.CheckJob == nil || fw.Status.CheckJob.JobID == "" {
+	if fw.Status.DellStatus == nil || fw.Status.DellStatus.CheckJob == nil || fw.Status.DellStatus.CheckJob.JobID == "" {
 		return false, fmt.Errorf("missing check job ID while polling repository check")
 	}
 
-	job, err := updater.GetJob(ctx, "", fw.Status.CheckJob.JobID)
+	job, err := updater.GetJob(ctx, "", fw.Status.DellStatus.CheckJob.JobID)
 	if err != nil {
 		log.V(1).Info("Failed to fetch repository check job, retrying", "error", err)
 		return true, nil
@@ -206,7 +213,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 
 	if !job.IsTerminal() {
 		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.CheckJob = &repoJob
+			dellStatus(status).CheckJob = &repoJob
 		})
 	}
 
@@ -220,7 +227,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 			return false, fmt.Errorf("failed to update RepositoryCheckCompleted condition: %w", err)
 		}
 		return false, r.patchProgress(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.CheckJob = &repoJob
+			dellStatus(status).CheckJob = &repoJob
 		})
 	}
 
@@ -256,9 +263,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 		// whether to issue a fresh check on the next periodic drift-check
 		// reconcile of the Completed state.
 		fw.Status.Conditions = []metav1.Condition{*condition}
-		fw.Status.CheckJob = nil
-		fw.Status.UpdateJob = nil
-		fw.Status.BaselineJobIDs = nil
+		fw.Status.DellStatus = nil
 		fw.Status.PassCount = 0
 		return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 	}
@@ -280,7 +285,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 		fw.Status.State = systemv1alpha1.FirmwareUpdateStateFailed
 		fw.Status.ObservedGeneration = fw.Generation
 		fw.Status.PassCount = passCount
-		fw.Status.CheckJob = &repoJob
+		dellStatus(&fw.Status).CheckJob = &repoJob
 		fw.Status.Conditions = []metav1.Condition{*condition}
 		return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 	}
@@ -295,7 +300,9 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 	fw.Status.ObservedGeneration = fw.Generation
 	fw.Status.PassCount = passCount
 	fw.Status.Conditions = []metav1.Condition{}
-	fw.Status.CheckJob = nil
+	if fw.Status.DellStatus != nil {
+		fw.Status.DellStatus.CheckJob = nil
+	}
 	return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 }
 
@@ -310,7 +317,10 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 	// persisted a reconcile ahead of the apply call, any job spawned on the
 	// BMC in that window (e.g. unrelated background LC-log jobs) would be
 	// mistaken for one of our own component jobs by trackComponentJobs.
-	baselineJobIDs := fw.Status.BaselineJobIDs
+	var baselineJobIDs []string
+	if fw.Status.DellStatus != nil {
+		baselineJobIDs = fw.Status.DellStatus.BaselineJobIDs
+	}
 	if baselineJobIDs == nil {
 		jobIDs, err := updater.ListJobs(ctx, "")
 		if err != nil {
@@ -345,7 +355,7 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 		// Persist the baseline captured above so a retry doesn't need to
 		// re-list jobs; harmless if it does, since apply hasn't succeeded yet.
 		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.BaselineJobIDs = baselineJobIDs
+			dellStatus(status).BaselineJobIDs = baselineJobIDs
 		})
 	}
 
@@ -359,18 +369,19 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 	}
 
 	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-		status.BaselineJobIDs = baselineJobIDs
-		status.UpdateJob = &systemv1alpha1.RepositoryJob{JobID: jobID}
+		ds := dellStatus(status)
+		ds.BaselineJobIDs = baselineJobIDs
+		ds.UpdateJob = &systemv1alpha1.RepositoryJob{JobID: jobID}
 	})
 }
 
 func (dh *dellHandler) pollRepositoryUpdate(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, condition *metav1.Condition) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if fw.Status.UpdateJob == nil || fw.Status.UpdateJob.JobID == "" {
+	if fw.Status.DellStatus == nil || fw.Status.DellStatus.UpdateJob == nil || fw.Status.DellStatus.UpdateJob.JobID == "" {
 		return false, fmt.Errorf("missing update job ID while polling repository update")
 	}
 
-	job, err := updater.GetJob(ctx, "", fw.Status.UpdateJob.JobID)
+	job, err := updater.GetJob(ctx, "", fw.Status.DellStatus.UpdateJob.JobID)
 	if err != nil {
 		log.V(1).Info("Failed to fetch repository update job, retrying", "error", err)
 		return true, nil
@@ -379,7 +390,7 @@ func (dh *dellHandler) pollRepositoryUpdate(ctx context.Context, updater bmc.Fir
 
 	if !job.IsTerminal() {
 		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.UpdateJob = &repoJob
+			dellStatus(status).UpdateJob = &repoJob
 		})
 	}
 
@@ -393,7 +404,7 @@ func (dh *dellHandler) pollRepositoryUpdate(ctx context.Context, updater bmc.Fir
 			return false, fmt.Errorf("failed to update RepositoryUpdateCompleted condition: %w", err)
 		}
 		return false, r.patchProgress(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-			status.UpdateJob = &repoJob
+			dellStatus(status).UpdateJob = &repoJob
 		})
 	}
 
@@ -406,7 +417,7 @@ func (dh *dellHandler) pollRepositoryUpdate(ctx context.Context, updater bmc.Fir
 		return false, fmt.Errorf("failed to update RepositoryUpdateCompleted condition: %w", err)
 	}
 	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
-		status.UpdateJob = &repoJob
+		dellStatus(status).UpdateJob = &repoJob
 	})
 }
 
@@ -418,14 +429,24 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		return true, nil
 	}
 
-	known := make(map[string]struct{}, len(fw.Status.BaselineJobIDs)+1)
-	for _, id := range fw.Status.BaselineJobIDs {
+	var baselineJobIDs []string
+	var updateJobID string
+	if fw.Status.DellStatus != nil {
+		baselineJobIDs = fw.Status.DellStatus.BaselineJobIDs
+		if fw.Status.DellStatus.UpdateJob != nil {
+			updateJobID = fw.Status.DellStatus.UpdateJob.JobID
+		}
+	}
+	known := make(map[string]struct{}, len(baselineJobIDs)+1)
+	for _, id := range baselineJobIDs {
 		known[id] = struct{}{}
 	}
-	if fw.Status.UpdateJob != nil {
-		known[fw.Status.UpdateJob.JobID] = struct{}{}
+	if updateJobID != "" {
+		known[updateJobID] = struct{}{}
 	}
 
+	componentJobs := make([]systemv1alpha1.RepositoryJob, 0, len(jobIDs))
+	summary := &systemv1alpha1.ComponentJobsSummary{}
 	allTerminal := true
 	anyFailed := false
 	for _, id := range jobIDs {
@@ -437,8 +458,16 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 			log.V(1).Info("Failed to fetch component job, retrying", "JobID", id, "error", err)
 			return true, nil
 		}
-		if job.IsFailed() {
+		componentJobs = append(componentJobs, toRepositoryJob(job))
+		summary.Total++
+		switch {
+		case job.IsFailed():
 			anyFailed = true
+			summary.Failed++
+		case job.IsCompleted():
+			summary.Completed++
+		default:
+			summary.InProgress++
 		}
 		if !job.IsTerminal() {
 			allTerminal = false
@@ -446,7 +475,11 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	}
 
 	if !allTerminal {
-		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {})
+		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
+			ds := dellStatus(status)
+			ds.ComponentJobs = componentJobs
+			ds.ComponentJobsSummary = summary
+		})
 	}
 
 	if anyFailed {
@@ -458,7 +491,11 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		); err != nil {
 			return false, fmt.Errorf("failed to update ComponentJobsCompleted condition: %w", err)
 		}
-		return false, r.patchProgress(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {})
+		return false, r.patchProgress(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
+			ds := dellStatus(status)
+			ds.ComponentJobs = componentJobs
+			ds.ComponentJobsSummary = summary
+		})
 	}
 
 	if err := r.Conditions.Update(
@@ -469,7 +506,11 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	); err != nil {
 		return false, fmt.Errorf("failed to update ComponentJobsCompleted condition: %w", err)
 	}
-	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {})
+	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
+		ds := dellStatus(status)
+		ds.ComponentJobs = componentJobs
+		ds.ComponentJobsSummary = summary
+	})
 }
 
 // buildRepositoryParameters translates the FirmwareUpdate's Repository

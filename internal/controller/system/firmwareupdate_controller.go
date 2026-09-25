@@ -452,9 +452,7 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 		fw.Status.FailedAttempts = 0
 		fw.Status.State = systemv1alpha1.FirmwareUpdateStatePending
 		fw.Status.ObservedGeneration = fw.Generation
-		fw.Status.CheckJob = nil
-		fw.Status.UpdateJob = nil
-		fw.Status.BaselineJobIDs = nil
+		fw.Status.DellStatus = nil
 		fw.Status.LastProgressTime = nil
 		fw.Status.PassCount = 0
 		annotations := fw.GetAnnotations()
@@ -497,10 +495,7 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 			fwBase := fw.DeepCopy()
 			fw.Status.State = systemv1alpha1.FirmwareUpdateStatePending
 			fw.Status.ObservedGeneration = fw.Generation
-			fw.Status.CheckJob = nil
-			fw.Status.UpdateJob = nil
-			fw.Status.BaselineJobIDs = nil
-
+			fw.Status.DellStatus = nil
 			fw.Status.LastProgressTime = nil
 			fw.Status.PassCount = 0
 			retryCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionRetryOfFailedResourceIssued)
@@ -576,9 +571,7 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 		}
 	} else {
 		fw.Status.Conditions = []metav1.Condition{}
-		fw.Status.CheckJob = nil
-		fw.Status.UpdateJob = nil
-		fw.Status.BaselineJobIDs = nil
+		fw.Status.DellStatus = nil
 		fw.Status.LastProgressTime = nil
 		fw.Status.PassCount = 0
 	}
@@ -592,8 +585,8 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 
 // patchProgress patches the top-level State, optionally merges condition into
 // the conditions slice (preserving all other conditions), and applies mutate
-// to update job-tracking fields (CheckJob/UpdateJob/ComponentJobs/BaselineJobIDs)
-// - all in a single status patch.
+// to update vendor-specific job-tracking fields (e.g. DellStatus.CheckJob/
+// UpdateJob/ComponentJobs/BaselineJobIDs) - all in a single status patch.
 func (r *FirmwareUpdateReconciler) patchProgress(
 	ctx context.Context,
 	fw *systemv1alpha1.FirmwareUpdate,
