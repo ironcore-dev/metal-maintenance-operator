@@ -4,6 +4,8 @@
 package baseboard
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,7 +26,9 @@ import (
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
+	"github.com/stmcginnis/gofish/schemas"
 )
 
 var _ = Describe("BMCSettings Controller", func() {
@@ -920,6 +924,746 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		By("Ensuring the chained variable (LicenseKey looked up via BmcName) was written to the BMC")
 		Expect(mockServers[0].GetBMCSettingAttr("BMC")).To(HaveKeyWithValue("abc", "license-key-for-"+bmc.Name))
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+})
+
+var _ = Describe("classifyKey", func() {
+	const (
+		uri          = "/redfish/v1/Managers/BMC/Settings"
+		storedETag   = `W/"v1"`
+		currentETag  = `W/"v1"`
+		changedETag  = `W/"v2"`
+		desiredValue = "ntp.example.com"
+	)
+
+	storedEntry := func(etag, vHash string) baseboardv1alpha1.BMCSettingsApplyResultEntry {
+		return baseboardv1alpha1.BMCSettingsApplyResultEntry{URI: uri, ETag: etag, ValueHash: vHash}
+	}
+
+	It("falls back to value-map GET when no stored entry", func() {
+		result := classifyKey("k", desiredValue, baseboardv1alpha1.BMCSettingsApplyResultEntry{}, "", false, false, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+		Expect(result.needsValueGet).To(BeTrue())
+		Expect(result.needsApply).To(BeFalse())
+	})
+
+	It("falls back to value-map GET when stored ETag is empty", func() {
+		result := classifyKey("k", desiredValue, storedEntry("", ""), currentETag, true, false, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+		Expect(result.needsValueGet).To(BeTrue())
+	})
+
+	It("falls back to value-map GET when currentETag is empty (POST-based resource gone)", func() {
+		result := classifyKey("k", desiredValue, storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), "", true, false, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+		Expect(result.needsValueGet).To(BeTrue())
+	})
+
+	It("fast-path skips key when ETag unchanged and value fingerprint unchanged", func() {
+		result := classifyKey("k", desiredValue, storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), currentETag, true, false, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+		Expect(result.needsApply).To(BeFalse())
+		Expect(result.needsValueGet).To(BeFalse())
+	})
+
+	It("triggers re-apply when ETag unchanged but desired value changed (Secret rotation)", func() {
+		result := classifyKey("k", "new-ntp.example.com", storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), currentETag, true, false, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+		Expect(result.needsApply).To(BeTrue())
+		Expect(result.needsValueGet).To(BeFalse())
+	})
+
+	It("requests value-map GET when ETag changed for readable key", func() {
+		result := classifyKey("k", desiredValue, storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), changedETag, true, false, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+		Expect(result.needsValueGet).To(BeTrue())
+	})
+
+	Context("write-only key, conservative policy, ETag changed", func() {
+		It("skips when desired value fingerprint unchanged", func() {
+			result := classifyKey("k", desiredValue, storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), changedETag, true, true, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+			Expect(result.needsApply).To(BeFalse())
+			Expect(result.needsValueGet).To(BeFalse())
+		})
+
+		It("re-applies when desired value fingerprint changed", func() {
+			result := classifyKey("k", "rotated-value", storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), changedETag, true, true, baseboardv1alpha1.WriteOnlyDriftPolicyConservative, testHMACKey)
+			Expect(result.needsApply).To(BeTrue())
+		})
+	})
+
+	Context("write-only key, strict policy", func() {
+		It("always re-applies regardless of ETag and value fingerprint", func() {
+			result := classifyKey("k", desiredValue, storedEntry(storedETag, hmacValueHash(testHMACKey, desiredValue)), currentETag, true, true, baseboardv1alpha1.WriteOnlyDriftPolicyStrict, testHMACKey)
+			Expect(result.needsApply).To(BeTrue())
+		})
+	})
+})
+
+var _ = Describe("hmacValueHash", func() {
+	It("produces a stable fingerprint for the same key and value", func() {
+		hash := hmacValueHash(testHMACKey, "ntp.example.com")
+		Expect(hash).NotTo(BeEmpty())
+		Consistently(func() string {
+			return hmacValueHash(testHMACKey, "ntp.example.com")
+		}).Should(Equal(hash))
+	})
+
+	It("produces a different fingerprint when the key differs", func() {
+		otherKey := make([]byte, 32)
+		Expect(hmacValueHash(otherKey, "ntp.example.com")).ToNot(Equal(hmacValueHash(testHMACKey, "ntp.example.com")))
+	})
+
+	It("produces a different fingerprint when the value differs", func() {
+		Expect(hmacValueHash(testHMACKey, "value-a")).ToNot(Equal(hmacValueHash(testHMACKey, "value-b")))
+	})
+})
+
+var _ = Describe("refreshedETags", func() {
+	const uri = "/redfish/v1/Managers/BMC/Settings"
+
+	It("returns nil when no ETags changed", func() {
+		stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+			"key1": {URI: uri, ETag: `W/"v1"`, ValueHash: "hash1"},
+		}
+		current := map[string]string{uri: `W/"v1"`}
+		updated := refreshedETags(stored, current, nil)
+		Expect(updated).To(BeNil())
+	})
+
+	It("returns updated entry when ETag changed and key is not in diff", func() {
+		stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+			"key1": {URI: uri, ETag: `W/"v1"`, ValueHash: "hash1"},
+		}
+		current := map[string]string{uri: `W/"v2"`}
+		updated := refreshedETags(stored, current, map[string]struct{}{})
+		Expect(updated).To(HaveKey("key1"))
+		Expect(updated["key1"].ETag).To(Equal(`W/"v2"`))
+		Expect(updated["key1"].ValueHash).To(Equal("hash1"))
+	})
+
+	It("does not include keys that are in the diff set", func() {
+		stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+			"key1": {URI: uri, ETag: `W/"v1"`, ValueHash: "hash1"},
+		}
+		current := map[string]string{uri: `W/"v2"`}
+		diffKeys := map[string]struct{}{"key1": {}}
+		updated := refreshedETags(stored, current, diffKeys)
+		Expect(updated).To(BeNil())
+	})
+
+	It("does not include keys where currentETag is empty", func() {
+		stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+			"key1": {URI: uri, ETag: `W/"v1"`, ValueHash: "hash1"},
+		}
+		current := map[string]string{uri: ""}
+		updated := refreshedETags(stored, current, nil)
+		Expect(updated).To(BeNil())
+	})
+})
+
+// testHMACKey is a fixed 32-byte non-zero key used in unit tests.
+var testHMACKey = []byte{
+	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+	0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+	0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+}
+
+// fakeEtagDriftClient is an in-memory stand-in for the etagDriftClient interface used in etagAwareDiff unit tests.
+type fakeEtagDriftClient struct {
+	// etags maps resource URI -> current ETag. "" or absent means the fetch
+	// should behave as if the resource is unreachable (e.g. 404 for a POST-based
+	// ephemeral resource).
+	etags map[string]string
+	// fetchErr, if set, makes FetchETags return an error (simulating a transient
+	// BMC failure); the caller must fall back to the full value-map GET.
+	fetchErr error
+	// values holds the BMC's current readable attribute values. Keys absent from
+	// this map are treated as write-only (the BMC does not return them).
+	values map[string]any
+
+	// fetchETagsCalls and getValuesCalls record how many times each method was
+	// invoked, so tests can assert the fast-path really avoided a BMC call.
+	fetchETagsCalls int
+	getValuesCalls  int
+	lastGetKeys     map[string]string
+}
+
+func (f *fakeEtagDriftClient) FetchETags(_ context.Context, uris []string) (map[string]string, error) {
+	f.fetchETagsCalls++
+	if f.fetchErr != nil {
+		return nil, f.fetchErr
+	}
+	result := make(map[string]string, len(uris))
+	for _, u := range uris {
+		result[u] = f.etags[u]
+	}
+	return result, nil
+}
+
+func (f *fakeEtagDriftClient) GetBMCAttributeValues(_ context.Context, req bmc.GetBMCAttributeValuesRequest) (schemas.SettingsAttributes, error) {
+	f.getValuesCalls++
+	f.lastGetKeys = req.Attributes
+	result := schemas.SettingsAttributes{}
+	for key := range req.Attributes {
+		if val, ok := f.values[key]; ok {
+			result[key] = val
+		}
+		// Absent from f.values => write-only; simply not included in the response,
+		// matching the real BMC's behaviour for write-only keys.
+	}
+	return result, nil
+}
+
+var _ = Describe("etagAwareDiff", func() {
+	const (
+		uri         = "/redfish/v1/Managers/BMC/Settings"
+		storedETag  = `W/"v1"`
+		changedETag = `W/"v2"`
+	)
+
+	var r *BMCSettingsReconciler
+
+	BeforeEach(func() {
+		r = &BMCSettingsReconciler{HMACKey: testHMACKey}
+	})
+
+	storedEntry := func(value string) baseboardv1alpha1.BMCSettingsApplyResultEntry {
+		return baseboardv1alpha1.BMCSettingsApplyResultEntry{
+			URI: uri, ETag: storedETag, ValueHash: hmacValueHash(testHMACKey, value),
+		}
+	}
+
+	Context("first reconcile — no stored ETags", func() {
+		It("performs the full value-map GET and does not call FetchETags", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{values: map[string]any{"ntp": "ntp.example.com"}}
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"ntp": "ntp.example.com"},
+				nil, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty())
+			Expect(client.fetchETagsCalls).To(Equal(0))
+			Expect(client.getValuesCalls).To(Equal(1))
+		})
+	})
+
+	Context("ETag unchanged", func() {
+		It("skips the key without any BMC GET when the desired value is also unchanged", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{etags: map[string]string{uri: storedETag}}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"ntp": storedEntry("ntp.example.com")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"ntp": "ntp.example.com"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty())
+			Expect(client.fetchETagsCalls).To(Equal(1))
+			Expect(client.getValuesCalls).To(Equal(0), "fast-path must not issue a value-map GET")
+		})
+
+		It("re-applies when the desired value changed (Secret/ConfigMap rotation), despite ETag match", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{etags: map[string]string{uri: storedETag}}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"ntp": storedEntry("old.example.com")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"ntp": "new.example.com"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue("ntp", "new.example.com"))
+			Expect(client.getValuesCalls).To(Equal(0), "value change is detected without a GET")
+		})
+	})
+
+	Context("ETag changed, readable key", func() {
+		It("issues a value-map GET and finds no drift, leaving the key out of the diff", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: changedETag},
+				values: map[string]any{"ntp": "ntp.example.com"},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"ntp": storedEntry("ntp.example.com")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"ntp": "ntp.example.com"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty())
+			Expect(client.getValuesCalls).To(Equal(1), "an ETag change on a readable key must be confirmed via GET")
+		})
+
+		It("issues a value-map GET and re-applies when the value actually drifted", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: changedETag},
+				values: map[string]any{"ntp": "someone-else.example.com"},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"ntp": storedEntry("ntp.example.com")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"ntp": "ntp.example.com"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue("ntp", "ntp.example.com"))
+		})
+	})
+
+	Context("ETag changed, write-only key", func() {
+		It("Conservative: skips re-apply when the desired value fingerprint is unchanged", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: changedETag},
+				values: map[string]any{}, // write-only key: absent from GET response
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"password": storedEntry("s3cret")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"password": "s3cret"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty(), "conservative mode accepts the undetectable drift risk")
+		})
+
+		It("Conservative: treats nil-valued key (e.g. BMC returns password:null) same as absent — skips re-apply when value unchanged", func(ctx SpecContext) {
+			// Simulates Dell iDRAC returning NTPConfigGroup.1.NTP1SecurityKey: null.
+			// The key IS in the map but has no readable value.
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: changedETag},
+				values: map[string]any{"password": nil}, // present but null — write-only behaviour
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"password": storedEntry("s3cret")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"password": "s3cret"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty(), "nil value treated as write-only: conservative skips when value fingerprint unchanged")
+		})
+
+		It("Strict: skips re-apply for nil key when ETag unchanged (no drift signal)", func(ctx SpecContext) {
+			// Strict with no ETag change: no drift evidence, skip to avoid endless resets.
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: storedETag}, // ETag UNCHANGED
+				values: map[string]any{"password": nil},    // null value — write-only
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"password": storedEntry("s3cret")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"password": "s3cret"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyStrict)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty(), "Strict: no ETag change → no re-apply even for null write-only key")
+		})
+
+		It("Strict: re-applies nil key when ETag changed (drift signal present)", func(ctx SpecContext) {
+			// ETag changed on the resource → Strict assumes our write-only key drifted.
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: changedETag}, // ETag CHANGED
+				values: map[string]any{"password": nil},     // null value — write-only
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"password": storedEntry("s3cret")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"password": "s3cret"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyStrict)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue("password", "s3cret"), "Strict: ETag changed → re-apply write-only null key")
+		})
+
+		It("Conservative: re-applies when the desired value fingerprint changed", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: changedETag},
+				values: map[string]any{},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"password": storedEntry("old-secret")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"password": "rotated-secret"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue("password", "rotated-secret"))
+		})
+
+		It("Strict: always re-applies regardless of ETag state or value fingerprint", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: storedETag}, // unchanged ETag
+				values: map[string]any{},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"password": storedEntry("s3cret")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"password": "s3cret"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyStrict)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue("password", "s3cret"))
+		})
+	})
+
+	Context("POST-based key", func() {
+		It("always takes the idempotency fast-path regardless of ETag state (IsPost=true, value unchanged)", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{uri: storedETag}, // unchanged
+				values: map[string]any{"cert": "same-cert"},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				"POST /certs": {URI: uri, ETag: storedETag, ValueHash: hmacValueHash(testHMACKey, "same-cert"), IsPost: true},
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"POST /certs": "same-cert"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty())
+			Expect(client.getValuesCalls).To(Equal(0), "POST-based keys must not issue a GET (idempotency fast-path)")
+		})
+
+		It("falls back to re-POST without GET when value changed (IsPost=true, value changed)", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{}, // FetchETags returns "" for the URI (404)
+				values: map[string]any{"cert": "same-cert"},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				"POST /certs": {URI: uri, ETag: storedETag, ValueHash: hmacValueHash(testHMACKey, "old-cert"), IsPost: true},
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"POST /certs": "new-cert"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue("POST /certs", "new-cert"), "POST key must be re-applied when value changed")
+			Expect(client.getValuesCalls).To(Equal(0), "POST keys must not issue a GET even when re-applying")
+		})
+
+		// Write-only POST keys are create-only; skip re-apply when the value fingerprint is unchanged.
+		It("write-only POST: skips re-apply when desired value fingerprint is unchanged", func(ctx SpecContext) {
+			// The BMC never returns subscription data in GET responses.
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{}, // no ETag for POST resources
+				values: map[string]any{},    // write-only: absent from GET response
+			}
+			postKey := "POST /redfish/v1/EventService/Subscriptions"
+			payload := `{"Context":"test","Destination":"https://test.example.com/events","Protocol":"Redfish"}`
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				postKey: {
+					URI:       "/redfish/v1/EventService/Subscriptions/1",
+					ETag:      "", // POST responses typically have no ETag
+					ValueHash: hmacValueHash(testHMACKey, payload),
+					IsPost:    true,
+				},
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{postKey: payload},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty(), "POST key must not be re-applied when desired value is unchanged")
+			Expect(client.getValuesCalls).To(Equal(0), "POST keys must not issue a GET")
+		})
+
+		It("write-only POST: skips re-apply even when IsPost flag is missing (legacy entry — key name prefix used)", func(ctx SpecContext) {
+			// Simulates a BMCSettings written by an older version of the controller
+			// where IsPost was not yet stored (omitempty on false value).
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{},
+				values: map[string]any{},
+			}
+			postKey := "POST /redfish/v1/EventService/Subscriptions"
+			payload := `{"Context":"test","Destination":"https://test.example.com/events","Protocol":"Redfish"}`
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				postKey: {
+					URI:       "/redfish/v1/EventService/Subscriptions/1",
+					ETag:      "",
+					ValueHash: hmacValueHash(testHMACKey, payload),
+					IsPost:    false, // as if deserialized from JSON without isPost field
+				},
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{postKey: payload},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty(), "POST key must not be re-applied even when IsPost flag is absent (uses key prefix)")
+			Expect(client.getValuesCalls).To(Equal(0), "POST keys must not issue a GET")
+		})
+
+		It("write-only POST: re-applies when desired value changed (e.g. new subscription destination)", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{},
+				values: map[string]any{},
+			}
+			postKey := "POST /redfish/v1/EventService/Subscriptions"
+			oldPayload := `{"Context":"test","Destination":"https://old.example.com/events","Protocol":"Redfish"}`
+			newPayload := `{"Context":"test","Destination":"https://new.example.com/events","Protocol":"Redfish"}`
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				postKey: {
+					URI:       "/redfish/v1/EventService/Subscriptions/1",
+					ETag:      "",
+					ValueHash: hmacValueHash(testHMACKey, oldPayload),
+					IsPost:    true,
+				},
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{postKey: newPayload},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue(postKey, newPayload), "POST key must be re-applied when payload changed")
+		})
+
+		It("write-only POST: re-applies when no stored ValueHash (first idempotency guard)", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags:  map[string]string{},
+				values: map[string]any{},
+			}
+			postKey := "POST /redfish/v1/EventService/Subscriptions"
+			payload := `{"Context":"test","Destination":"https://test.example.com/events","Protocol":"Redfish"}`
+			// Simulates a BMCSettings applied before the ValueHash was captured.
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				postKey: {
+					URI:       "/redfish/v1/EventService/Subscriptions/1",
+					ETag:      "",
+					ValueHash: "", // no stored hash
+					IsPost:    true,
+				},
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{postKey: payload},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(HaveKeyWithValue(postKey, payload), "POST key must be re-applied when ValueHash is absent")
+		})
+	})
+
+	Context("ETag fetch unavailable", func() {
+		It("falls back to full value-map GET without a surfaced error when FetchETags errors", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				fetchErr: errors.New("boom"),
+				values:   map[string]any{"ntp": "ntp.example.com"},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{"ntp": storedEntry("ntp.example.com")}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{"ntp": "ntp.example.com"},
+				stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty())
+			Expect(client.getValuesCalls).To(Equal(1), "must fall back to the value-map GET")
+		})
+	})
+
+	Context("partial AppliedETags", func() {
+		It("uses the fast-path for keys with stored entries and the GET path for keys without", func(ctx SpecContext) {
+			client := &fakeEtagDriftClient{
+				etags: map[string]string{uri: storedETag},
+				values: map[string]any{
+					"missing-key": "some-value",
+				},
+			}
+			stored := map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry{
+				"ntp": storedEntry("ntp.example.com"),
+				// "missing-key" intentionally has no stored entry.
+			}
+
+			diff, _, err := r.etagAwareDiff(ctx, client, "uuid", map[string]string{
+				"ntp":         "ntp.example.com",
+				"missing-key": "some-value",
+			}, stored, baseboardv1alpha1.WriteOnlyDriftPolicyConservative)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(diff).To(BeEmpty())
+			Expect(client.lastGetKeys).To(HaveKey("missing-key"))
+			Expect(client.lastGetKeys).NotTo(HaveKey("ntp"), "ntp should have used the fast-path, not the GET")
+		})
+	})
+})
+
+// These specs exercise ETag-based drift detection end to end through the real reconcile loop and mock Redfish server.
+var _ = Describe("BMCSettings Controller ETag drift detection", func() {
+	_ = SetupTest(nil)
+
+	const bmcSettingsURI = "/redfish/v1/Managers/BMC/Settings"
+
+	var (
+		server    *metalv1alpha1.Server
+		bmcObj    *metalv1alpha1.BMC
+		bmcSecret *metalv1alpha1.BMCSecret
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		By("Creating a BMCSecret")
+		bmcSecret = &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-secret-",
+			},
+			Data: map[string][]byte{
+				metalv1alpha1.BMCSecretUsernameKeyName: []byte("foo"),
+				metalv1alpha1.BMCSecretPasswordKeyName: []byte("bar"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcSecret)).To(Succeed())
+
+		By("Creating a BMC resource")
+		bmcObj = &metalv1alpha1.BMC{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-",
+			},
+			Spec: metalv1alpha1.BMCSpec{
+				Endpoint: &metalv1alpha1.InlineEndpoint{
+					IP:         metalv1alpha1.MustParseIP(MockServerIP),
+					MACAddress: "23:11:8A:33:CF:EB",
+				},
+				Protocol: metalv1alpha1.Protocol{
+					Name: metalv1alpha1.ProtocolRedfishLocal,
+					Port: MockServerPort,
+				},
+				BMCSecretRef: v1.LocalObjectReference{
+					Name: bmcSecret.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcObj)).To(Succeed())
+
+		By("Ensuring that the Server resource will be created")
+		server = &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: bmcutils.GetServerNameFromBMCandIndex(0, bmcObj),
+			},
+			Spec: metalv1alpha1.ServerSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
+		By("Ensuring that the Server is in an available state")
+		Eventually(UpdateStatus(server, func() {
+			server.Status.State = metalv1alpha1.ServerStateAvailable
+			server.Status.PowerState = metalv1alpha1.ServerOffPowerState
+		})).Should(Succeed())
+
+		Eventually(UpdateStatus(bmcObj, func() {
+			bmcObj.Status.State = metalv1alpha1.BMCStateEnabled
+		})).Should(Succeed())
+
+		// Seed an initial ETag so PATCH responses return a real ETag for the controller to capture.
+		mockServers[0].SetResourceETag(bmcSettingsURI, `W/"v0"`)
+	})
+
+	AfterEach(func(ctx SpecContext) {
+		Expect(k8sClient.Delete(ctx, bmcObj)).To(Succeed())
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, server))).To(Succeed())
+		Expect(k8sClient.Delete(ctx, bmcSecret)).To(Succeed())
+		EnsureCleanState()
+		mockServers[0].ResetBMCSettings("BMC")
+	})
+
+	newSettings := func(name string, setting map[string]string) *baseboardv1alpha1.BMCSettings {
+		return &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: name},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: setting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+			},
+		}
+	}
+
+	// waitForSettled waits until the mock BMC reflects the expected value, guarding against async settle races.
+	waitForSettled := func(key, want string) {
+		Eventually(func() any {
+			return mockServers[0].GetBMCSettingAttr("BMC")[key]
+		}).Should(Equal(want))
+		Consistently(func() any {
+			return mockServers[0].GetBMCSettingAttr("BMC")[key]
+		}, "300ms").Should(Equal(want))
+	}
+
+	It("records URI, ETag, and value hash in status.appliedETags after a successful apply", func(ctx SpecContext) {
+		settings := newSettings("test-etag-apply-", map[string]string{"abc": "etag-test-value"})
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+
+		Eventually(Object(settings)).Should(HaveField("Status.AppliedETags", HaveKey("abc")))
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(settings), settings)).To(Succeed())
+		entry := settings.Status.AppliedETags["abc"]
+		Expect(entry.URI).To(Equal(bmcSettingsURI))
+		Expect(entry.ETag).NotTo(BeEmpty())
+		Expect(entry.ValueHash).To(Equal(hmacValueHash(testHMACKey, "etag-test-value")))
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+
+	It("fast-path: does not correct out-of-band drift when the ETag is unchanged (documented Conservative-style limitation for the readable path)", func(ctx SpecContext) {
+		settings := newSettings("test-etag-fastpath-", map[string]string{"abc": "fastpath-value"})
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+		Eventually(Object(settings)).Should(HaveField("Status.AppliedETags", HaveKey("abc")))
+		waitForSettled("abc", "fastpath-value")
+
+		By("Silently drifting the BMC attribute without bumping the ETag")
+		mockServers[0].SetBMCSettingAttr("BMC", "abc", "drifted-without-etag-bump")
+
+		By("Ensuring the controller does not notice or correct the drift (ETag unchanged -> fast-path skip)")
+		Consistently(func() any {
+			return mockServers[0].GetBMCSettingAttr("BMC")["abc"]
+		}).Should(Equal("drifted-without-etag-bump"))
+		Consistently(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+
+	It("O4: when the ETag changes but the managed value is still correct, refreshes the stored ETag without re-applying", func(ctx SpecContext) {
+		settings := newSettings("test-etag-refresh-", map[string]string{"abc": "refresh-value"})
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+		Eventually(Object(settings)).Should(HaveField("Status.AppliedETags", HaveKey("abc")))
+		waitForSettled("abc", "refresh-value")
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(settings), settings)).To(Succeed())
+		originalETag := settings.Status.AppliedETags["abc"].ETag
+
+		By("Bumping the resource ETag without changing the managed value (e.g. an unrelated key changed)")
+		bumped := mockServers[0].GetResourceETag(bmcSettingsURI)
+		Expect(bumped).To(Equal(originalETag))
+		mockServers[0].SetResourceETag(bmcSettingsURI, `W/"external-bump-1"`)
+
+		By("Nudging the BMCSettings object so a reconcile re-checks drift")
+		Eventually(Update(settings, func() {
+			metav1.SetMetaDataAnnotation(&settings.ObjectMeta, "test.metal.ironcore.dev/nudge", fmt.Sprintf("%d", time.Now().UnixNano()))
+		})).Should(Succeed())
+
+		By("Ensuring the controller refreshes the stored ETag and does not re-apply")
+		Eventually(func() string {
+			current := &baseboardv1alpha1.BMCSettings{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(settings), current); err != nil {
+				return ""
+			}
+			return current.Status.AppliedETags["abc"].ETag
+		}).Should(Equal(`W/"external-bump-1"`))
+		Consistently(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+		Expect(mockServers[0].GetBMCSettingAttr("BMC")["abc"]).To(Equal("refresh-value"))
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+
+	It("re-applies when the ETag changed and the managed value actually drifted", func(ctx SpecContext) {
+		settings := newSettings("test-etag-drift-", map[string]string{"abc": "drift-value"})
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+		Eventually(Object(settings)).Should(HaveField("Status.AppliedETags", HaveKey("abc")))
+		waitForSettled("abc", "drift-value")
+
+		By("Drifting the value and bumping the ETag, simulating an external change to the managed key")
+		mockServers[0].SetBMCSettingAttr("BMC", "abc", "someone-elses-value")
+		mockServers[0].SetResourceETag(bmcSettingsURI, `W/"external-bump-2"`)
+
+		By("Nudging the BMCSettings object so a reconcile re-checks drift")
+		Eventually(Update(settings, func() {
+			metav1.SetMetaDataAnnotation(&settings.ObjectMeta, "test.metal.ironcore.dev/nudge", fmt.Sprintf("%d", time.Now().UnixNano()))
+		})).Should(Succeed())
+
+		By("Ensuring the controller detects the drift and re-applies the desired value")
+		Eventually(func() any {
+			return mockServers[0].GetBMCSettingAttr("BMC")["abc"]
+		}).Should(Equal("drift-value"))
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
 
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 	})

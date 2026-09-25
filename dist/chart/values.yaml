@@ -33,6 +33,7 @@ manager:
     - "--sanitization-namespace={{ .Values.sanitization.namespace }}"
     - "--sanitization-image={{ .Values.sanitization.image }}"
     - "--report-base-url={{ .Values.sanitization.reportBaseURL }}"
+    - "--manager-namespace={{ .Release.Namespace }}"
 
   ## Health probes.
   ## The manager serves the liveness (/healthz) and readiness (/readyz) endpoints on this port.

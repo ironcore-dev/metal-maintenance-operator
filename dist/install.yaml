@@ -1557,6 +1557,16 @@ spec:
                 description: Version specifies the software version (e.g. BIOS, BMC)
                   these settings apply to.
                 type: string
+              writeOnlyDriftPolicy:
+                default: Conservative
+                description: |-
+                  WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for
+                  a resource containing a write-only key changes.  Defaults to Conservative.
+                  See WriteOnlyDriftPolicy for full semantics and limitations.
+                enum:
+                - Conservative
+                - Strict
+                type: string
             required:
             - bmcRef
             type: object
@@ -1582,6 +1592,12 @@ spec:
                         hash of the GET response body prefixed with "hash:sha256:" for BMCs that
                         do not return ETag headers.
                       type: string
+                    isPost:
+                      description: |-
+                        IsPost reports that the value was applied via HTTP POST rather than PATCH.
+                        POST creates a (possibly ephemeral) resource whose URI cannot be used for
+                        ETag-based drift detection, so these keys always take the full value-map GET path.
+                      type: boolean
                     uri:
                       description: |-
                         URI is the Redfish resource URI from the apply response.

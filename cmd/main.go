@@ -50,6 +50,7 @@ import (
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/indexers"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	webhookbaseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/baseboard/v1alpha1"
 	webhooksystemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -210,6 +211,13 @@ func main() {
 	}
 	if reportBaseURL == "" {
 		setupLog.Error(nil, "Must specify --report-base-url")
+		os.Exit(1)
+	}
+	if managerNamespace == "" {
+		managerNamespace = os.Getenv("POD_NAMESPACE")
+	}
+	if managerNamespace == "" {
+		setupLog.Error(nil, "Manager configuration omitted --manager-namespace and POD_NAMESPACE is not set")
 		os.Exit(1)
 	}
 
@@ -391,6 +399,18 @@ func main() {
 	}
 	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
 
+	const hmacKeyName = "metal-maintenance-operator-hmac-key"
+	bootstrapClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		setupLog.Error(err, "Failed to create bootstrap client for HMAC signing key")
+		os.Exit(1)
+	}
+	hmacKey, err := utils.EnsureHMACKey(context.Background(), bootstrapClient, managerNamespace, hmacKeyName)
+	if err != nil {
+		setupLog.Error(err, "Failed to ensure HMAC signing key")
+		os.Exit(1)
+	}
+
 	if err = (&baseboardctrl.BMCSettingsReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
@@ -401,6 +421,7 @@ func main() {
 		Conditions:                  accessor,
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		HMACKey:                     hmacKey,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BMCSettings controller")
 		os.Exit(1)

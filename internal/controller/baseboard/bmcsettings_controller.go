@@ -5,9 +5,15 @@ package baseboard
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +51,7 @@ type BMCSettingsReconciler struct {
 	BMCOptions                  bmc.Options
 	Conditions                  *conditionutils.Accessor
 	DefaultFailedAutoRetryCount int32
+	HMACKey                     []byte
 }
 
 const (
@@ -288,7 +295,7 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 
 func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-	settingsDiff, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
+	settingsDiff, effectiveSettings, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get BMC settings: %w", err)
 	}
@@ -347,10 +354,10 @@ func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context
 	if ok, err := r.handleBMCReset(ctx, settings, bmcObj, constants.ConditionResetIssued); !ok || err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.updateSettingsAndVerify(ctx, settings, bmcObj, settingsDiff, bmcClient)
+	return r.updateSettingsAndVerify(ctx, settings, bmcObj, settingsDiff, effectiveSettings, bmcClient)
 }
 
-func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, settingsDiff schemas.SettingsAttributes, bmcClient bmc.BMC) (ctrl.Result, error) {
+func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, settingsDiff schemas.SettingsAttributes, effectiveSettings map[string]string, bmcClient bmc.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	// Phase 1: Issue settings to the BMC (gated by ConditionBMCSettingsChangesIssued)
@@ -370,7 +377,15 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 			return ctrl.Result{}, fmt.Errorf("failed to check pending BMC settings: %w", err)
 		}
 
-		if len(pendingAttr) == 0 {
+		// Skip nil-valued pending attrs (e.g. Dell password fields permanently reported as null).
+		effectivePending := schemas.SettingsAttributes{}
+		for k, v := range pendingAttr {
+			if v != nil {
+				effectivePending[k] = v
+			}
+		}
+
+		if len(effectivePending) == 0 {
 			resetBMCReq, err := bmcClient.CheckBMCAttributes(ctx, bmcObj.Spec.BMCUUID, settingsDiff)
 			if err != nil {
 				log.Error(err, "could not validate settings and determine if reboot needed")
@@ -409,7 +424,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 				return ctrl.Result{}, fmt.Errorf("failed to update BMCSettings Applied condition: %w", err)
 			}
 
-			if err := r.persistApplyCycleConditions(ctx, settings, changesIssued, resetBMCReq, applyResults); err != nil {
+			if err := r.persistApplyCycleConditions(ctx, settings, changesIssued, resetBMCReq, applyResults, effectiveSettings); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
@@ -425,7 +440,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 	}
 
 	// Phase 3: Verify settings
-	settingsDiff, err = r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
+	settingsDiff, _, err = r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get BMC settings: %w", err)
 	}
@@ -462,7 +477,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 
 // persistApplyCycleConditions resets later-phase conditions (verified, reset) and
 // persists all phase conditions and AppliedETags atomically after a successful settings apply in Phase 1.
-func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition, resetBMCReq bool, applyResults map[string]bmc.ApplyResult) error {
+func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition, resetBMCReq bool, applyResults map[string]bmc.ApplyResult, effectiveSettings map[string]string) error {
 	log := ctrl.LoggerFrom(ctx)
 
 	resetCond, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCResetPostSettingApply)
@@ -509,10 +524,17 @@ func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context,
 		if settings.Status.AppliedETags == nil {
 			settings.Status.AppliedETags = make(map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry, len(applyResults))
 		}
-		for key, r := range applyResults {
+		for key, applyRes := range applyResults {
+			// Store value hash so future reconciles can detect desired-state changes.
+			var vHash string
+			if raw, ok := effectiveSettings[key]; ok {
+				vHash = hmacValueHash(r.HMACKey, raw)
+			}
 			settings.Status.AppliedETags[key] = baseboardv1alpha1.BMCSettingsApplyResultEntry{
-				URI:  r.URI,
-				ETag: r.ETag,
+				URI:       applyRes.URI,
+				ETag:      applyRes.ETag,
+				ValueHash: vHash,
+				IsPost:    applyRes.IsPost,
 			}
 		}
 	}
@@ -547,7 +569,7 @@ func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, s
 		return err
 	}
 
-	settingsDiff, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
+	settingsDiff, _, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
 	if err != nil {
 		return fmt.Errorf("failed to fetch and check BMCSettings: %w", err)
 	}
@@ -774,24 +796,40 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 	return nil
 }
 
-func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (diff schemas.SettingsAttributes, err error) {
+func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (diff schemas.SettingsAttributes, effectiveSettings map[string]string, err error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	resolvedVars, err := utils.ResolveVariables(ctx, r.Client, settings, settings.Spec.Variables)
 	if err != nil {
-		return diff, fmt.Errorf("failed to resolve BMCSettings variables: %w", err)
+		return diff, nil, fmt.Errorf("failed to resolve BMCSettings variables: %w", err)
 	}
 	effectiveSettingsMap, err := utils.ApplyVariables(utils.MergeSettingsFlow(settings.Spec.SettingsFlow), resolvedVars)
 	if err != nil {
-		return diff, fmt.Errorf("failed to apply BMCSettings variables: %w", err)
+		return diff, nil, fmt.Errorf("failed to apply BMCSettings variables: %w", err)
 	}
 
+	policy := settings.Spec.WriteOnlyDriftPolicy
+	if policy == "" {
+		policy = baseboardv1alpha1.WriteOnlyDriftPolicyConservative
+	}
+
+	// Attempt ETag-aware diff when stored ETags are present.
+	if len(settings.Status.AppliedETags) > 0 {
+		diff, currentETags, err := r.etagAwareDiff(ctx, bmcClient, bmcObj.Spec.BMCUUID, effectiveSettingsMap, settings.Status.AppliedETags, policy)
+		if err != nil {
+			return nil, nil, err
+		}
+		r.persistETagRefreshes(ctx, settings, diff, currentETags)
+		log.V(1).Info("ETag-aware diff computed", "diffKeys", utils.SettingKeys(diff))
+		return diff, effectiveSettingsMap, nil
+	}
+	// Fallback: full value-map GET (no stored ETags yet).
 	currentSettings, err := bmcClient.GetBMCAttributeValues(ctx, bmc.GetBMCAttributeValuesRequest{
 		UUID:       bmcObj.Spec.BMCUUID,
 		Attributes: effectiveSettingsMap,
 	})
 	if err != nil {
-		return diff, fmt.Errorf("failed to get BMC settings: %w", err)
+		return diff, nil, fmt.Errorf("failed to get BMC settings: %w", err)
 	}
 
 	log.V(1).Info("Current BMC settings fetched", "SettingKeys", utils.SettingKeys(currentSettings))
@@ -800,6 +838,10 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	var errs []error
 	for key, value := range effectiveSettingsMap {
 		res, ok := currentSettings[key]
+		// Null value: write-only semantics — skip to avoid endless resets.
+		if ok && res == nil {
+			continue
+		}
 		if ok {
 			switch data := res.(type) {
 			case int:
@@ -833,10 +875,10 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	}
 
 	if len(errs) > 0 {
-		return diff, fmt.Errorf("failed to find diff for some BMC settings: %v", errs)
+		return diff, effectiveSettingsMap, fmt.Errorf("failed to find diff for some BMC settings: %v", errs)
 	}
 
-	return diff, nil
+	return diff, effectiveSettingsMap, nil
 }
 
 func (r *BMCSettingsReconciler) checkIfMaintenanceGranted(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (bool, error) {
@@ -1323,4 +1365,374 @@ func (r *BMCSettingsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsBySecret)).
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsByConfigMap)).
 		Complete(r)
+}
+
+// hmacValueHash returns a keyed HMAC-SHA256 fingerprint of a resolved setting value.
+// Using an HMAC prevents offline dictionary attacks against hashes stored in
+// cluster-readable BMCSettings status by principals without access to the key Secret.
+func hmacValueHash(key []byte, value string) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(value))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// etagDriftClient is the narrow slice of bmc.BMC that ETag-aware drift detection needs.
+type etagDriftClient interface {
+	FetchETags(ctx context.Context, uris []string) (map[string]string, error)
+	GetBMCAttributeValues(ctx context.Context, req bmc.GetBMCAttributeValuesRequest) (schemas.SettingsAttributes, error)
+}
+
+// etagDriftResult holds the outcome of a single key's ETag-based drift check.
+type etagDriftResult struct {
+	// needsApply is true when the key must be included in the next apply.
+	needsApply bool
+	// needsValueGet is true when a value-map GET is required to resolve the drift.
+	needsValueGet bool
+}
+
+// classifyKey decides what action to take for a single settings key without issuing any BMC requests.
+func classifyKey(
+	_ string,
+	desiredValue string,
+	stored baseboardv1alpha1.BMCSettingsApplyResultEntry,
+	currentETag string,
+	hasStoredEntry bool,
+	isWriteOnly bool,
+	policy baseboardv1alpha1.WriteOnlyDriftPolicy,
+	hmacKey []byte,
+) etagDriftResult {
+	if !hasStoredEntry || stored.ETag == "" {
+		return etagDriftResult{needsValueGet: true}
+	}
+
+	desiredHash := hmacValueHash(hmacKey, desiredValue)
+
+	if isWriteOnly && policy == baseboardv1alpha1.WriteOnlyDriftPolicyStrict {
+		return etagDriftResult{needsApply: true}
+	}
+
+	if currentETag == "" {
+		return etagDriftResult{needsValueGet: true}
+	}
+
+	etagChanged := currentETag != stored.ETag
+
+	if !etagChanged {
+		if desiredHash != stored.ValueHash {
+			return etagDriftResult{needsApply: true}
+		}
+		return etagDriftResult{}
+	}
+
+	if isWriteOnly {
+		if desiredHash != stored.ValueHash {
+			return etagDriftResult{needsApply: true}
+		}
+		return etagDriftResult{}
+	}
+
+	return etagDriftResult{needsValueGet: true}
+}
+
+// etagAwareDiff computes the settings diff using ETag-based optimisations where possible.
+// Falls back to GetBMCAttributeValues when ETags are unavailable or insufficient.
+func (r *BMCSettingsReconciler) etagAwareDiff(
+	ctx context.Context,
+	bmcClient etagDriftClient,
+	bmcUUID string,
+	effectiveSettings map[string]string,
+	storedETags map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry,
+	policy baseboardv1alpha1.WriteOnlyDriftPolicy,
+) (diff schemas.SettingsAttributes, currentETags map[string]string, err error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	if len(effectiveSettings) == 0 {
+		return schemas.SettingsAttributes{}, nil, nil
+	}
+
+	// Step 1: Collect URIs with stored ETags.
+	uriSet := map[string]struct{}{}
+	for key, entry := range storedETags {
+		if _, wantedKey := effectiveSettings[key]; wantedKey && entry.URI != "" && entry.ETag != "" {
+			uriSet[entry.URI] = struct{}{}
+		}
+	}
+
+	// Step 2: Fetch current ETags.
+	if len(uriSet) > 0 {
+		uris := make([]string, 0, len(uriSet))
+		for u := range uriSet {
+			uris = append(uris, u)
+		}
+		currentETags, err = bmcClient.FetchETags(ctx, uris)
+		if err != nil {
+			log.V(1).Info("ETag fetch failed, falling back to full value-map GET", "error", err)
+			currentETags = nil
+		}
+	}
+
+	// Step 3: Classify each key.
+	needsGetKeys, immediateApply, _ := r.classifySettingsKeys(r.HMACKey, ctx, effectiveSettings, storedETags, currentETags, policy)
+
+	diff = schemas.SettingsAttributes{}
+
+	// Step 4: Issue GET for keys that need it.
+	if len(needsGetKeys) > 0 {
+		var current schemas.SettingsAttributes
+		current, err = bmcClient.GetBMCAttributeValues(ctx, bmc.GetBMCAttributeValuesRequest{
+			UUID:       bmcUUID,
+			Attributes: needsGetKeys,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get BMC attribute values: %w", err)
+		}
+
+		// Step 5: Classify each key as write-only or readable and build diff.
+		for key, desiredValue := range needsGetKeys {
+			r.applyDiffForKey(r.HMACKey, ctx, key, desiredValue, current, storedETags, currentETags, policy, diff)
+		}
+	}
+
+	// Step 6: Add immediate-apply keys.
+	for key, desiredValue := range immediateApply {
+		diff[key] = desiredValue
+	}
+
+	return diff, currentETags, nil
+}
+
+// persistETagRefreshes updates stored ETags for keys whose resource ETag changed but had no drift.
+func (r *BMCSettingsReconciler) persistETagRefreshes(
+	ctx context.Context,
+	settings *baseboardv1alpha1.BMCSettings,
+	diff schemas.SettingsAttributes,
+	currentETags map[string]string,
+) {
+	log := ctrl.LoggerFrom(ctx)
+	diffKeySet := make(map[string]struct{}, len(diff))
+	for k := range diff {
+		diffKeySet[k] = struct{}{}
+	}
+	refreshed := refreshedETags(settings.Status.AppliedETags, currentETags, diffKeySet)
+	if len(refreshed) == 0 {
+		return
+	}
+	base := settings.DeepCopy()
+	if settings.Status.AppliedETags == nil {
+		settings.Status.AppliedETags = make(map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry)
+	}
+	maps.Copy(settings.Status.AppliedETags, refreshed)
+	if patchErr := r.Status().Patch(ctx, settings, client.MergeFrom(base)); patchErr != nil {
+		log.V(1).Info("Failed to persist ETag refresh (non-fatal)", "error", patchErr)
+	}
+}
+
+// classifySettingsKeys partitions effectiveSettings keys into needsGet, immediateApply, and postSkip maps.
+func (r *BMCSettingsReconciler) classifySettingsKeys(
+	hmacKey []byte,
+	ctx context.Context,
+	effectiveSettings map[string]string,
+	storedETags map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry,
+	currentETags map[string]string,
+	policy baseboardv1alpha1.WriteOnlyDriftPolicy,
+) (needsGetKeys, immediateApply map[string]string, postIdempotentSkip map[string]struct{}) {
+	log := ctrl.LoggerFrom(ctx)
+	needsGetKeys = map[string]string{}
+	immediateApply = map[string]string{}
+	postIdempotentSkip = map[string]struct{}{}
+
+	for key, desiredValue := range effectiveSettings {
+		stored, hasStored := storedETags[key]
+		var currentETag string
+		if hasStored && stored.URI != "" && currentETags != nil {
+			currentETag = currentETags[stored.URI]
+		}
+
+		// POST keys: skip if value unchanged since last apply.
+		keyIsPost := (hasStored && stored.IsPost) ||
+			strings.HasPrefix(key, http.MethodPost+" ")
+		if keyIsPost && hasStored {
+			currentHash := hmacValueHash(hmacKey, desiredValue)
+			log.V(1).Info("POST key idempotency check",
+				"key", key, "storedHash", stored.ValueHash, "currentHash", currentHash)
+			if stored.ValueHash != "" && currentHash == stored.ValueHash {
+				log.V(1).Info("POST key skipped: desired value unchanged since last apply",
+					"key", key, "uri", stored.URI)
+				postIdempotentSkip[key] = struct{}{}
+				continue
+			}
+			log.V(1).Info("POST key queued for re-apply: desired value changed", "key", key)
+			immediateApply[key] = desiredValue
+			continue
+		}
+
+		result := classifyKey(key, desiredValue, stored, currentETag, hasStored, false, policy, hmacKey)
+
+		// Under Strict, route fast-path skips through GET to detect write-only keys.
+		if !result.needsValueGet && !result.needsApply && policy == baseboardv1alpha1.WriteOnlyDriftPolicyStrict {
+			result.needsValueGet = true
+		}
+
+		switch {
+		case result.needsValueGet:
+			needsGetKeys[key] = desiredValue
+		case result.needsApply:
+			immediateApply[key] = desiredValue
+		default:
+			log.V(2).Info("ETag fast-path: key skipped (ETag and value fingerprint unchanged)",
+				"key", key, "uri", stored.URI)
+		}
+	}
+
+	// If no ETags available, all keys need GET (except already-handled POST keys).
+	if currentETags == nil && len(storedETags) > 0 {
+		for key, val := range effectiveSettings {
+			if _, isPostSkip := postIdempotentSkip[key]; isPostSkip {
+				continue
+			}
+			if _, alreadyGet := needsGetKeys[key]; !alreadyGet {
+				if _, alreadyApply := immediateApply[key]; !alreadyApply {
+					needsGetKeys[key] = val
+				}
+			}
+		}
+	}
+	return needsGetKeys, immediateApply, postIdempotentSkip
+}
+
+// applyDiffForKey classifies a single GET-result key and adds it to diff if needed.
+func (r *BMCSettingsReconciler) applyDiffForKey(
+	hmacKey []byte,
+	ctx context.Context,
+	key, desiredValue string,
+	current schemas.SettingsAttributes,
+	storedETags map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry,
+	currentETags map[string]string,
+	policy baseboardv1alpha1.WriteOnlyDriftPolicy,
+	diff schemas.SettingsAttributes,
+) {
+	log := ctrl.LoggerFrom(ctx)
+	res, readable := current[key]
+	if !readable {
+		// Absent key: BMC does not expose it (write-only).
+		absStored, absHasStored := storedETags[key]
+		var absETag string
+		if absHasStored && absStored.URI != "" && currentETags != nil {
+			absETag = currentETags[absStored.URI]
+		}
+		absResult := classifyKey(key, desiredValue, absStored, absETag, absHasStored, true, policy, hmacKey)
+		if absResult.needsApply {
+			diff[key] = desiredValue
+		} else if absResult.needsValueGet {
+			// No ETag signal available — apply only if desired value changed since last apply.
+			if !absHasStored || hmacValueHash(hmacKey, desiredValue) != absStored.ValueHash {
+				diff[key] = desiredValue
+			}
+		}
+		return
+	}
+	if res == nil {
+		// Null value: PATCH-prefix write-only semantics. Re-apply only on ETag change or value change.
+		stored, hasStored := storedETags[key]
+		var currentETag string
+		if hasStored && stored.URI != "" && currentETags != nil {
+			currentETag = currentETags[stored.URI]
+		}
+		etagChanged := hasStored && stored.ETag != "" && currentETag != "" && currentETag != stored.ETag
+		valueChanged := !hasStored || hmacValueHash(hmacKey, desiredValue) != stored.ValueHash
+		if etagChanged {
+			if policy == baseboardv1alpha1.WriteOnlyDriftPolicyStrict || valueChanged {
+				log.V(1).Info("Write-only null key included in diff (ETag changed)",
+					"key", key, "strict", policy == baseboardv1alpha1.WriteOnlyDriftPolicyStrict)
+				diff[key] = desiredValue
+			} else {
+				log.V(1).Info("Write-only null key skipped (ETag changed but value fingerprint unchanged — Conservative)",
+					"key", key)
+			}
+		} else if valueChanged {
+			log.V(1).Info("Write-only null key included in diff (desired value changed)", "key", key)
+			diff[key] = desiredValue
+		} else {
+			log.V(1).Info("Write-only null key skipped (no ETag signal, value fingerprint unchanged)", "key", key)
+		}
+		return
+	}
+	// Readable key.
+	stored, hasStored := storedETags[key]
+	driftVal, hasDrift := computeReadableDiff(key, desiredValue, res)
+	if hasDrift {
+		diff[key] = driftVal
+	} else if hasStored && stored.ETag != "" && currentETags != nil {
+		currentETag := currentETags[stored.URI]
+		if currentETag != stored.ETag && currentETag != "" {
+			log.V(1).Info("ETag changed but managed values unaffected; will update stored ETag",
+				"key", key, "uri", stored.URI,
+				"oldETag", stored.ETag, "newETag", currentETag)
+		}
+	}
+}
+
+// computeReadableDiff compares a desired string value against the current BMC value and returns
+// the coerced desired value plus whether a diff exists.
+func computeReadableDiff(_ string, desiredValue string, current any) (any, bool) {
+	switch data := current.(type) {
+	case int:
+		intVal, err := strconv.Atoi(desiredValue)
+		if err != nil {
+			// Invalid desired value — surface it so CheckBMCAttributes can reject it.
+			return desiredValue, true
+		}
+		if data != intVal {
+			return intVal, true
+		}
+	case string:
+		if data != desiredValue {
+			return desiredValue, true
+		}
+	case float64:
+		floatVal, err := strconv.ParseFloat(desiredValue, 64)
+		if err != nil {
+			// Invalid desired value — surface it so CheckBMCAttributes can reject it.
+			return desiredValue, true
+		}
+		if data != floatVal {
+			return floatVal, true
+		}
+	default:
+		if fmt.Sprintf("%v", data) != desiredValue {
+			return desiredValue, true
+		}
+	}
+	return nil, false
+}
+
+// refreshedETags returns updated ETag entries for keys whose resource ETag changed but had no drift.
+func refreshedETags(
+	storedETags map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry,
+	currentETags map[string]string,
+	diffKeys map[string]struct{},
+) map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry {
+	if len(currentETags) == 0 {
+		return nil
+	}
+	var updated map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry
+	for key, entry := range storedETags {
+		if _, hasDrift := diffKeys[key]; hasDrift {
+			continue
+		}
+		newETag, ok := currentETags[entry.URI]
+		if !ok || newETag == entry.ETag || newETag == "" {
+			continue
+		}
+		if updated == nil {
+			updated = make(map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry)
+		}
+		updated[key] = baseboardv1alpha1.BMCSettingsApplyResultEntry{
+			URI:       entry.URI,
+			ETag:      newETag,
+			ValueHash: entry.ValueHash,
+			IsPost:    entry.IsPost,
+		}
+	}
+	return updated
 }
