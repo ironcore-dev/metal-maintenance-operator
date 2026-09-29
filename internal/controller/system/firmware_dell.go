@@ -39,10 +39,7 @@ const (
 
 	// ConditionRepositoryUpdatePowerOnIssued tracks a PowerOn request issued to
 	// the server before applying the repository update, when the server was
-	// found powered off. Without this, a server left powered off by a prior
-	// maintenance window would leave component jobs stuck at "Scheduled"
-	// forever, since Dell only flashes staged updates on the next reboot into
-	// the host OS, which never happens while the server stays off.
+	// found powered off.
 	ConditionRepositoryUpdatePowerOnIssued = "RepositoryUpdatePowerOnIssued"
 
 	ReasonRepositoryCheckIssued     = "RepositoryCheckIssuedToBMC"
@@ -347,11 +344,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 }
 
 // ensureServerPoweredOn issues a PowerOn request to the server via BMC if it
-// is found powered off before applying the repository update, mirroring the
-// pre-upgrade power-on check used by BIOSVersion. Dell's InstallFromRepository
-// OEM action stages component jobs that only get flashed on the host's next
-// reboot into the running OS; if the server is off, that reboot never
-// happens and the jobs stay "Scheduled" forever.
+// is found powered off before applying the repository update
 func (dh *dellHandler) ensureServerPoweredOn(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
@@ -644,20 +637,14 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 	}
 
 	return &bmc.RepositoryUpdateParameters{
-		ShareType:    string(repo.ShareType),
-		IPAddress:    repo.Address,
-		ShareName:    repo.ShareName,
-		CatalogFile:  catalogFile,
-		UserName:     username,
-		Password:     password,
-		ApplyUpdate:  applyUpdate,
-		RebootNeeded: applyUpdate && repo.RebootNeeded,
-		// IgnoreCertWarning is hardcoded to true: the repository share is not
-		// expected to present a certificate the iDRAC can verify (no field is
-		// exposed on DellFirmwareRepository for this today), and without it the
-		// iDRAC rejects the file transfer with "verification certificate is not
-		// available" on HTTPS shares.
-		IgnoreCertWarning:      true,
+		ShareType:              string(repo.ShareType),
+		IPAddress:              repo.Address,
+		ShareName:              repo.ShareName,
+		CatalogFile:            catalogFile,
+		UserName:               username,
+		Password:               password,
+		ApplyUpdate:            applyUpdate,
+		RebootNeeded:           applyUpdate && repo.RebootNeeded,
 		ApplySameVersions:      applySameVersions,
 		ApplyDowngradeVersions: applyDowngradeVersions,
 	}, nil

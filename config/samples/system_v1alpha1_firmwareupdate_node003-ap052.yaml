@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: system.metal.ironcore.dev/v1alpha1
+kind: FirmwareUpdate
+metadata:
+  name: sample-fw-update
+  namespace: default
+spec:
+  serverRef:
+    name: sample-system-0
+  dellRepository:
+    shareType: HTTPS
+    address: example.repository.com
+    shareName: /hw-firmware/firmware_80u3_04_2026
+    catalogFile: Catalog.xml
+    rebootNeeded: true
+    # applyVersionPolicy omitted -> only genuine upgrades are applied
+  serverMaintenancePolicy: OwnerApproval
