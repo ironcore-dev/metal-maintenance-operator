@@ -678,7 +678,7 @@ func (r *FirmwareUpdateReconciler) requestServerMaintenance(ctx context.Context,
 
 	serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: r.ManagerNamespace,
+			Namespace: fw.Namespace,
 			Name:      fw.Name,
 		},
 	}

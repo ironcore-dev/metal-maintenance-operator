@@ -37,6 +37,14 @@ const (
 	// spawned by the apply call.
 	ConditionComponentJobsCompleted = "ComponentJobsCompleted"
 
+	// ConditionRepositoryUpdatePowerOnIssued tracks a PowerOn request issued to
+	// the server before applying the repository update, when the server was
+	// found powered off. Without this, a server left powered off by a prior
+	// maintenance window would leave component jobs stuck at "Scheduled"
+	// forever, since Dell only flashes staged updates on the next reboot into
+	// the host OS, which never happens while the server stays off.
+	ConditionRepositoryUpdatePowerOnIssued = "RepositoryUpdatePowerOnIssued"
+
 	ReasonRepositoryCheckIssued     = "RepositoryCheckIssuedToBMC"
 	ReasonRepositoryCheckCompleted  = "RepositoryCheckCompleted"
 	ReasonRepositoryCheckFailed     = "RepositoryCheckFailed"
@@ -78,7 +86,7 @@ func (dh *dellHandler) handleInProgress(ctx context.Context, fw *systemv1alpha1.
 	if !inMaintenance {
 		return false, nil
 	}
-	return dh.processInProgress(ctx, updater, fw, r, server)
+	return dh.processInProgress(ctx, bmcClient, updater, fw, r, server)
 }
 
 func (dh *dellHandler) handleCompleted(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, bmcClient bmc.BMC, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
@@ -97,11 +105,13 @@ func (dh *dellHandler) handleCompleted(ctx context.Context, fw *systemv1alpha1.F
 // are actually pending installation does this transition into InProgress,
 // where the update is actually applied.
 func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
 	checkIssued, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryCheckIssued)
 	if err != nil {
 		return false, err
 	}
 	if checkIssued.Status != metav1.ConditionTrue {
+		log.V(1).Info("RepositoryCheck not yet issued, issuing dry-run check", "Server", server.Name)
 		return dh.issueRepositoryCheck(ctx, updater, fw, r, server, checkIssued)
 	}
 
@@ -109,7 +119,26 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 	if err != nil {
 		return false, err
 	}
+	log.V(1).Info("RepositoryCheck issued, polling for completion", "Server", server.Name, "JobID", checkJobID(fw))
 	return dh.pollRepositoryCheck(ctx, updater, fw, r, server, checkCompleted)
+}
+
+// checkJobID returns the currently tracked repository-check job ID, or "" if
+// none is recorded yet. Used only for log context.
+func checkJobID(fw *systemv1alpha1.FirmwareUpdate) string {
+	if fw.Status.DellStatus == nil || fw.Status.DellStatus.CheckJob == nil {
+		return ""
+	}
+	return fw.Status.DellStatus.CheckJob.JobID
+}
+
+// updateJobID returns the currently tracked repository-update (apply) job ID,
+// or "" if none is recorded yet. Used only for log context.
+func updateJobID(fw *systemv1alpha1.FirmwareUpdate) string {
+	if fw.Status.DellStatus == nil || fw.Status.DellStatus.UpdateJob == nil {
+		return ""
+	}
+	return fw.Status.DellStatus.UpdateJob.JobID
 }
 
 // processInProgress drives the actual repository-based firmware update once
@@ -118,12 +147,18 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 // apply completes, control is handed back to Completed, whose dry-run check
 // confirms convergence (or discovers further pending packages and re-enters
 // InProgress).
-func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
+func (dh *dellHandler) processInProgress(ctx context.Context, bmcClient bmc.BMC, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
 	updateIssued, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryUpdateIssued)
 	if err != nil {
 		return false, err
 	}
 	if updateIssued.Status != metav1.ConditionTrue {
+		log.V(1).Info("RepositoryUpdate not yet issued, ensuring server is powered on before applying", "Server", server.Name)
+		if requeue, err := dh.ensureServerPoweredOn(ctx, bmcClient, fw, r, server); requeue || err != nil {
+			return requeue, err
+		}
+		log.V(1).Info("Server is powered on, issuing repository update apply call", "Server", server.Name)
 		return dh.issueRepositoryUpdate(ctx, updater, fw, r, server, updateIssued)
 	}
 
@@ -132,6 +167,7 @@ func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.Firmwa
 		return false, err
 	}
 	if updateCompleted.Status != metav1.ConditionTrue {
+		log.V(1).Info("RepositoryUpdate issued, polling apply job for completion", "Server", server.Name, "JobID", updateJobID(fw))
 		return dh.pollRepositoryUpdate(ctx, updater, fw, r, updateCompleted)
 	}
 
@@ -140,6 +176,7 @@ func (dh *dellHandler) processInProgress(ctx context.Context, updater bmc.Firmwa
 		return false, err
 	}
 	if componentsCompleted.Status != metav1.ConditionTrue {
+		log.V(1).Info("RepositoryUpdate apply job completed, tracking spawned component firmware jobs", "Server", server.Name)
 		return dh.trackComponentJobs(ctx, updater, fw, r, componentsCompleted)
 	}
 
@@ -167,6 +204,7 @@ func (dh *dellHandler) issueRepositoryCheck(ctx context.Context, updater bmc.Fir
 		return false, fmt.Errorf("failed to build repository parameters: %w", err)
 	}
 
+	log.V(1).Info("Calling InstallFirmwareFromRepository (dry-run)", "Server", server.Name, "Address", parameters.IPAddress, "ShareName", parameters.ShareName, "CatalogFile", parameters.CatalogFile)
 	jobID, isFatal, err := updater.InstallFirmwareFromRepository(ctx, server.Spec.SystemURI, parameters)
 	if err != nil {
 		if isFatal {
@@ -184,6 +222,7 @@ func (dh *dellHandler) issueRepositoryCheck(ctx context.Context, updater bmc.Fir
 		return false, err
 	}
 
+	log.V(1).Info("Repository check job issued", "Server", server.Name, "JobID", jobID)
 	if err := r.Conditions.Update(
 		condition,
 		conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -212,6 +251,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 	repoJob := toRepositoryJob(job)
 
 	if !job.IsTerminal() {
+		log.V(1).Info("Repository check job still in progress", "JobID", job.ID, "State", job.State, "PercentComplete", job.PercentComplete, "Message", job.Message)
 		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
 			dellStatus(status).CheckJob = &repoJob
 		})
@@ -306,6 +346,47 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 	return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 }
 
+// ensureServerPoweredOn issues a PowerOn request to the server via BMC if it
+// is found powered off before applying the repository update, mirroring the
+// pre-upgrade power-on check used by BIOSVersion. Dell's InstallFromRepository
+// OEM action stages component jobs that only get flashed on the host's next
+// reboot into the running OS; if the server is off, that reboot never
+// happens and the jobs stay "Scheduled" forever.
+func (dh *dellHandler) ensureServerPoweredOn(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+	if err != nil {
+		return false, fmt.Errorf("failed to check server power state: %w", err)
+	}
+	if inPowerOnState {
+		log.V(1).Info("Server is already powered on", "Server", server.Name)
+		return false, nil
+	}
+
+	powerOnIssued, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryUpdatePowerOnIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for issued power on of server: %w", err)
+	}
+	if powerOnIssued.Status != metav1.ConditionTrue {
+		log.V(1).Info("Server is powered off, issuing PowerOn request", "Server", server.Name)
+		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
+			return false, fmt.Errorf("failed to power on server: %w", err)
+		}
+		if err := r.Conditions.Update(
+			powerOnIssued,
+			conditionutils.UpdateStatus(corev1.ConditionTrue),
+			conditionutils.UpdateReason(ReasonServerPowerOnIssued),
+			conditionutils.UpdateMessage("Issued PowerOn request to the server via BMC"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update issued power on condition: %w", err)
+		}
+		return false, r.updateStatus(ctx, fw, fw.Status.State, powerOnIssued)
+	}
+	// no watch event to notice the power-on completing in real BMC - poll periodically instead.
+	log.V(1).Info("Server in powered off state, retrying", "Server", server.Name)
+	return true, nil
+}
+
 func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server, condition *metav1.Condition) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	// Snapshot the jobs known to the BMC before issuing the apply call, so
@@ -331,6 +412,7 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 			jobIDs = []string{}
 		}
 		baselineJobIDs = jobIDs
+		log.V(1).Info("Captured baseline job IDs before applying repository update", "Server", server.Name, "BaselineJobCount", len(baselineJobIDs))
 	}
 
 	parameters, err := buildRepositoryParameters(ctx, r, fw, true)
@@ -338,6 +420,7 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 		return false, fmt.Errorf("failed to build repository parameters: %w", err)
 	}
 
+	log.V(1).Info("Calling InstallFirmwareFromRepository (apply)", "Server", server.Name, "Address", parameters.IPAddress, "ShareName", parameters.ShareName, "CatalogFile", parameters.CatalogFile)
 	jobID, isFatal, err := updater.InstallFirmwareFromRepository(ctx, server.Spec.SystemURI, parameters)
 	if err != nil {
 		if isFatal {
@@ -359,6 +442,7 @@ func (dh *dellHandler) issueRepositoryUpdate(ctx context.Context, updater bmc.Fi
 		})
 	}
 
+	log.V(1).Info("Repository update job issued", "Server", server.Name, "JobID", jobID)
 	if err := r.Conditions.Update(
 		condition,
 		conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -389,11 +473,13 @@ func (dh *dellHandler) pollRepositoryUpdate(ctx context.Context, updater bmc.Fir
 	repoJob := toRepositoryJob(job)
 
 	if !job.IsTerminal() {
+		log.V(1).Info("Repository update job still in progress", "JobID", job.ID, "State", job.State, "PercentComplete", job.PercentComplete, "Message", job.Message)
 		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
 			dellStatus(status).UpdateJob = &repoJob
 		})
 	}
 
+	log.V(1).Info("Repository update job reached terminal state", "JobID", job.ID, "State", job.State, "Message", job.Message)
 	if job.IsFailed() {
 		if err := r.Conditions.Update(
 			condition,
@@ -428,6 +514,7 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		log.V(1).Info("Failed to list jobs for component tracking, retrying", "error", err)
 		return true, nil
 	}
+	log.V(1).Info("Listed BMC jobs for component tracking", "TotalJobsOnBMC", len(jobIDs))
 
 	var baselineJobIDs []string
 	var updateJobID string
@@ -464,10 +551,13 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		case job.IsFailed():
 			anyFailed = true
 			summary.Failed++
+			log.Info("Component firmware job failed", "JobID", job.ID, "Name", job.Name, "State", job.State, "Message", job.Message)
 		case job.IsCompleted():
 			summary.Completed++
+			log.V(1).Info("Component firmware job completed", "JobID", job.ID, "Name", job.Name, "State", job.State)
 		default:
 			summary.InProgress++
+			log.V(1).Info("Component firmware job still in progress", "JobID", job.ID, "Name", job.Name, "State", job.State, "PercentComplete", job.PercentComplete)
 		}
 		if !job.IsTerminal() {
 			allTerminal = false
@@ -475,6 +565,8 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	}
 
 	if !allTerminal {
+		log.V(1).Info("Component firmware jobs still in progress",
+			"Total", summary.Total, "Completed", summary.Completed, "Failed", summary.Failed, "InProgress", summary.InProgress)
 		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
 			ds := dellStatus(status)
 			ds.ComponentJobs = componentJobs
@@ -483,6 +575,7 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	}
 
 	if anyFailed {
+		log.Info("Component firmware jobs finished with failures", "Total", summary.Total, "Completed", summary.Completed, "Failed", summary.Failed)
 		if err := r.Conditions.Update(
 			condition,
 			conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -498,6 +591,7 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		})
 	}
 
+	log.V(1).Info("All component firmware jobs completed successfully", "Total", summary.Total, "Completed", summary.Completed)
 	if err := r.Conditions.Update(
 		condition,
 		conditionutils.UpdateStatus(corev1.ConditionTrue),
@@ -550,14 +644,20 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 	}
 
 	return &bmc.RepositoryUpdateParameters{
-		ShareType:              string(repo.ShareType),
-		IPAddress:              repo.Address,
-		ShareName:              repo.ShareName,
-		CatalogFile:            catalogFile,
-		UserName:               username,
-		Password:               password,
-		ApplyUpdate:            applyUpdate,
-		RebootNeeded:           applyUpdate && repo.RebootNeeded,
+		ShareType:    string(repo.ShareType),
+		IPAddress:    repo.Address,
+		ShareName:    repo.ShareName,
+		CatalogFile:  catalogFile,
+		UserName:     username,
+		Password:     password,
+		ApplyUpdate:  applyUpdate,
+		RebootNeeded: applyUpdate && repo.RebootNeeded,
+		// IgnoreCertWarning is hardcoded to true: the repository share is not
+		// expected to present a certificate the iDRAC can verify (no field is
+		// exposed on DellFirmwareRepository for this today), and without it the
+		// iDRAC rejects the file transfer with "verification certificate is not
+		// available" on HTTPS shares.
+		IgnoreCertWarning:      true,
 		ApplySameVersions:      applySameVersions,
 		ApplyDowngradeVersions: applyDowngradeVersions,
 	}, nil
