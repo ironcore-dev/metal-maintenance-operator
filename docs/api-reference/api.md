@@ -1028,6 +1028,27 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 
 
+#### ComponentJobsSummary
+
+
+
+ComponentJobsSummary tallies the current pass's per-component jobs (ComponentJobs) by
+completion state, computed by the controller purely for observability (e.g. printcolumns);
+controller logic drives off ComponentJobs directly rather than this summary.
+
+
+
+_Appears in:_
+- [DellFirmwareUpdateStatus](#dellfirmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `total` _integer_ | Total is the number of component jobs discovered so far in the current pass. |  |  |
+| `completed` _integer_ | Completed is the number of component jobs that finished successfully. |  |  |
+| `inProgress` _integer_ | InProgress is the number of component jobs that have not yet reached a terminal state. |  |  |
+| `failed` _integer_ | Failed is the number of component jobs that finished in a failed state. |  |  |
+
+
 #### DellFirmwareRepository
 
 
@@ -1050,6 +1071,30 @@ _Appears in:_
 | `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required.<br />Must not be set when ShareType is HTTP. |  |  |
 | `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
 | `applyVersionPolicy` _[DellVersionApplyPolicy](#dellversionapplypolicy)_ | ApplyVersionPolicy controls whether packages already at the same version and/or older<br />than the currently installed version are applied. If unset, only genuine upgrades are applied. |  | Enum: [AllowSameVersion AllowDowngradeVersion AllowSameAndDowngradeVersion] <br /> |
+
+
+#### DellFirmwareUpdateStatus
+
+
+
+DellFirmwareUpdateStatus contains status fields specific to Dell's repository-based firmware
+update mechanism (DellSoftwareInstallationService.InstallFromRepository). Keeping these fields
+vendor-namespaced (rather than flat on FirmwareUpdateStatus) mirrors DellFirmwareRepository in
+the spec and leaves room for sibling vendor-specific status structs (e.g. for Fujitsu/Lenovo
+image-based updates) to be added to FirmwareUpdateStatus without colliding field names.
+
+
+
+_Appears in:_
+- [FirmwareUpdateStatus](#firmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
+| `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
+| `componentJobs` _[RepositoryJob](#repositoryjob) array_ | ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job. |  |  |
+| `componentJobsSummary` _[ComponentJobsSummary](#componentjobssummary)_ | ComponentJobsSummary tallies ComponentJobs by completion state. |  |  |
+| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly<br />empty) slice indicates the baseline has been captured for the current pass. |  |  |
 
 
 #### DellShareType
@@ -1165,9 +1210,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `state` _[FirmwareUpdateState](#firmwareupdatestate)_ | State represents the current state of the firmware update. |  |  |
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to the ServerMaintenance object the controller created for this update. |  |  |
-| `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
-| `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
-| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly<br />empty) slice indicates the baseline has been captured for the current pass. |  |  |
+| `dellStatus` _[DellFirmwareUpdateStatus](#dellfirmwareupdatestatus)_ | DellStatus contains status fields specific to Dell's repository-based firmware update<br />mechanism. Populated only when Spec.DellRepository is set. |  |  |
 | `lastProgressTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastProgressTime records the last time the controller observed forward progress.<br />Used together with ProgressDeadlineSeconds to detect stalled updates. |  |  |
 | `passCount` _integer_ | PassCount is the number of check->apply->track->recheck passes completed so far. |  |  |
 | `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
@@ -1203,7 +1246,7 @@ operation. State is intentionally a plain string mirroring bmc.DellJob.
 
 
 _Appears in:_
-- [FirmwareUpdateStatus](#firmwareupdatestatus)
+- [DellFirmwareUpdateStatus](#dellfirmwareupdatestatus)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
