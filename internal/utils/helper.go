@@ -25,7 +25,7 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -275,7 +275,7 @@ func IsChildRetryThroughSets(childObj client.Object) bool {
 func HandleIgnoreAnnotationPropagation(ctx context.Context, c client.Client, parentObj client.Object, ownedObjects client.ObjectList) error {
 	log := ctrl.LoggerFrom(ctx)
 	var errs []error
-	_ = meta.EachListItem(ownedObjects, func(obj runtime.Object) error {
+	_ = apimeta.EachListItem(ownedObjects, func(obj runtime.Object) error {
 		childObj, ok := obj.(client.Object)
 		if !ok {
 			errs = append(errs, fmt.Errorf("item in list is not a client.Object: %T", obj))
@@ -315,7 +315,7 @@ func HandleIgnoreAnnotationPropagation(ctx context.Context, c client.Client, par
 func HandleRetryAnnotationPropagation(ctx context.Context, c client.Client, parentObj client.Object, ownedObjects client.ObjectList) error {
 	log := ctrl.LoggerFrom(ctx)
 	var errs []error
-	_ = meta.EachListItem(ownedObjects, func(obj runtime.Object) error {
+	_ = apimeta.EachListItem(ownedObjects, func(obj runtime.Object) error {
 		cObj, ok := obj.(client.Object)
 		if !ok {
 			errs = append(errs, fmt.Errorf("item in list is not a client.Object: %T", obj))
@@ -684,4 +684,79 @@ func VersionSetChildName(setName, targetName string) string {
 	hash.Write([]byte(name)) // hash.Hash never errors on Write
 	suffix := "-" + utilrand.SafeEncodeString(fmt.Sprint(hash.Sum32()))
 	return name[:utilvalidation.DNS1123SubdomainMaxLength-len(suffix)] + suffix
+}
+
+// --- Readiness gate helpers ---
+
+// GatesSatisfied reports whether every gate in gates is satisfied by conditions. A gate is
+// satisfied when a condition of the given Type is present and its Status matches
+// RequiredStatus (ConditionTrue is assumed when RequiredStatus is empty). It returns true
+// together with a nil reasons slice when all gates are satisfied, or false together with a
+// human-readable reason per unsatisfied gate otherwise.
+func GatesSatisfied(conditions []metav1.Condition, gates []metalv1alpha1.ConditionRequirement) (bool, []string) {
+	if len(gates) == 0 {
+		return true, nil
+	}
+
+	var reasons []string
+	for _, gate := range gates {
+		requiredStatus := gate.RequiredStatus
+		if requiredStatus == "" {
+			requiredStatus = metav1.ConditionTrue
+		}
+
+		condition := apimeta.FindStatusCondition(conditions, gate.Type)
+		switch {
+		case condition == nil:
+			reasons = append(reasons, fmt.Sprintf("condition %q not present", gate.Type))
+		case condition.Status != requiredStatus:
+			reasons = append(reasons, fmt.Sprintf("condition %q is %q, want %q", gate.Type, condition.Status, requiredStatus))
+		}
+	}
+
+	return len(reasons) == 0, reasons
+}
+
+// GatesSatisfiedForServers reports whether gates are satisfied on every server in servers (AND
+// semantics across all related servers). It returns the combined, server-prefixed reasons for
+// any unsatisfied gates.
+func GatesSatisfiedForServers(servers []*metalv1alpha1.Server, gates []metalv1alpha1.ConditionRequirement) (bool, []string) {
+	if len(gates) == 0 {
+		return true, nil
+	}
+
+	var reasons []string
+	for _, server := range servers {
+		if satisfied, serverReasons := GatesSatisfied(server.Status.Conditions, gates); !satisfied {
+			for _, reason := range serverReasons {
+				reasons = append(reasons, fmt.Sprintf("server %q: %s", server.Name, reason))
+			}
+		}
+	}
+
+	return len(reasons) == 0, reasons
+}
+
+// PatchServerCondition sets the given condition on the Server's status and patches it. It is a
+// no-op returning nil if conditionType is empty. Callers should tolerate NotFound/Conflict
+// errors by requeueing, as this is invoked outside of the primary reconciled object's
+// optimistic-concurrency loop.
+func PatchServerCondition(ctx context.Context, c client.Client, server *metalv1alpha1.Server, conditionType string, status metav1.ConditionStatus, reason, message string) error {
+	if conditionType == "" {
+		return nil
+	}
+
+	base := server.DeepCopy()
+	apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: server.Generation,
+	})
+
+	if err := c.Status().Patch(ctx, server, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("patching server %s condition %q: %w", server.Name, conditionType, err)
+	}
+	return nil
 }

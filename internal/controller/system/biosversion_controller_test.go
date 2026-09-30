@@ -16,7 +16,6 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
-	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -26,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -97,9 +97,11 @@ var _ = Describe("BIOSVersion Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 mockUpServerBiosVersion,
-					Image:                   api.ImageSpec{URI: mockUpServerBiosVersion},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 mockUpServerBiosVersion,
+						Image:                   api.ImageSpec{URI: mockUpServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -147,9 +149,11 @@ var _ = Describe("BIOSVersion Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 upgradeServerBiosVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -259,9 +263,11 @@ var _ = Describe("BIOSVersion Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 upgradeServerBiosVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -350,10 +356,12 @@ var _ = Describe("BIOSVersion Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 upgradeServerBiosVersion + " fail",
-					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion + " fail"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
-					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion + " fail",
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion + " fail"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
@@ -403,9 +411,148 @@ var _ = Describe("BIOSVersion Controller", func() {
 		}).Should(Equal(0))
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
+
+	It("should reset the completion condition on the Server when a previously Completed BIOSVersion drifts", func(ctx SpecContext) {
+		By("Creating a BIOSVersion with a CompletionConditionType, matching the current version")
+		biosVersion := &systemv1alpha1.BIOSVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-drift-reset-",
+			},
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 mockUpServerBiosVersion,
+						Image:                   api.ImageSpec{URI: mockUpServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						CompletionConditionType: "BIOSVersionUpgraded",
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosVersion)).To(Succeed())
+
+		By("Ensuring that BIOS upgrade has completed")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSVersionUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Simulating drift/restart by requesting a different version than what is installed")
+		Eventually(Update(biosVersion, func() {
+			biosVersion.Spec.Version = upgradeServerBiosVersion
+			biosVersion.Spec.Image = api.ImageSpec{URI: upgradeServerBiosVersion}
+		})).Should(Succeed())
+
+		By("Ensuring the completion condition is reset to False on the Server once drift is detected")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSVersionUpgraded"),
+					HaveField("Status", metav1.ConditionFalse),
+				),
+			)),
+		)
+
+		By("Ensuring the BIOSVersion re-upgrades and reaches Completed again")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition is patched True again once re-completed")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSVersionUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BIOSVersion")
+		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should wait for readiness gates to be satisfied before starting the upgrade", func(ctx SpecContext) {
+		By("Creating a BIOSVersion with a ReadinessGate that is not yet satisfied on the Server")
+		biosVersion := &systemv1alpha1.BIOSVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-readiness-gate-",
+			},
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SomePrerequisiteReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosVersion)).To(Succeed())
+
+		By("Ensuring that the BIOSVersion remains Pending because the readiness gate is not satisfied")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStatePending),
+		)
+		Consistently(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStatePending),
+		)
+
+		By("Ensuring the ReadinessGatesSatisfied condition is False on the BIOSVersion")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Satisfying the readiness gate on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring that the BIOSVersion now proceeds and reaches Completed")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStateCompleted),
+		)
+
+		By("Deleting the BIOSVersion")
+		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
 })
 
 var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
+
 	ns := SetupTest(nil)
 
 	var (
@@ -484,9 +631,11 @@ var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 upgradeServerBiosVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},

@@ -15,10 +15,10 @@ import (
 // BIOSSettingsTemplate defines the template for BIOS settings to be applied.
 type BIOSSettingsTemplate struct {
 	api.SettingsTemplate `json:",inline"`
+	api.ReadinessGating  `json:",inline"`
 }
 
 // BIOSSettingsSpec defines the desired state of BIOSSettings.
-// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
 type BIOSSettingsSpec struct {
 	// BIOSSettingsTemplate defines the template for BIOS Settings to be applied on the servers.
 	BIOSSettingsTemplate `json:",inline"`

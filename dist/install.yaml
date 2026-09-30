@@ -68,6 +68,45 @@ spec:
           spec:
             description: BIOSSettingsSpec defines the desired state of BIOSSettings.
             properties:
+              completionConditionType:
+                description: |-
+                  CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                  related Server(s) once this resource reaches its terminal success state. Downstream
+                  resources can reference this Type in their own ReadinessGates to build a manual
+                  sequence across resources.
+                type: string
+              readinessGates:
+                description: |-
+                  ReadinessGates is a list of Server conditions that must be satisfied before the
+                  controller starts applying this resource. Semantics mirror Kubernetes
+                  Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                  Server(s) with the required status.
+                items:
+                  description: |-
+                    ConditionRequirement defines a specific Server condition and the status value
+                    required to trigger the controller's action.
+                  properties:
+                    requiredStatus:
+                      description: RequiredStatus is status of the condition, one
+                        of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Type of server condition
+
+                        Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                      maxLength: 316
+                      minLength: 1
+                      type: string
+                  required:
+                  - requiredStatus
+                  - type
+                  type: object
+                type: array
               retryPolicy:
                 description: RetryPolicy defines the retry behavior for automatic
                   retries on transient failures.
@@ -280,9 +319,6 @@ spec:
             required:
             - serverRef
             type: object
-            x-kubernetes-validations:
-            - message: version is required
-              rule: size(self.version) > 0
           status:
             description: BIOSSettingsStatus defines the observed state of BIOSSettings.
             properties:
@@ -527,6 +563,45 @@ spec:
                 description: BIOSSettingsTemplate defines the template for the BIOSSettings
                   resource to be applied to the servers.
                 properties:
+                  completionConditionType:
+                    description: |-
+                      CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                      related Server(s) once this resource reaches its terminal success state. Downstream
+                      resources can reference this Type in their own ReadinessGates to build a manual
+                      sequence across resources.
+                    type: string
+                  readinessGates:
+                    description: |-
+                      ReadinessGates is a list of Server conditions that must be satisfied before the
+                      controller starts applying this resource. Semantics mirror Kubernetes
+                      Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                      Server(s) with the required status.
+                    items:
+                      description: |-
+                        ConditionRequirement defines a specific Server condition and the status value
+                        required to trigger the controller's action.
+                      properties:
+                        requiredStatus:
+                          description: RequiredStatus is status of the condition,
+                            one of True, False, Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: |-
+                            Type of server condition
+
+                            Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                          maxLength: 316
+                          minLength: 1
+                          type: string
+                      required:
+                      - requiredStatus
+                      - type
+                      type: object
+                    type: array
                   retryPolicy:
                     description: RetryPolicy defines the retry behavior for automatic
                       retries on transient failures.
@@ -872,9 +947,16 @@ spec:
           spec:
             description: BIOSVersionSpec defines the desired state of BIOSVersion.
             properties:
+              completionConditionType:
+                description: |-
+                  CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                  related Server(s) once this resource reaches its terminal success state. Downstream
+                  resources can reference this Type in their own ReadinessGates to build a manual
+                  sequence across resources.
+                type: string
               image:
                 description: Image specifies the image to use to upgrade to the given
-                  BIOS version.
+                  version.
                 properties:
                   URI:
                     description: URI is the URI of the software image to install.
@@ -900,6 +982,38 @@ spec:
                 required:
                 - URI
                 type: object
+              readinessGates:
+                description: |-
+                  ReadinessGates is a list of Server conditions that must be satisfied before the
+                  controller starts applying this resource. Semantics mirror Kubernetes
+                  Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                  Server(s) with the required status.
+                items:
+                  description: |-
+                    ConditionRequirement defines a specific Server condition and the status value
+                    required to trigger the controller's action.
+                  properties:
+                    requiredStatus:
+                      description: RequiredStatus is status of the condition, one
+                        of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Type of server condition
+
+                        Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                      maxLength: 316
+                      minLength: 1
+                      type: string
+                  required:
+                  - requiredStatus
+                  - type
+                  type: object
+                type: array
               retryPolicy:
                 description: RetryPolicy defines the retry behavior for automatic
                   retries on transient failures.
@@ -916,7 +1030,7 @@ spec:
                 type: object
               serverMaintenancePolicy:
                 description: ServerMaintenancePolicy is a maintenance policy to be
-                  enforced on the server.
+                  applied on the server.
                 type: string
               serverMaintenanceRef:
                 description: ServerMaintenanceRef is a reference to a ServerMaintenance
@@ -955,7 +1069,8 @@ spec:
                   should bypass vendor update policies.
                 type: string
               version:
-                description: Version specifies the BIOS version to upgrade to.
+                description: Version specifies the software version (e.g. BIOS, BMC)
+                  to upgrade to.
                 type: string
             required:
             - image
@@ -1137,9 +1252,16 @@ spec:
                 description: BIOSVersionTemplate defines the template for the BIOSVersion
                   resource to be applied to the servers.
                 properties:
+                  completionConditionType:
+                    description: |-
+                      CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                      related Server(s) once this resource reaches its terminal success state. Downstream
+                      resources can reference this Type in their own ReadinessGates to build a manual
+                      sequence across resources.
+                    type: string
                   image:
                     description: Image specifies the image to use to upgrade to the
-                      given BIOS version.
+                      given version.
                     properties:
                       URI:
                         description: URI is the URI of the software image to install.
@@ -1165,6 +1287,38 @@ spec:
                     required:
                     - URI
                     type: object
+                  readinessGates:
+                    description: |-
+                      ReadinessGates is a list of Server conditions that must be satisfied before the
+                      controller starts applying this resource. Semantics mirror Kubernetes
+                      Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                      Server(s) with the required status.
+                    items:
+                      description: |-
+                        ConditionRequirement defines a specific Server condition and the status value
+                        required to trigger the controller's action.
+                      properties:
+                        requiredStatus:
+                          description: RequiredStatus is status of the condition,
+                            one of True, False, Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: |-
+                            Type of server condition
+
+                            Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                          maxLength: 316
+                          minLength: 1
+                          type: string
+                      required:
+                      - requiredStatus
+                      - type
+                      type: object
+                    type: array
                   retryPolicy:
                     description: RetryPolicy defines the retry behavior for automatic
                       retries on transient failures.
@@ -1181,14 +1335,15 @@ spec:
                     type: object
                   serverMaintenancePolicy:
                     description: ServerMaintenancePolicy is a maintenance policy to
-                      be enforced on the server.
+                      be applied on the server.
                     type: string
                   updatePolicy:
                     description: UpdatePolicy indicates whether the server's upgrade
                       service should bypass vendor update policies.
                     type: string
                   version:
-                    description: Version specifies the BIOS version to upgrade to.
+                    description: Version specifies the software version (e.g. BIOS,
+                      BMC) to upgrade to.
                     type: string
                 required:
                 - image
@@ -1354,6 +1509,45 @@ spec:
                 x-kubernetes-validations:
                 - message: bmcRef is immutable
                   rule: self == oldSelf
+              completionConditionType:
+                description: |-
+                  CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                  related Server(s) once this resource reaches its terminal success state. Downstream
+                  resources can reference this Type in their own ReadinessGates to build a manual
+                  sequence across resources.
+                type: string
+              readinessGates:
+                description: |-
+                  ReadinessGates is a list of Server conditions that must be satisfied before the
+                  controller starts applying this resource. Semantics mirror Kubernetes
+                  Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                  Server(s) with the required status.
+                items:
+                  description: |-
+                    ConditionRequirement defines a specific Server condition and the status value
+                    required to trigger the controller's action.
+                  properties:
+                    requiredStatus:
+                      description: RequiredStatus is status of the condition, one
+                        of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Type of server condition
+
+                        Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                      maxLength: 316
+                      minLength: 1
+                      type: string
+                  required:
+                  - requiredStatus
+                  - type
+                  type: object
+                type: array
               retryPolicy:
                 description: RetryPolicy defines the retry behavior for automatic
                   retries on transient failures.
@@ -1561,8 +1755,6 @@ spec:
             - bmcRef
             type: object
             x-kubernetes-validations:
-            - message: version is required
-              rule: size(self.version) > 0
             - message: variable keys must be unique
               rule: '!has(self.variables) || self.variables.all(v, self.variables.filter(w,
                 w.key == v.key).size() == 1)'
@@ -1797,6 +1989,45 @@ spec:
                 description: BMCSettingsTemplate defines the template for the BMCSettings
                   resource to be applied to the BMCs.
                 properties:
+                  completionConditionType:
+                    description: |-
+                      CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                      related Server(s) once this resource reaches its terminal success state. Downstream
+                      resources can reference this Type in their own ReadinessGates to build a manual
+                      sequence across resources.
+                    type: string
+                  readinessGates:
+                    description: |-
+                      ReadinessGates is a list of Server conditions that must be satisfied before the
+                      controller starts applying this resource. Semantics mirror Kubernetes
+                      Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                      Server(s) with the required status.
+                    items:
+                      description: |-
+                        ConditionRequirement defines a specific Server condition and the status value
+                        required to trigger the controller's action.
+                      properties:
+                        requiredStatus:
+                          description: RequiredStatus is status of the condition,
+                            one of True, False, Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: |-
+                            Type of server condition
+
+                            Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                          maxLength: 316
+                          minLength: 1
+                          type: string
+                      required:
+                      - requiredStatus
+                      - type
+                      type: object
+                    type: array
                   retryPolicy:
                     description: RetryPolicy defines the retry behavior for automatic
                       retries on transient failures.
@@ -2322,9 +2553,16 @@ spec:
                 x-kubernetes-validations:
                 - message: bmcRef is immutable
                   rule: self == oldSelf
+              completionConditionType:
+                description: |-
+                  CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                  related Server(s) once this resource reaches its terminal success state. Downstream
+                  resources can reference this Type in their own ReadinessGates to build a manual
+                  sequence across resources.
+                type: string
               image:
                 description: Image specifies the image to use to upgrade to the given
-                  BMC version.
+                  version.
                 properties:
                   URI:
                     description: URI is the URI of the software image to install.
@@ -2350,6 +2588,38 @@ spec:
                 required:
                 - URI
                 type: object
+              readinessGates:
+                description: |-
+                  ReadinessGates is a list of Server conditions that must be satisfied before the
+                  controller starts applying this resource. Semantics mirror Kubernetes
+                  Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                  Server(s) with the required status.
+                items:
+                  description: |-
+                    ConditionRequirement defines a specific Server condition and the status value
+                    required to trigger the controller's action.
+                  properties:
+                    requiredStatus:
+                      description: RequiredStatus is status of the condition, one
+                        of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Type of server condition
+
+                        Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                      maxLength: 316
+                      minLength: 1
+                      type: string
+                  required:
+                  - requiredStatus
+                  - type
+                  type: object
+                type: array
               retryPolicy:
                 description: RetryPolicy defines the retry behavior for automatic
                   retries on transient failures.
@@ -2366,7 +2636,7 @@ spec:
                 type: object
               serverMaintenancePolicy:
                 description: ServerMaintenancePolicy is a maintenance policy to be
-                  enforced on the server managed by referred BMC.
+                  applied on the server.
                 type: string
               serverMaintenanceRefs:
                 description: ServerMaintenanceRefs are references to ServerMaintenance
@@ -2391,7 +2661,8 @@ spec:
                   should bypass vendor update policies.
                 type: string
               version:
-                description: Version specifies the BMC version to upgrade to.
+                description: Version specifies the software version (e.g. BIOS, BMC)
+                  to upgrade to.
                 type: string
             required:
             - bmcRef
@@ -2620,9 +2891,16 @@ spec:
                 description: BMCVersionTemplate defines the template for the BMCVersion
                   resource to be applied to the BMCs.
                 properties:
+                  completionConditionType:
+                    description: |-
+                      CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                      related Server(s) once this resource reaches its terminal success state. Downstream
+                      resources can reference this Type in their own ReadinessGates to build a manual
+                      sequence across resources.
+                    type: string
                   image:
                     description: Image specifies the image to use to upgrade to the
-                      given BMC version.
+                      given version.
                     properties:
                       URI:
                         description: URI is the URI of the software image to install.
@@ -2648,6 +2926,38 @@ spec:
                     required:
                     - URI
                     type: object
+                  readinessGates:
+                    description: |-
+                      ReadinessGates is a list of Server conditions that must be satisfied before the
+                      controller starts applying this resource. Semantics mirror Kubernetes
+                      Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                      Server(s) with the required status.
+                    items:
+                      description: |-
+                        ConditionRequirement defines a specific Server condition and the status value
+                        required to trigger the controller's action.
+                      properties:
+                        requiredStatus:
+                          description: RequiredStatus is status of the condition,
+                            one of True, False, Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: |-
+                            Type of server condition
+
+                            Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                          maxLength: 316
+                          minLength: 1
+                          type: string
+                      required:
+                      - requiredStatus
+                      - type
+                      type: object
+                    type: array
                   retryPolicy:
                     description: RetryPolicy defines the retry behavior for automatic
                       retries on transient failures.
@@ -2664,14 +2974,15 @@ spec:
                     type: object
                   serverMaintenancePolicy:
                     description: ServerMaintenancePolicy is a maintenance policy to
-                      be enforced on the server managed by referred BMC.
+                      be applied on the server.
                     type: string
                   updatePolicy:
                     description: UpdatePolicy indicates whether the server's upgrade
                       service should bypass vendor update policies.
                     type: string
                   version:
-                    description: Version specifies the BMC version to upgrade to.
+                    description: Version specifies the software version (e.g. BIOS,
+                      BMC) to upgrade to.
                     type: string
                 required:
                 - image

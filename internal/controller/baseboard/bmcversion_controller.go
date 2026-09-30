@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
@@ -35,6 +36,9 @@ import (
 
 const (
 	bmcVersionFinalizer = "baseboard.metal.ironcore.dev/bmcversion"
+
+	ReasonBMCVersionCompletionConditionApplied = "BMCVersionUpgraded"
+	ReasonBMCVersionCompletionConditionReset   = "BMCVersionDriftDetected"
 )
 
 // BMCVersionReconciler reconciles a BMCVersion object
@@ -54,6 +58,7 @@ type BMCVersionReconciler struct {
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcversions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcversions/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch
@@ -211,6 +216,31 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 				return ctrl.Result{}, fmt.Errorf("failed to patch BMCVersion for retrying: %w", err)
 			}
 			return ctrl.Result{}, nil
+		}
+		if satisfied, reasons := func() (bool, []string) {
+			servers, err := r.getServersForBMCVersion(ctx, bmcClient, bmcVersion)
+			if err != nil {
+				return false, []string{fmt.Sprintf("failed to get servers for readiness gate check: %v", err)}
+			}
+			return utils.GatesSatisfiedForServers(servers, bmcVersion.Spec.ReadinessGates)
+		}(); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, bmcVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			if err := r.patchBMCVersionStatusAndCondition(ctx, bmcVersion, baseboardv1alpha1.BMCVersionStatePending, bmcVersion.Status.UpgradeTask, condition); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
 		return ctrl.Result{}, r.removeServerMaintenanceRefAndResetConditions(ctx, bmcVersion, bmcClient, bmcObj)
 	case baseboardv1alpha1.BMCVersionStateInProgress:
@@ -567,6 +597,7 @@ func (r *BMCVersionReconciler) removeServerMaintenanceRefAndResetConditions(
 	BMC *metalv1alpha1.BMC,
 ) error {
 	log := ctrl.LoggerFrom(ctx)
+	wasCompleted := bmcVersion.Status.State == baseboardv1alpha1.BMCVersionStateCompleted
 	currentBMCVersion, err := r.getBMCVersionFromBMC(ctx, bmcClient, BMC)
 	if err != nil {
 		return err
@@ -576,8 +607,30 @@ func (r *BMCVersionReconciler) removeServerMaintenanceRefAndResetConditions(
 		if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
 			return err
 		}
+		if bmcVersion.Spec.CompletionConditionType != "" {
+			servers, err := r.getServersForBMCVersion(ctx, bmcClient, bmcVersion)
+			if err != nil {
+				return fmt.Errorf("failed to get servers for completion condition patch: %w", err)
+			}
+			for _, server := range servers {
+				if err := utils.PatchServerCondition(ctx, r.Client, server, bmcVersion.Spec.CompletionConditionType, metav1.ConditionTrue, ReasonBMCVersionCompletionConditionApplied, fmt.Sprintf("BMCVersion %s upgraded to %s", bmcVersion.Name, currentBMCVersion)); err != nil {
+					return err
+				}
+			}
+		}
 		log.V(1).Info("Upgraded BMC version", "BMCVersion", currentBMCVersion, "BMC", BMC.Name)
 		state = baseboardv1alpha1.BMCVersionStateCompleted
+	} else if wasCompleted && bmcVersion.Spec.CompletionConditionType != "" {
+		log.V(1).Info("BMC version drift detected after completion, resetting completion condition", "BMC", BMC.Name)
+		servers, err := r.getServersForBMCVersion(ctx, bmcClient, bmcVersion)
+		if err != nil {
+			return fmt.Errorf("failed to get servers for completion condition reset: %w", err)
+		}
+		for _, server := range servers {
+			if err := utils.PatchServerCondition(ctx, r.Client, server, bmcVersion.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBMCVersionCompletionConditionReset, fmt.Sprintf("BMCVersion %s no longer upgraded, drift detected", bmcVersion.Name)); err != nil {
+				return err
+			}
+		}
 	}
 	retryFailedCondition, err := utils.GetCondition(r.Conditions, bmcVersion.Status.Conditions, constants.ConditionRetryOfFailedResourceIssued)
 	if err != nil {
@@ -1218,5 +1271,34 @@ func (r *BMCVersionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&baseboardv1alpha1.BMCVersion{}).
 		Owns(&maintenancev1alpha1.ServerMaintenance{}).
 		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCVersionByBMCRefs)).
+		Watches(&metalv1alpha1.Server{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCVersionByServerRefs)).
 		Complete(r)
+}
+
+// enqueueBMCVersionByServerRefs enqueues BMCVersions whose BMCRef matches the BMC of the
+// changed Server, so that readiness-gate re-evaluation is triggered promptly when the Server's
+// conditions change, instead of waiting for the next periodic resync.
+func (r *BMCVersionReconciler) enqueueBMCVersionByServerRefs(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := ctrl.LoggerFrom(ctx)
+	server := obj.(*metalv1alpha1.Server)
+	if server.Spec.BMCRef == nil {
+		return nil
+	}
+
+	bmcVersionList := &baseboardv1alpha1.BMCVersionList{}
+	if err := r.List(ctx, bmcVersionList); err != nil {
+		log.Error(err, "Failed to list BMCVersionList")
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for _, bmcVersion := range bmcVersionList.Items {
+		if bmcVersion.Spec.BMCRef != nil && bmcVersion.Spec.BMCRef.Name == server.Spec.BMCRef.Name {
+			if bmcVersion.Status.State == baseboardv1alpha1.BMCVersionStateCompleted || bmcVersion.Status.State == baseboardv1alpha1.BMCVersionStateFailed {
+				continue
+			}
+			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: bmcVersion.Namespace, Name: bmcVersion.Name}})
+		}
+	}
+	return requests
 }

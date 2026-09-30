@@ -29,6 +29,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -934,6 +935,193 @@ var _ = Describe("BIOSSettings Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, biosSettings2)).To(Succeed())
 		Eventually(Get(biosSettings2)).Should(Satisfy(apierrors.IsNotFound))
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should reset the completion condition on the Server when a previously Applied BIOSSettings drifts", func(ctx SpecContext) {
+		// settings mocked at
+		// metal-operator/bmc/mock/server/data/Registries/BiosAttributeRegistry.v1_0_0.json
+		biosSetting := make(map[string]string)
+		biosSetting["EmbeddedSata"] = "Raid"
+
+		By("Creating a BIOSSettings with a CompletionConditionType")
+		biosSettings := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-drift-reset-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version: mockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: biosSetting,
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						CompletionConditionType: "BIOSSettingsApplied",
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettings)).To(Succeed())
+
+		By("Ensuring that the BIOSSettings has reached Applied state")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSSettingsApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Simulating drift by changing the desired settings")
+		Eventually(Update(biosSettings, func() {
+			biosSettings.Spec.SettingsFlow[0].Settings = map[string]string{"EmbeddedSata": "NonRaid"}
+		})).Should(Succeed())
+
+		By("Ensuring the completion condition is reset to False on the Server once drift is detected")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSSettingsApplied"),
+					HaveField("Status", metav1.ConditionFalse),
+				),
+			)),
+		)
+
+		By("Ensuring the BIOSSettings re-applies and moves back to Applied")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition is patched True again once re-applied")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSSettingsApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BIOSSettings")
+		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should apply settings without waiting on a BIOS version when Spec.Version is not set", func(ctx SpecContext) {
+		biosSetting := make(map[string]string)
+		biosSetting["EmbeddedSata"] = "Raid"
+
+		By("Creating a BIOSSettings without a Version")
+		biosSettings := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-no-version-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: biosSetting,
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettings)).To(Succeed())
+
+		By("Ensuring that the BIOSSettings does not stay Pending waiting on a version match")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateApplied),
+		)
+
+		By("Deleting the BIOSSettings")
+		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should wait for readiness gates to be satisfied before applying settings", func(ctx SpecContext) {
+		biosSetting := make(map[string]string)
+		biosSetting["EmbeddedSata"] = "Raid"
+
+		By("Creating a BIOSSettings with a ReadinessGate that is not yet satisfied on the Server")
+		biosSettings := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-readiness-gate-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: biosSetting,
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SomePrerequisiteReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettings)).To(Succeed())
+
+		By("Ensuring that the BIOSSettings remains Pending because the readiness gate is not satisfied")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStatePending),
+		)
+		Consistently(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStatePending),
+		)
+
+		By("Ensuring the ReadinessGatesSatisfied condition is False on the BIOSSettings")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Satisfying the readiness gate on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring that the BIOSSettings now proceeds and reaches Applied")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateApplied),
+		)
+
+		By("Deleting the BIOSSettings")
+		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })

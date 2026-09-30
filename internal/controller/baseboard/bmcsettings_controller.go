@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -55,19 +56,24 @@ const (
 	ConditionBMCSettingsChangesIssued    = "ChangesIssued"
 	ConditionBMCSettingsChangesVerified  = "ChangesVerified"
 	ConditionBMCSettingsValidationFailed = "SettingsValidationFailed"
+	ConditionReadinessGatesSatisfied     = "ReadinessGatesSatisfied"
 
-	ReasonBMCPoweredOff                  = "PoweredOff"
-	ReasonBMCVersionMatching             = "VersionMatching"
-	ReasonBMCSettingsChangesIssued       = "ChangesIssued"
-	ReasonBMCSettingsChangesVerified     = "ChangesVerified"
-	ReasonBMCSettingsVerificationPending = "SettingsVerificationPending"
-	ReasonBMCSettingsValidationFailed    = "SettingsValidationFailed"
+	ReasonBMCPoweredOff                         = "PoweredOff"
+	ReasonBMCVersionMatching                    = "VersionMatching"
+	ReasonBMCSettingsChangesIssued              = "ChangesIssued"
+	ReasonBMCSettingsChangesVerified            = "ChangesVerified"
+	ReasonBMCSettingsVerificationPending        = "SettingsVerificationPending"
+	ReasonBMCSettingsValidationFailed           = "SettingsValidationFailed"
+	ReasonReadinessGatesNotSatisfied            = "ReadinessGatesNotSatisfied"
+	ReasonBMCSettingsCompletionConditionApplied = "BMCSettingsApplied"
+	ReasonBMCSettingsCompletionConditionReset   = "BMCSettingsDriftDetected"
 )
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcsettings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcsettings/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcsettings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -247,11 +253,34 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 			return ctrl.Result{}, nil
 		}
 		var state = baseboardv1alpha1.BMCSettingsStateInProgress
+		servers, err := r.getServers(ctx, bmcObj, bmcClient)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get servers for readiness gate check: %w", err)
+		}
+		if satisfied, reasons := utils.GatesSatisfiedForServers(servers, settings.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			if err := r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStatePending, condition); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		}
 		versionCheckCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionVersionUpdatePending)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get Condition for pending BMCVersion update state: %w", err)
 		}
-		if bmcObj.Status.FirmwareVersion != settings.Spec.Version {
+		if settings.Spec.Version != "" && bmcObj.Status.FirmwareVersion != settings.Spec.Version {
 			log.V(1).Info("Pending BMC version upgrade", "currentVersion", bmcObj.Status.FirmwareVersion, "requiredVersion", settings.Spec.Version)
 			if err := r.Conditions.Update(
 				versionCheckCondition,
@@ -555,7 +584,30 @@ func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, s
 		// Drift detected — reset all conditions and state so the next reconcile
 		// re-enters the apply phase from scratch.
 		log.V(1).Info("Settings drift detected, resetting state for re-apply")
+		if settings.Spec.CompletionConditionType != "" {
+			servers, err := r.getServers(ctx, bmcObj, bmcClient)
+			if err != nil {
+				return fmt.Errorf("failed to get servers for completion condition reset: %w", err)
+			}
+			for _, server := range servers {
+				if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBMCSettingsCompletionConditionReset, fmt.Sprintf("BMCSettings %s no longer applied, drift detected", settings.Name)); err != nil {
+					return err
+				}
+			}
+		}
 		return r.updateBMCSettingsStatus(ctx, settings, "", nil)
+	}
+
+	if settings.Spec.CompletionConditionType != "" {
+		servers, err := r.getServers(ctx, bmcObj, bmcClient)
+		if err != nil {
+			return fmt.Errorf("failed to get servers for completion condition patch: %w", err)
+		}
+		for _, server := range servers {
+			if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionTrue, ReasonBMCSettingsCompletionConditionApplied, fmt.Sprintf("BMCSettings %s applied", settings.Name)); err != nil {
+				return err
+			}
+		}
 	}
 
 	log.V(1).Info("Done with BMC setting update", "BMCSetting", settings.Name, "BMC", bmcObj.Name)
@@ -1192,6 +1244,35 @@ func (r *BMCSettingsReconciler) enqueueBMCSettingsByBMCRefs(ctx context.Context,
 	}
 	return requests
 }
+
+// enqueueBMCSettingsByServerRefs enqueues BMCSettings whose BMCRef matches the BMC of the
+// changed Server, so that readiness-gate re-evaluation is triggered promptly when the Server's
+// conditions change, instead of waiting for the next periodic resync.
+func (r *BMCSettingsReconciler) enqueueBMCSettingsByServerRefs(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := ctrl.LoggerFrom(ctx)
+	server := obj.(*metalv1alpha1.Server)
+	if server.Spec.BMCRef == nil {
+		return nil
+	}
+
+	settingsList := &baseboardv1alpha1.BMCSettingsList{}
+	if err := r.List(ctx, settingsList); err != nil {
+		log.Error(err, "Failed to list BMCSettingsList")
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for _, settings := range settingsList.Items {
+		if settings.Spec.BMCRef != nil && settings.Spec.BMCRef.Name == server.Spec.BMCRef.Name {
+			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied || settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
+				continue
+			}
+			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: settings.Namespace, Name: settings.Name}})
+		}
+	}
+	return requests
+}
+
 func (r *BMCSettingsReconciler) enqueueBMCSettingsByBMCVersion(ctx context.Context, obj client.Object) []ctrl.Request {
 	log := ctrl.LoggerFrom(ctx)
 	BMCVersion := obj.(*baseboardv1alpha1.BMCVersion)
@@ -1319,6 +1400,7 @@ func (r *BMCSettingsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&baseboardv1alpha1.BMCSettings{}).
 		Owns(&maintenancev1alpha1.ServerMaintenance{}).
 		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsByBMCRefs)).
+		Watches(&metalv1alpha1.Server{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsByServerRefs)).
 		Watches(&baseboardv1alpha1.BMCVersion{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsByBMCVersion)).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsBySecret)).
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueBMCSettingsByConfigMap)).

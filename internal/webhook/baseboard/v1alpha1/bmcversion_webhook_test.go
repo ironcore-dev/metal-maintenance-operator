@@ -35,8 +35,10 @@ var _ = Describe("BMCVersion Webhook", func() {
 			},
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version: "P70 v1.45 (12/06/2017)",
-					Image:   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
+					VersionTemplate: api.VersionTemplate{
+						Version: "P70 v1.45 (12/06/2017)",
+						Image:   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
+					},
 				},
 				BMCRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -62,9 +64,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P71 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "foo"},
 				},
@@ -80,9 +84,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P70 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P70 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -98,9 +104,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P71 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -121,9 +129,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P71 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},

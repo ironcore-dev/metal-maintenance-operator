@@ -10,6 +10,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
@@ -53,24 +54,28 @@ const (
 	ConditionSettingsRebootPowerOn       = "RebootPowerOn"
 	ConditionSettingsVerify              = "VerifySettingsPostUpdate"
 	ConditionSettingsValidationFailed    = "SettingsValidationFailed"
+	ConditionReadinessGatesSatisfied     = "ReadinessGatesSatisfied"
 
-	ReasonPendingSettingsFound          = "PendingSettingsFound"
-	ReasonSettingsDuplicateKeysFound    = "SettingsDuplicateKeysFound"
-	ReasonSettingsUpdateStarted         = "SettingsUpdateStarted"
-	ReasonSettingsTimedOut              = "SettingsTimedOutDuringUpdate"
-	ReasonSettingsServerPoweredOn       = "ServerPoweredOn"
-	ReasonSettingsServerPowerOnIssued   = "ServerPowerOnIssued"
-	ReasonSettingsUpdateIssued          = "SettingsUpdateIssued"
-	ReasonSettingsUnexpectedPending     = "UnexpectedPendingSettings"
-	ReasonSettingsSkipReboot            = "SkipServerReboot"
-	ReasonSettingsRebootNeeded          = "RebootPostSettingUpdate"
-	ReasonSettingsRebootIssued          = "RebootRequestIssuedToBMC"
-	ReasonSettingsRebootObservedOff     = "RebootObservedServerLeftPowerOnState"
-	ReasonSettingsRebootTimedOut        = "RebootTimedOutWaitingForPowerState"
-	ReasonSettingsRebootPowerOn         = "PowerOnCompletedDuringReboot"
-	ReasonSettingsVerificationCompleted = "VerificationCompleted"
-	ReasonSettingsVerificationNotDone   = "VerificationNotCompleted"
-	ReasonSettingsValidationFailed      = "SettingsValidationFailed"
+	ReasonPendingSettingsFound                   = "PendingSettingsFound"
+	ReasonSettingsDuplicateKeysFound             = "SettingsDuplicateKeysFound"
+	ReasonSettingsUpdateStarted                  = "SettingsUpdateStarted"
+	ReasonSettingsTimedOut                       = "SettingsTimedOutDuringUpdate"
+	ReasonSettingsServerPoweredOn                = "ServerPoweredOn"
+	ReasonSettingsServerPowerOnIssued            = "ServerPowerOnIssued"
+	ReasonSettingsUpdateIssued                   = "SettingsUpdateIssued"
+	ReasonSettingsUnexpectedPending              = "UnexpectedPendingSettings"
+	ReasonSettingsSkipReboot                     = "SkipServerReboot"
+	ReasonSettingsRebootNeeded                   = "RebootPostSettingUpdate"
+	ReasonSettingsRebootIssued                   = "RebootRequestIssuedToBMC"
+	ReasonSettingsRebootObservedOff              = "RebootObservedServerLeftPowerOnState"
+	ReasonSettingsRebootTimedOut                 = "RebootTimedOutWaitingForPowerState"
+	ReasonSettingsRebootPowerOn                  = "PowerOnCompletedDuringReboot"
+	ReasonSettingsVerificationCompleted          = "VerificationCompleted"
+	ReasonSettingsVerificationNotDone            = "VerificationNotCompleted"
+	ReasonSettingsValidationFailed               = "SettingsValidationFailed"
+	ReasonReadinessGatesNotSatisfied             = "ReadinessGatesNotSatisfied"
+	ReasonBIOSSettingsCompletionConditionApplied = "BIOSSettingsApplied"
+	ReasonBIOSSettingsCompletionConditionReset   = "BIOSSettingsDriftDetected"
 )
 
 // BIOSSettingsReconciler reconciles a BIOSSettings object
@@ -92,6 +97,7 @@ type BIOSSettingsReconciler struct {
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biossettings/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biossettings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch
@@ -264,6 +270,26 @@ func (r *BIOSSettingsReconciler) ensureBIOSSettingsStateTransition(ctx context.C
 
 func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+		log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+		condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
+		}
+		if err := r.Conditions.Update(
+			condition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+			conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
+		}
+		if err := r.updateStatus(ctx, settings, systemv1alpha1.BIOSSettingsStatePending, condition); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+	}
+
 	if len(settings.Spec.SettingsFlow) == 0 {
 		log.V(1).Info("Skipping BIOSSettings because no settings flow found")
 		return ctrl.Result{}, r.updateStatus(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied, nil)
@@ -367,7 +393,7 @@ func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, 
 
 	var state = systemv1alpha1.BIOSSettingsStateInProgress
 	var condition *metav1.Condition
-	if biosVersion != settings.Spec.Version {
+	if settings.Spec.Version != "" && biosVersion != settings.Spec.Version {
 		versionCheckCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionVersionUpdatePending)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get Condition for pending BIOSVersion update state: %w", err)
@@ -1079,7 +1105,14 @@ func (r *BIOSSettingsReconciler) handleAppliedState(ctx context.Context, bmcClie
 	}
 	if len(settingsDiff) > 0 {
 		log.V(1).Info("Found BIOS setting difference after applied state", "SettingsDiff", settingsDiff)
+		if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBIOSSettingsCompletionConditionReset, fmt.Sprintf("BIOSSettings %s no longer applied, drift detected", settings.Name)); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, r.updateStatus(ctx, settings, systemv1alpha1.BIOSSettingsStatePending, nil)
+	}
+
+	if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionTrue, ReasonBIOSSettingsCompletionConditionApplied, fmt.Sprintf("BIOSSettings %s applied", settings.Name)); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	log.V(1).Info("Finished BIOSSettings update", "server", server)
