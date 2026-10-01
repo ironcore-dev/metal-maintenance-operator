@@ -302,6 +302,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 		fw.Status.Conditions = []metav1.Condition{*condition}
 		fw.Status.DellStatus = nil
 		fw.Status.PassCount = 0
+		fw.Status.LastProgressTime = new(metav1.Now())
 		return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 	}
 

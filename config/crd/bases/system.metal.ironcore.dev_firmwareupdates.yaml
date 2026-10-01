@@ -157,7 +157,6 @@ spec:
                 format: int32
                 type: integer
             required:
-            - dellRepository
             - serverRef
             type: object
           status:
