@@ -253,11 +253,7 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 			return ctrl.Result{}, nil
 		}
 		var state = baseboardv1alpha1.BMCSettingsStateInProgress
-		servers, err := r.getServers(ctx, bmcObj, bmcClient)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get servers for readiness gate check: %w", err)
-		}
-		if satisfied, reasons := utils.GatesSatisfiedForServers(servers, settings.Spec.ReadinessGates); !satisfied {
+		if satisfied, reasons := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
 			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
@@ -307,12 +303,47 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 	case baseboardv1alpha1.BMCSettingsStateInProgress:
 		return r.handleSettingInProgressState(ctx, settings, bmcObj, bmcClient)
 	case baseboardv1alpha1.BMCSettingsStateApplied:
-		return ctrl.Result{}, r.handleSettingAppliedState(ctx, settings, bmcObj, bmcClient)
+		// Re-check readiness gates on every resync while Applied: a sibling object sharing the
+		// same BMCRef may depend on THIS object's completion condition to unblock, and conversely
+		// this object's gates may reference a sibling that is still mid-rollout. If gates are no
+		// longer satisfied, stay Applied without touching the BMC/hardware or releasing the
+		// ServerMaintenance claim, so we never redrive/fight an active sibling.
+		if satisfied, reasons := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); !satisfied {
+			log.V(1).Info("Readiness gates no longer satisfied, staying Applied", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			if err := r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied, condition); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		}
+		if err := r.handleSettingAppliedState(ctx, settings, bmcObj, bmcClient); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	case baseboardv1alpha1.BMCSettingsStateFailed:
 		return ctrl.Result{}, r.handleFailedState(ctx, settings, bmcObj)
 	}
 	log.V(1).Info("Unknown State found", "BMCSettings state", settings.Status.State)
 	return ctrl.Result{}, nil
+}
+
+func (r *BMCSettingsReconciler) checkBMCSettingsReadinessGates(ctx context.Context, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings) (bool, []string) {
+	servers, err := r.getServers(ctx, bmcObj, bmcClient)
+	if err != nil {
+		return false, []string{fmt.Sprintf("failed to get servers for readiness gate check: %v", err)}
+	}
+	return utils.GatesSatisfiedForServers(servers, settings.Spec.ReadinessGates)
 }
 
 func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (ctrl.Result, error) {
@@ -571,10 +602,6 @@ func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context,
 
 func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
-	// Clean up maintenance CRD and references
-	if err := r.cleanupServerMaintenanceReferences(ctx, settings); err != nil {
-		return err
-	}
 
 	settingsDiff, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
 	if err != nil {
@@ -595,6 +622,10 @@ func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, s
 				}
 			}
 		}
+		// Clean up maintenance CRD and references now that the drift reset is recorded.
+		if err := r.cleanupServerMaintenanceReferences(ctx, settings); err != nil {
+			return err
+		}
 		return r.updateBMCSettingsStatus(ctx, settings, "", nil)
 	}
 
@@ -608,6 +639,11 @@ func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, s
 				return err
 			}
 		}
+	}
+
+	// Clean up maintenance CRD and references
+	if err := r.cleanupServerMaintenanceReferences(ctx, settings); err != nil {
+		return err
 	}
 
 	log.V(1).Info("Done with BMC setting update", "BMCSetting", settings.Name, "BMC", bmcObj.Name)
@@ -1264,7 +1300,12 @@ func (r *BMCSettingsReconciler) enqueueBMCSettingsByServerRefs(ctx context.Conte
 	var requests []ctrl.Request
 	for _, settings := range settingsList.Items {
 		if settings.Spec.BMCRef != nil && settings.Spec.BMCRef.Name == server.Spec.BMCRef.Name {
-			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied || settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
+			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
+				continue
+			}
+			// An Applied object only needs to be re-evaluated if it has ReadinessGates that
+			// could later become unsatisfied again; otherwise there is nothing to recheck.
+			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied && len(settings.Spec.ReadinessGates) == 0 {
 				continue
 			}
 			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: settings.Namespace, Name: settings.Name}})

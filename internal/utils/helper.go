@@ -734,7 +734,7 @@ func GatesSatisfiedForServers(servers []*metalv1alpha1.Server, gates []metalv1al
 		}
 	}
 
-	return len(reasons) == 0, reasons
+	return len(reasons) == 0 && len(servers) > 0, reasons
 }
 
 // PatchServerCondition sets the given condition on the Server's status and patches it. It is a

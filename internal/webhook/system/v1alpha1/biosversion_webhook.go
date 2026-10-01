@@ -92,6 +92,12 @@ func (v *BIOSVersionValidator) ValidateDelete(ctx context.Context, obj *systemv1
 	return nil, nil
 }
 
+// checkForDuplicateBIOSVersionRefToServer rejects a BIOSVersion if another BIOSVersion already refers to
+// the same Server AND both that sibling and the object being validated have no ReadinessGates. At most
+// one ungated object per ServerRef may exist at any time - if either the new object or the pre-existing
+// sibling has ReadinessGates, additional BIOSVersion objects for the same Server are allowed (relying on the gates, and the controller-side
+// gate-recheck, to coordinate them). This does NOT validate that the gates form a correct/cycle-free
+// mutual-exclusion chain - it is a lightweight guard only.
 func checkForDuplicateBIOSVersionRefToServer(versions *systemv1alpha1.BIOSVersionList, version *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	if version.Spec.ServerRef == nil {
 		return nil, nil
@@ -103,8 +109,11 @@ func checkForDuplicateBIOSVersionRefToServer(versions *systemv1alpha1.BIOSVersio
 		if bv.Spec.ServerRef == nil {
 			continue
 		}
-		if version.Spec.ServerRef.Name == bv.Spec.ServerRef.Name {
-			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s",
+		if version.Spec.ServerRef.Name != bv.Spec.ServerRef.Name {
+			continue
+		}
+		if len(version.Spec.ReadinessGates) == 0 && len(bv.Spec.ReadinessGates) == 0 {
+			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s without readinessGates",
 				version.Spec.ServerRef.Name, version.Name, bv.Spec.ServerRef.Name, bv.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: version.GroupVersionKind().Group, Kind: version.Kind},

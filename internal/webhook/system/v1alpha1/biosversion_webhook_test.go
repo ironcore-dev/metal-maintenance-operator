@@ -49,7 +49,7 @@ var _ = Describe("BIOSVersion Webhook", func() {
 		Expect(k8sClient.DeleteAllOf(ctx, &systemv1alpha1.BIOSVersion{})).To(Succeed())
 	})
 
-	It("should deny creation if spec.serverRef is duplicate", func(ctx SpecContext) {
+	It("should deny creation if an existing sibling referring to the same server has no ReadinessGates", func(ctx SpecContext) {
 		By("Creating another BIOSVersion with existing ServerRef")
 		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
@@ -67,6 +67,31 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 		}
 		Expect(validator.ValidateCreate(ctx, biosVersionV2)).Error().To(HaveOccurred())
+	})
+
+	It("should allow creation if every existing sibling referring to the same server already has ReadinessGates", func(ctx SpecContext) {
+		By("Giving biosVersionV1 non-empty ReadinessGates")
+		Eventually(Update(biosVersionV1, func() {
+			biosVersionV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+		})).Should(Succeed())
+
+		By("Creating another BIOSVersion with existing ServerRef")
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "two"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: "foo"},
+			},
+		}
+		Expect(validator.ValidateCreate(ctx, biosVersionV2)).Error().ToNot(HaveOccurred())
 	})
 
 	It("should create if a spec.serverRef field is not a duplicate", func() {
@@ -89,7 +114,7 @@ var _ = Describe("BIOSVersion Webhook", func() {
 		Expect(validator.ValidateCreate(ctx, biosVersionV2)).Error().ToNot(HaveOccurred())
 	})
 
-	It("should deny update if spec.serverRef is duplicate", func() {
+	It("should deny update if an existing sibling referring to the same server has no ReadinessGates", func() {
 		By("Creating a BIOSVersion with different ServerRef")
 		biosVersionV2 := &systemv1alpha1.BIOSVersion{
 			ObjectMeta: metav1.ObjectMeta{
@@ -112,6 +137,36 @@ var _ = Describe("BIOSVersion Webhook", func() {
 		biosVersionV2Updated := biosVersionV2.DeepCopy()
 		biosVersionV2Updated.Spec.ServerRef = &v1.LocalObjectReference{Name: "foo"}
 		Expect(validator.ValidateUpdate(ctx, biosVersionV2, biosVersionV2Updated)).Error().To(HaveOccurred())
+	})
+
+	It("should allow update if every existing sibling referring to the same server already has ReadinessGates", func() {
+		By("Giving biosVersionV1 non-empty ReadinessGates")
+		Eventually(Update(biosVersionV1, func() {
+			biosVersionV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+		})).Should(Succeed())
+
+		By("Creating a BIOSVersion with different ServerRef")
+		biosVersionV2 := &systemv1alpha1.BIOSVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "asd"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: "bar"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosVersionV2)).To(Succeed())
+
+		By("Updating a BIOSVersion V2 to conflicting spec.serverRef")
+		biosVersionV2Updated := biosVersionV2.DeepCopy()
+		biosVersionV2Updated.Spec.ServerRef = &v1.LocalObjectReference{Name: "foo"}
+		Expect(validator.ValidateUpdate(ctx, biosVersionV2, biosVersionV2Updated)).Error().ToNot(HaveOccurred())
 	})
 
 	It("should allow update if a different field is duplicate", func() {

@@ -549,6 +549,98 @@ var _ = Describe("BIOSVersion Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
+
+	It("should stay Completed and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating a BIOSVersion gated on that condition, with a CompletionConditionType")
+		biosVersion := &systemv1alpha1.BIOSVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-readiness-gate-recheck-",
+			},
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SiblingGateReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+						CompletionConditionType: "BIOSVersionGateRecheckUpgraded",
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosVersion)).To(Succeed())
+
+		By("Ensuring the BIOSVersion reaches Completed")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSVersionGateRecheckUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Flipping the readiness gate back to unsatisfied on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionFalse,
+				Reason: "NoLongerReady",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the ReadinessGatesSatisfied condition goes False on the BIOSVersion")
+		Eventually(Object(biosVersion)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Ensuring the BIOSVersion stays Completed and does not re-actuate")
+		Consistently(Object(biosVersion)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition on the Server is left untouched (still True) while gates are unsatisfied")
+		Consistently(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSVersionGateRecheckUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BIOSVersion")
+		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
 })
 
 var _ = Describe("BIOSVersion Controller with BMCRef BMC", func() {

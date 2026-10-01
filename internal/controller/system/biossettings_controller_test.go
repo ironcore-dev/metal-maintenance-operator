@@ -1124,6 +1124,104 @@ var _ = Describe("BIOSSettings Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
+
+	It("should stay Applied and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {
+		biosSetting := make(map[string]string)
+		biosSetting["EmbeddedSata"] = "Raid"
+
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating a BIOSSettings gated on that condition, with a CompletionConditionType")
+		biosSettings := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-readiness-gate-recheck-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: biosSetting,
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SiblingGateReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+						CompletionConditionType: "BIOSSettingsGateRecheckApplied",
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettings)).To(Succeed())
+
+		By("Ensuring the BIOSSettings reaches Applied")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSSettingsGateRecheckApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Flipping the readiness gate back to unsatisfied on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionFalse,
+				Reason: "NoLongerReady",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the ReadinessGatesSatisfied condition goes False on the BIOSSettings")
+		Eventually(Object(biosSettings)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Ensuring the BIOSSettings stays Applied and does not re-actuate")
+		Consistently(Object(biosSettings)).Should(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition on the Server is left untouched (still True) while gates are unsatisfied")
+		Consistently(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BIOSSettingsGateRecheckApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BIOSSettings")
+		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
 })
 
 var _ = Describe("BIOSSettings Controller with BMCRef BMC", func() {

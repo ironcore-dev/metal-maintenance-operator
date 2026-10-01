@@ -1096,4 +1096,98 @@ var _ = Describe("BMCSettings Controller", func() {
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
+
+	It("should stay Applied and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {
+		bmcSetting := map[string]string{"abc": "readiness-gate-recheck-value"}
+
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating a BMCSettings gated on that condition, with a CompletionConditionType")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-readiness-gate-recheck-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SiblingGateReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+						CompletionConditionType: "BMCSettingsGateRecheckApplied",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring the BMCSettings reaches Applied")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsGateRecheckApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Flipping the readiness gate back to unsatisfied on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionFalse,
+				Reason: "NoLongerReady",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the ReadinessGatesSatisfied condition goes False on the BMCSettings")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Ensuring the BMCSettings stays Applied and does not re-actuate")
+		Consistently(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition on the Server is left untouched (still True) while gates are unsatisfied")
+		Consistently(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsGateRecheckApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BMCSettings")
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
 })
