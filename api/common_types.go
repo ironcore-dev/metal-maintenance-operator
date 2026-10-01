@@ -76,6 +76,8 @@ type ReadinessGating struct {
 	// resources can reference this Type in their own ReadinessGates to build a manual
 	// sequence across resources.
 	// +optional
+	// +kubebuilder:validation:MaxLength=316
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`
 	CompletionConditionType string `json:"completionConditionType,omitempty"`
 }
 

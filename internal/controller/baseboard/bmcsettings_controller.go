@@ -65,6 +65,7 @@ const (
 	ReasonBMCSettingsVerificationPending        = "SettingsVerificationPending"
 	ReasonBMCSettingsValidationFailed           = "SettingsValidationFailed"
 	ReasonReadinessGatesNotSatisfied            = "ReadinessGatesNotSatisfied"
+	ReasonReadinessGatesSatisfied               = "ReadinessGatesSatisfied"
 	ReasonBMCSettingsCompletionConditionApplied = "BMCSettingsApplied"
 	ReasonBMCSettingsCompletionConditionReset   = "BMCSettingsDriftDetected"
 )
@@ -272,6 +273,15 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 			}
 			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
+
+		// Gates are satisfied: ensure the condition reflects that (it may be stale False from a
+		// previous reconcile), independent of which path below this object takes next. Skip
+		// entirely when no gates are configured, so resources without ReadinessGates never gain
+		// this condition.
+		if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, settings.Status.State); err != nil {
+			return ctrl.Result{}, err
+		}
+
 		versionCheckCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionVersionUpdatePending)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get Condition for pending BMCVersion update state: %w", err)
@@ -327,6 +337,9 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 			}
 			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 		}
+		if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.handleSettingAppliedState(ctx, settings, bmcObj, bmcClient); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -344,6 +357,31 @@ func (r *BMCSettingsReconciler) checkBMCSettingsReadinessGates(ctx context.Conte
 		return false, []string{fmt.Sprintf("failed to get servers for readiness gate check: %v", err)}
 	}
 	return utils.GatesSatisfiedForServers(servers, settings.Spec.ReadinessGates)
+}
+
+// markBMCSettingsReadinessGatesSatisfied patches ConditionReadinessGatesSatisfied to True if it
+// isn't already, so a previously-recorded failure does not remain stale once gates pass. It is a
+// no-op when no ReadinessGates are configured, so ungated resources never gain this condition.
+func (r *BMCSettingsReconciler) markBMCSettingsReadinessGatesSatisfied(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, state baseboardv1alpha1.BMCSettingsState) error {
+	if len(settings.Spec.ReadinessGates) == 0 {
+		return nil
+	}
+	condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if condition.Status == metav1.ConditionTrue {
+		return nil
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(ReasonReadinessGatesSatisfied),
+		conditionutils.UpdateMessage("Readiness gates satisfied"),
+	); err != nil {
+		return fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	return r.updateBMCSettingsStatus(ctx, settings, state, condition)
 }
 
 func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (ctrl.Result, error) {
@@ -1303,9 +1341,12 @@ func (r *BMCSettingsReconciler) enqueueBMCSettingsByServerRefs(ctx context.Conte
 			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
 				continue
 			}
-			// An Applied object only needs to be re-evaluated if it has ReadinessGates that
-			// could later become unsatisfied again; otherwise there is nothing to recheck.
-			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied && len(settings.Spec.ReadinessGates) == 0 {
+			// Applied and Pending (or not-yet-started) objects only depend on Server conditions
+			// through their ReadinessGates; without any gates configured
+			if len(settings.Spec.ReadinessGates) == 0 &&
+				(settings.Status.State == "" ||
+					settings.Status.State == baseboardv1alpha1.BMCSettingsStatePending ||
+					settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied) {
 				continue
 			}
 			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: settings.Namespace, Name: settings.Name}})

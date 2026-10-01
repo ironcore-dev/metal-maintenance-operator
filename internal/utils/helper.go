@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -738,24 +739,37 @@ func GatesSatisfiedForServers(servers []*metalv1alpha1.Server, gates []metalv1al
 }
 
 // PatchServerCondition sets the given condition on the Server's status and patches it. It is a
-// no-op returning nil if conditionType is empty. Callers should tolerate NotFound/Conflict
-// errors by requeueing, as this is invoked outside of the primary reconciled object's
-// optimistic-concurrency loop.
+// no-op returning nil if conditionType is empty. Multiple callers (e.g. sibling firmware/settings
+// resources sharing the same Server) may race to patch different condition types on the same
+// Server concurrently; this function re-fetches the Server and retries on conflict, using an
+// optimistic-lock (resourceVersion-checked) merge patch, so a concurrent writer's unrelated
+// condition changes are never silently clobbered by a stale read-modify-write.
 func PatchServerCondition(ctx context.Context, c client.Client, server *metalv1alpha1.Server, conditionType string, status metav1.ConditionStatus, reason, message string) error {
 	if conditionType == "" {
 		return nil
 	}
 
-	base := server.DeepCopy()
-	apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: server.Generation,
+	key := client.ObjectKeyFromObject(server)
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		current := &metalv1alpha1.Server{}
+		if err := c.Get(ctx, key, current); err != nil {
+			return err
+		}
+		base := current.DeepCopy()
+		apimeta.SetStatusCondition(&current.Status.Conditions, metav1.Condition{
+			Type:               conditionType,
+			Status:             status,
+			Reason:             reason,
+			Message:            message,
+			ObservedGeneration: current.Generation,
+		})
+		if err := c.Status().Patch(ctx, current, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+			return err
+		}
+		current.DeepCopyInto(server)
+		return nil
 	})
-
-	if err := c.Status().Patch(ctx, server, client.MergeFrom(base)); err != nil {
+	if err != nil {
 		return fmt.Errorf("patching server %s condition %q: %w", server.Name, conditionType, err)
 	}
 	return nil

@@ -124,6 +124,8 @@ spec:
                       related Server(s) once this resource reaches its terminal success state. Downstream
                       resources can reference this Type in their own ReadinessGates to build a manual
                       sequence across resources.
+                    maxLength: 316
+                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                     type: string
                   readinessGates:
                     description: |-

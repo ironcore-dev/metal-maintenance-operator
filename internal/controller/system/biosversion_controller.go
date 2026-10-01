@@ -913,7 +913,9 @@ func (r *BIOSVersionReconciler) requestServerMaintenance(ctx context.Context, bi
 	}
 
 	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {
-		serverMaintenance.Spec.Policy = biosVersion.Spec.ServerMaintenancePolicy
+		if biosVersion.Spec.ServerMaintenancePolicy != "" {
+			serverMaintenance.Spec.Policy = biosVersion.Spec.ServerMaintenancePolicy
+		}
 		serverMaintenance.Spec.ServerRef = &corev1.LocalObjectReference{Name: server.Name}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
 			serverMaintenance.Status.State = ""
