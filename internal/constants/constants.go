@@ -76,6 +76,7 @@ const (
 	ConditionReset                       = "Reset"
 	ConditionReady                       = "Ready"
 	ConditionRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
+	ConditionProgressDeadlineExceeded    = "ProgressDeadlineExceeded"
 )
 
 // Shared reason strings used across baseboard and system controllers.
@@ -102,4 +103,5 @@ const (
 	ReasonMaintenanceWaiting          = "ServerMaintenanceWaitingOnApproval"
 	ReasonMaintenanceApproved         = "ServerMaintenanceApproval"
 	ReasonRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
+	ReasonProgressDeadlineExceeded    = "ProgressDeadlineExceeded"
 )
