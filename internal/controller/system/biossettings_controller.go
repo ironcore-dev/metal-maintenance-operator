@@ -10,6 +10,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
@@ -53,24 +54,29 @@ const (
 	ConditionSettingsRebootPowerOn       = "RebootPowerOn"
 	ConditionSettingsVerify              = "VerifySettingsPostUpdate"
 	ConditionSettingsValidationFailed    = "SettingsValidationFailed"
+	ConditionReadinessGatesSatisfied     = "ReadinessGatesSatisfied"
 
-	ReasonPendingSettingsFound          = "PendingSettingsFound"
-	ReasonSettingsDuplicateKeysFound    = "SettingsDuplicateKeysFound"
-	ReasonSettingsUpdateStarted         = "SettingsUpdateStarted"
-	ReasonSettingsTimedOut              = "SettingsTimedOutDuringUpdate"
-	ReasonSettingsServerPoweredOn       = "ServerPoweredOn"
-	ReasonSettingsServerPowerOnIssued   = "ServerPowerOnIssued"
-	ReasonSettingsUpdateIssued          = "SettingsUpdateIssued"
-	ReasonSettingsUnexpectedPending     = "UnexpectedPendingSettings"
-	ReasonSettingsSkipReboot            = "SkipServerReboot"
-	ReasonSettingsRebootNeeded          = "RebootPostSettingUpdate"
-	ReasonSettingsRebootIssued          = "RebootRequestIssuedToBMC"
-	ReasonSettingsRebootObservedOff     = "RebootObservedServerLeftPowerOnState"
-	ReasonSettingsRebootTimedOut        = "RebootTimedOutWaitingForPowerState"
-	ReasonSettingsRebootPowerOn         = "PowerOnCompletedDuringReboot"
-	ReasonSettingsVerificationCompleted = "VerificationCompleted"
-	ReasonSettingsVerificationNotDone   = "VerificationNotCompleted"
-	ReasonSettingsValidationFailed      = "SettingsValidationFailed"
+	ReasonPendingSettingsFound                   = "PendingSettingsFound"
+	ReasonSettingsDuplicateKeysFound             = "SettingsDuplicateKeysFound"
+	ReasonSettingsUpdateStarted                  = "SettingsUpdateStarted"
+	ReasonSettingsTimedOut                       = "SettingsTimedOutDuringUpdate"
+	ReasonSettingsServerPoweredOn                = "ServerPoweredOn"
+	ReasonSettingsServerPowerOnIssued            = "ServerPowerOnIssued"
+	ReasonSettingsUpdateIssued                   = "SettingsUpdateIssued"
+	ReasonSettingsUnexpectedPending              = "UnexpectedPendingSettings"
+	ReasonSettingsSkipReboot                     = "SkipServerReboot"
+	ReasonSettingsRebootNeeded                   = "RebootPostSettingUpdate"
+	ReasonSettingsRebootIssued                   = "RebootRequestIssuedToBMC"
+	ReasonSettingsRebootObservedOff              = "RebootObservedServerLeftPowerOnState"
+	ReasonSettingsRebootTimedOut                 = "RebootTimedOutWaitingForPowerState"
+	ReasonSettingsRebootPowerOn                  = "PowerOnCompletedDuringReboot"
+	ReasonSettingsVerificationCompleted          = "VerificationCompleted"
+	ReasonSettingsVerificationNotDone            = "VerificationNotCompleted"
+	ReasonSettingsValidationFailed               = "SettingsValidationFailed"
+	ReasonReadinessGatesNotSatisfied             = "ReadinessGatesNotSatisfied"
+	ReasonReadinessGatesSatisfied                = "ReadinessGatesSatisfied"
+	ReasonBIOSSettingsCompletionConditionApplied = "BIOSSettingsApplied"
+	ReasonBIOSSettingsCompletionConditionReset   = "BIOSSettingsDriftDetected"
 )
 
 // BIOSSettingsReconciler reconciles a BIOSSettings object
@@ -92,6 +98,7 @@ type BIOSSettingsReconciler struct {
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biossettings/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biossettings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch
@@ -254,6 +261,19 @@ func (r *BIOSSettingsReconciler) ensureBIOSSettingsStateTransition(ctx context.C
 	case systemv1alpha1.BIOSSettingsStateInProgress:
 		return r.handleSettingInProgressState(ctx, bmcClient, settings, server)
 	case systemv1alpha1.BIOSSettingsStateApplied:
+		// Re-check readiness gates on every resync while Applied: a sibling object sharing the
+		// same ServerRef may depend on THIS object's completion condition to unblock, and
+		// conversely this object's gates may reference a sibling that is still mid-rollout. If
+		// gates are no longer satisfied, stay Applied without touching the BMC/hardware or
+		// releasing the ServerMaintenance claim, so we never redrive/fight an active sibling.
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+			log := ctrl.LoggerFrom(ctx)
+			log.V(1).Info("Readiness gates no longer satisfied, staying Applied", "Reasons", reasons)
+			return r.patchBIOSSettingsReadinessGatesNotSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied, reasons)
+		}
+		if err := r.markBIOSSettingsReadinessGatesSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied); err != nil {
+			return ctrl.Result{}, err
+		}
 		return r.handleAppliedState(ctx, bmcClient, settings, server)
 	case systemv1alpha1.BIOSSettingsStateFailed:
 		return r.handleFailedState(ctx, settings, server)
@@ -262,8 +282,68 @@ func (r *BIOSSettingsReconciler) ensureBIOSSettingsStateTransition(ctx context.C
 	}
 }
 
+// markBIOSSettingsReadinessGatesSatisfied patches ConditionReadinessGatesSatisfied to True if it
+// isn't already, so a previously-recorded failure does not remain stale once gates pass. It is a
+// no-op when no ReadinessGates are configured, so ungated resources never gain this condition.
+func (r *BIOSSettingsReconciler) markBIOSSettingsReadinessGatesSatisfied(ctx context.Context, settings *systemv1alpha1.BIOSSettings, state systemv1alpha1.BIOSSettingsState) error {
+	if len(settings.Spec.ReadinessGates) == 0 {
+		return nil
+	}
+	condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if condition.Status == metav1.ConditionTrue {
+		return nil
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(ReasonReadinessGatesSatisfied),
+		conditionutils.UpdateMessage("Readiness gates satisfied"),
+	); err != nil {
+		return fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	return r.updateStatus(ctx, settings, state, condition)
+}
+
+// patchBIOSSettingsReadinessGatesNotSatisfied patches ConditionReadinessGatesSatisfied to False
+// with the given reasons and requeues after ResyncInterval. Shared by the Pending-entry check and
+// the Applied re-check, which both stop forward progress identically when gates regress.
+func (r *BIOSSettingsReconciler) patchBIOSSettingsReadinessGatesNotSatisfied(ctx context.Context, settings *systemv1alpha1.BIOSSettings, state systemv1alpha1.BIOSSettingsState, reasons []string) (ctrl.Result, error) {
+	condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionFalse),
+		conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+		conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+	); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	if err := r.updateStatus(ctx, settings, state, condition); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+}
+
 func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+		log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+		return r.patchBIOSSettingsReadinessGatesNotSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStatePending, reasons)
+	}
+
+	// Gates are satisfied: ensure the condition reflects that (it may be stale False from a
+	// previous reconcile), independent of which path below this object takes next. Skip
+	// entirely when no gates are configured, so resources without ReadinessGates never gain
+	// this condition.
+	if err := r.markBIOSSettingsReadinessGatesSatisfied(ctx, settings, settings.Status.State); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if len(settings.Spec.SettingsFlow) == 0 {
 		log.V(1).Info("Skipping BIOSSettings because no settings flow found")
 		return ctrl.Result{}, r.updateStatus(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied, nil)
@@ -367,7 +447,7 @@ func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, 
 
 	var state = systemv1alpha1.BIOSSettingsStateInProgress
 	var condition *metav1.Condition
-	if biosVersion != settings.Spec.Version {
+	if settings.Spec.Version != "" && biosVersion != settings.Spec.Version {
 		versionCheckCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionVersionUpdatePending)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get Condition for pending BIOSVersion update state: %w", err)
@@ -1065,9 +1145,6 @@ func (r *BIOSSettingsReconciler) ensureNoStrandedStatus(ctx context.Context, set
 
 func (r *BIOSSettingsReconciler) handleAppliedState(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if err := r.removeServerMaintenance(ctx, settings); err != nil {
-		return ctrl.Result{}, err
-	}
 
 	if requeue, err := r.ensureNoStrandedStatus(ctx, settings); requeue || err != nil {
 		return ctrl.Result{}, err
@@ -1079,7 +1156,18 @@ func (r *BIOSSettingsReconciler) handleAppliedState(ctx context.Context, bmcClie
 	}
 	if len(settingsDiff) > 0 {
 		log.V(1).Info("Found BIOS setting difference after applied state", "SettingsDiff", settingsDiff)
+		if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBIOSSettingsCompletionConditionReset, fmt.Sprintf("BIOSSettings %s no longer applied, drift detected", settings.Name)); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, r.updateStatus(ctx, settings, systemv1alpha1.BIOSSettingsStatePending, nil)
+	}
+
+	if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionTrue, ReasonBIOSSettingsCompletionConditionApplied, fmt.Sprintf("BIOSSettings %s applied", settings.Name)); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.removeServerMaintenance(ctx, settings); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	log.V(1).Info("Finished BIOSSettings update", "server", server)
@@ -1329,7 +1417,9 @@ func (r *BIOSSettingsReconciler) requestMaintenanceForServer(ctx context.Context
 		}}
 
 	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {
-		serverMaintenance.Spec.Policy = settings.Spec.ServerMaintenancePolicy
+		if settings.Spec.ServerMaintenancePolicy != "" {
+			serverMaintenance.Spec.Policy = settings.Spec.ServerMaintenancePolicy
+		}
 		serverMaintenance.Spec.ServerRef = &corev1.LocalObjectReference{Name: server.Name}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
 			serverMaintenance.Status.State = ""
@@ -1487,9 +1577,16 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByServerRefs(ctx context.Con
 
 	reqs := make([]ctrl.Request, 0, len(settingsList.Items))
 	for _, settings := range settingsList.Items {
-		if settings.Spec.ServerMaintenanceRef == nil ||
-			settings.Status.State == systemv1alpha1.BIOSSettingsStateApplied ||
-			settings.Status.State == systemv1alpha1.BIOSSettingsStateFailed {
+		if settings.Status.State == systemv1alpha1.BIOSSettingsStateFailed {
+			continue
+		}
+		if settings.Status.State == systemv1alpha1.BIOSSettingsStateApplied {
+			// An Applied object only needs to be re-evaluated if it has ReadinessGates that
+			// could later become unsatisfied again; otherwise there is nothing to recheck.
+			if len(settings.Spec.ReadinessGates) == 0 {
+				continue
+			}
+		} else if settings.Spec.ServerMaintenanceRef == nil {
 			continue
 		}
 		reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})

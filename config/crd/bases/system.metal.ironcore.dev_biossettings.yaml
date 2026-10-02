@@ -60,6 +60,47 @@ spec:
           spec:
             description: BIOSSettingsSpec defines the desired state of BIOSSettings.
             properties:
+              completionConditionType:
+                description: |-
+                  CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                  related Server(s) once this resource reaches its terminal success state. Downstream
+                  resources can reference this Type in their own ReadinessGates to build a manual
+                  sequence across resources.
+                maxLength: 316
+                pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                type: string
+              readinessGates:
+                description: |-
+                  ReadinessGates is a list of Server conditions that must be satisfied before the
+                  controller starts applying this resource. Semantics mirror Kubernetes
+                  Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                  Server(s) with the required status.
+                items:
+                  description: |-
+                    ConditionRequirement defines a specific Server condition and the status value
+                    required to trigger the controller's action.
+                  properties:
+                    requiredStatus:
+                      description: RequiredStatus is status of the condition, one
+                        of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Type of server condition
+
+                        Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                      maxLength: 316
+                      minLength: 1
+                      type: string
+                  required:
+                  - requiredStatus
+                  - type
+                  type: object
+                type: array
               retryPolicy:
                 description: RetryPolicy defines the retry behavior for automatic
                   retries on transient failures.
@@ -272,9 +313,6 @@ spec:
             required:
             - serverRef
             type: object
-            x-kubernetes-validations:
-            - message: version is required
-              rule: size(self.version) > 0
           status:
             description: BIOSSettingsStatus defines the observed state of BIOSSettings.
             properties:

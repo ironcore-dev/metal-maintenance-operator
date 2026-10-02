@@ -104,6 +104,12 @@ func (v *BMCSettingsValidator) ValidateDelete(ctx context.Context, obj *baseboar
 	return nil, nil
 }
 
+// checkForDuplicateBMCSettingsRefToBMC rejects a BMCSettings if another BMCSettings already refers to
+// the same BMC AND both that sibling and the object being validated have no ReadinessGates. At most one
+// ungated object per BMCRef may exist at any time - if either the new object or the pre-existing sibling
+// has ReadinessGates, additional BMCSettings objects for the same BMC are allowed (relying on the gates, and the controller-side
+// gate-recheck, to coordinate them). This does NOT validate that the gates form a correct/cycle-free
+// mutual-exclusion chain - it is a lightweight guard only.
 func checkForDuplicateBMCSettingsRefToBMC(settingsList *baseboardv1alpha1.BMCSettingsList, settings *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	if settings.Spec.BMCRef == nil {
 		return nil, nil
@@ -115,8 +121,11 @@ func checkForDuplicateBMCSettingsRefToBMC(settingsList *baseboardv1alpha1.BMCSet
 		if bs.Spec.BMCRef == nil {
 			continue
 		}
-		if bs.Spec.BMCRef.Name == settings.Spec.BMCRef.Name {
-			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s",
+		if bs.Spec.BMCRef.Name != settings.Spec.BMCRef.Name {
+			continue
+		}
+		if len(settings.Spec.ReadinessGates) == 0 && len(bs.Spec.ReadinessGates) == 0 {
+			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s without readinessGates",
 				settings.Spec.BMCRef.Name, settings.Name, bs.Spec.BMCRef.Name, bs.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: settings.GroupVersionKind().Group, Kind: settings.Kind},

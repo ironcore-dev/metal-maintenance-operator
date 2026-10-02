@@ -6,6 +6,7 @@ package prometheus_test
 import (
 	"testing"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
@@ -25,7 +26,7 @@ func TestFirmwareStateCollector_BIOSVersion(t *testing.T) {
 	biosv := &systemv1alpha1.BIOSVersion{
 		ObjectMeta: metav1.ObjectMeta{Name: "biosv-1"},
 		Spec: systemv1alpha1.BIOSVersionSpec{
-			BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{Version: "2.0.0"},
+			BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{VersionTemplate: api.VersionTemplate{Version: "2.0.0"}},
 			ServerRef:           &corev1.LocalObjectReference{Name: "server-1"},
 		},
 		Status: systemv1alpha1.BIOSVersionStatus{State: systemv1alpha1.BIOSVersionStateInProgress},
@@ -66,7 +67,7 @@ func TestFirmwareStateCollector_BMCVersion(t *testing.T) {
 	bmcv := &baseboardv1alpha1.BMCVersion{
 		ObjectMeta: metav1.ObjectMeta{Name: "bmcv-1"},
 		Spec: baseboardv1alpha1.BMCVersionSpec{
-			BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{Version: "3.0.0"},
+			BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{VersionTemplate: api.VersionTemplate{Version: "3.0.0"}},
 			BMCRef:             &corev1.LocalObjectReference{Name: "bmc-1"},
 		},
 		Status: baseboardv1alpha1.BMCVersionStatus{State: baseboardv1alpha1.BMCVersionStateCompleted},
@@ -119,7 +120,7 @@ func TestFirmwareStateCollector_NilServerRefSkipped(t *testing.T) {
 	scheme := newStateScheme(t)
 	biosv := &systemv1alpha1.BIOSVersion{
 		ObjectMeta: metav1.ObjectMeta{Name: "biosv-noref"},
-		Spec:       systemv1alpha1.BIOSVersionSpec{BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{Version: "1.0.0"}},
+		Spec:       systemv1alpha1.BIOSVersionSpec{BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{VersionTemplate: api.VersionTemplate{Version: "1.0.0"}}},
 		Status:     systemv1alpha1.BIOSVersionStatus{State: systemv1alpha1.BIOSVersionStatePending},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(biosv).WithStatusSubresource(biosv).Build()
@@ -142,7 +143,7 @@ func TestFirmwareStateCollector_ObservedVersionEmptyWhenServerMissing(t *testing
 	biosv := &systemv1alpha1.BIOSVersion{
 		ObjectMeta: metav1.ObjectMeta{Name: "biosv-orphan"},
 		Spec: systemv1alpha1.BIOSVersionSpec{
-			BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{Version: "2.0.0"},
+			BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{VersionTemplate: api.VersionTemplate{Version: "2.0.0"}},
 			ServerRef:           &corev1.LocalObjectReference{Name: "server-gone"},
 		},
 		Status: systemv1alpha1.BIOSVersionStatus{State: systemv1alpha1.BIOSVersionStatePending},
