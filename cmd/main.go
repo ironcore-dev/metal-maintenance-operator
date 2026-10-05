@@ -545,6 +545,11 @@ func main() {
 			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
 			os.Exit(1)
 		}
+
+		if err = webhooksystemv1alpha1.SetupFirmwareUpdateWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up FirmwareUpdate webhook")
+			os.Exit(1)
+		}
 	}
 
 	if err = (&baseboardctrl.BMCUserReconciler{
