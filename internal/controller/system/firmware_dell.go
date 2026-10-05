@@ -113,6 +113,11 @@ func (dh *dellHandler) handleCompleted(ctx context.Context, fw *systemv1alpha1.F
 // where the update is actually applied.
 func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
+	// Captured before any status mutation below: true only when this invocation is the
+	// Completed-state periodic drift-check (not the initial Pending-state check), used to decide
+	// whether finding pending packages here means a previously-applied CompletionConditionType
+	// needs to be reset to False.
+	wasCompleted := fw.Status.State == systemv1alpha1.FirmwareUpdateStateCompleted
 	checkIssued, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryCheckIssued)
 	if err != nil {
 		return false, err
@@ -127,7 +132,7 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 		return false, err
 	}
 	log.V(1).Info("RepositoryCheck issued, polling for completion", "Server", server.Name, "JobID", checkJobID(fw))
-	return dh.pollRepositoryCheck(ctx, updater, fw, r, server, checkCompleted)
+	return dh.pollRepositoryCheck(ctx, updater, fw, r, server, checkCompleted, wasCompleted)
 }
 
 // checkJobID returns the currently tracked repository-check job ID, or "" if
@@ -244,7 +249,7 @@ func (dh *dellHandler) issueRepositoryCheck(ctx context.Context, updater bmc.Fir
 	})
 }
 
-func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server, condition *metav1.Condition) (bool, error) {
+func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server, condition *metav1.Condition, wasCompleted bool) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if fw.Status.DellStatus == nil || fw.Status.DellStatus.CheckJob == nil || fw.Status.DellStatus.CheckJob.JobID == "" {
 		return false, fmt.Errorf("missing check job ID while polling repository check")
@@ -286,6 +291,13 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 
 	if !hasPending {
 		log.V(1).Info("Repository-based firmware update up to date", "Server", server.Name)
+		// Patch the Server's completion condition True BEFORE releasing the ServerMaintenance
+		// claim: publishing the "done" signal sibling resources may be gated on must happen before
+		// the mutual-exclusion lock on the server/BMC is released, to avoid a window where a
+		// sibling could start acting on the server before this object's completion is visible.
+		if err := utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionTrue, ReasonFirmwareUpdateCompletionConditionApplied, fmt.Sprintf("FirmwareUpdate %s applied", fw.Name)); err != nil {
+			return false, err
+		}
 		if err := r.cleanupServerMaintenanceReferences(ctx, fw); err != nil {
 			return false, err
 		}
@@ -314,6 +326,13 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 		fw.Status.PassCount = 0
 		fw.Status.LastProgressTime = new(metav1.Now())
 		return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
+	}
+
+	if wasCompleted {
+		log.V(1).Info("Firmware drift detected after completion, resetting completion condition", "Server", server.Name)
+		if err := utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonFirmwareUpdateCompletionConditionReset, fmt.Sprintf("FirmwareUpdate %s no longer applied, drift detected", fw.Name)); err != nil {
+			return false, err
+		}
 	}
 
 	// Packages are pending installation: bound how many times we allow a

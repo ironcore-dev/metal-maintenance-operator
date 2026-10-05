@@ -41,6 +41,9 @@ type FirmwareUpdateTemplate struct {
 	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
 	// +optional
 	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
+
+	// ReadinessGating defines the readiness gates and completion condition propagated to the Server.
+	api.ReadinessGating `json:",inline"`
 }
 
 // FirmwareUpdateSpec defines the desired state of FirmwareUpdate.

@@ -197,6 +197,48 @@ func GetCondition(acc *conditionutils.Accessor, conditions []metav1.Condition, c
 	return condition, nil
 }
 
+// GatesSatisfied reports whether every gate's condition type is present in conditions with the
+// required status. It returns false plus a human-readable reason per unsatisfied/missing gate.
+func GatesSatisfied(conditions []metav1.Condition, gates []metalv1alpha1.ConditionRequirement) (bool, []string) {
+	if len(gates) == 0 {
+		return true, nil
+	}
+	satisfied := true
+	var reasons []string
+	for _, gate := range gates {
+		condition := meta.FindStatusCondition(conditions, gate.Type)
+		if condition == nil {
+			satisfied = false
+			reasons = append(reasons, fmt.Sprintf("condition %q not found", gate.Type))
+			continue
+		}
+		if condition.Status != gate.RequiredStatus {
+			satisfied = false
+			reasons = append(reasons, fmt.Sprintf("condition %q is %q, want %q", gate.Type, condition.Status, gate.RequiredStatus))
+		}
+	}
+	return satisfied, reasons
+}
+
+// GatesSatisfiedForServers reports whether gates are satisfied on every given Server, aggregating
+// reasons across all servers (used by future Set controllers managing multiple Servers).
+func GatesSatisfiedForServers(servers []*metalv1alpha1.Server, gates []metalv1alpha1.ConditionRequirement) (bool, []string) {
+	if len(gates) == 0 {
+		return true, nil
+	}
+	satisfied := true
+	var reasons []string
+	for _, server := range servers {
+		if ok, serverReasons := GatesSatisfied(server.Status.Conditions, gates); !ok {
+			satisfied = false
+			for _, reason := range serverReasons {
+				reasons = append(reasons, fmt.Sprintf("server %s: %s", server.Name, reason))
+			}
+		}
+	}
+	return satisfied, reasons
+}
+
 // --- Server helpers ---
 
 // GetServerByName returns a Server by name.
@@ -206,6 +248,29 @@ func GetServerByName(ctx context.Context, c client.Client, serverName string) (*
 		return nil, err
 	}
 	return server, nil
+}
+
+// PatchServerCondition sets condition conditionType on server's status to status, with the given
+// reason/message, retrying on write conflicts against a freshly re-read Server. It is a no-op if
+// conditionType is empty (i.e. the caller's resource has no CompletionConditionType configured).
+func PatchServerCondition(ctx context.Context, c client.Client, server *metalv1alpha1.Server, conditionType string, status metav1.ConditionStatus, reason, message string) error {
+	if conditionType == "" {
+		return nil
+	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &metalv1alpha1.Server{}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(server), latest); err != nil {
+			return err
+		}
+		base := latest.DeepCopy()
+		meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
+			Type:    conditionType,
+			Status:  status,
+			Reason:  reason,
+			Message: message,
+		})
+		return c.Status().Patch(ctx, latest, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	})
 }
 
 // --- Annotation helpers ---

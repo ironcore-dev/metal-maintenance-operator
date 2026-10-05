@@ -11,6 +11,29 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// ReadinessGating defines the readiness-gate and completion-condition fields shared by the
+// BIOS/BMC settings, version, and firmware update templates. It is embedded (inline) in each
+// template so both the single-object resource (e.g. FirmwareUpdateSpec) and the corresponding
+// Set resource's template expose it identically, and Set controllers propagate it to owned
+// objects for free by copying the whole template.
+type ReadinessGating struct {
+	// ReadinessGates is a list of Server conditions that must be satisfied before the
+	// controller starts applying this resource. Semantics mirror Kubernetes
+	// Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+	// Server(s) with the required status.
+	// +optional
+	ReadinessGates []metalv1alpha1.ConditionRequirement `json:"readinessGates,omitempty"`
+
+	// CompletionConditionType, if set, is the condition Type patched (status True) onto the
+	// related Server(s) once this resource reaches its terminal success state. Downstream
+	// resources can reference this Type in their own ReadinessGates to build a manual
+	// sequence across resources.
+	// +optional
+	// +kubebuilder:validation:MaxLength=316
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`
+	CompletionConditionType string `json:"completionConditionType,omitempty"`
+}
+
 // SettingsTemplate defines the fields shared by BIOS and BMC settings templates.
 type SettingsTemplate struct {
 	// Version specifies the software version (e.g. BIOS, BMC) these settings apply to.
