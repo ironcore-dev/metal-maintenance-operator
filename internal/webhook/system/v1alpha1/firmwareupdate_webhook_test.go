@@ -64,6 +64,21 @@ var _ = Describe("FirmwareUpdate Webhook", func() {
 		Expect(validator.ValidateCreate(ctx, fwUpdateV2)).Error().To(HaveOccurred())
 	})
 
+	It("should deny creation of a same-named FirmwareUpdate in a different namespace targeting the same Server", func(ctx SpecContext) {
+		By("Creating a second namespace")
+		ns := &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "fw-other-ns-"},
+		}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		By("Creating a FirmwareUpdate with the same name as fwUpdateV1 in the other namespace, targeting the same Server")
+		fwUpdateOtherNS := newFirmwareUpdate("foo")
+		fwUpdateOtherNS.GenerateName = ""
+		fwUpdateOtherNS.Name = fwUpdateV1.Name
+		fwUpdateOtherNS.Namespace = ns.Name
+		Expect(validator.ValidateCreate(ctx, fwUpdateOtherNS)).Error().To(HaveOccurred())
+	})
+
 	It("should allow creating a FirmwareUpdate for a Server without one", func(ctx SpecContext) {
 		By("Creating a FirmwareUpdate targeting a new Server")
 		fwUpdateV2 := newFirmwareUpdate("bar")

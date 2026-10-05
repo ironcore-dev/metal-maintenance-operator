@@ -99,7 +99,7 @@ func checkForDuplicateFirmwareUpdateRefToServer(fwUpdateList *systemv1alpha1.Fir
 		return nil, nil
 	}
 	for _, other := range fwUpdateList.Items {
-		if fwUpdate.Name == other.Name {
+		if fwUpdate.Name == other.Name && fwUpdate.Namespace == other.Namespace {
 			continue
 		}
 		if other.Spec.ServerRef == nil {
