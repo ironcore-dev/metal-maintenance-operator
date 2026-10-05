@@ -669,6 +669,7 @@ Package v1alpha1 contains API Schema definitions for the system v1alpha1 API gro
 - [BIOSVersion](#biosversion)
 - [BIOSVersionSet](#biosversionset)
 - [FirmwareUpdate](#firmwareupdate)
+- [FirmwareUpdateSet](#firmwareupdateset)
 
 
 
@@ -1155,6 +1156,63 @@ FirmwareUpdate is the Schema for the firmwareupdates API.
 | `status` _[FirmwareUpdateStatus](#firmwareupdatestatus)_ |  |  |  |
 
 
+#### FirmwareUpdateSet
+
+
+
+FirmwareUpdateSet is the Schema for the firmwareupdatesets API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `FirmwareUpdateSet` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[FirmwareUpdateSetSpec](#firmwareupdatesetspec)_ |  |  |  |
+| `status` _[FirmwareUpdateSetStatus](#firmwareupdatesetstatus)_ |  |  |  |
+
+
+#### FirmwareUpdateSetSpec
+
+
+
+FirmwareUpdateSetSpec defines the desired state of FirmwareUpdateSet.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSet](#firmwareupdateset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
+| `firmwareUpdateTemplate` _[FirmwareUpdateTemplate](#firmwareupdatetemplate)_ | FirmwareUpdateTemplate defines the template for the FirmwareUpdate resource to be applied to the servers. |  |  |
+
+
+#### FirmwareUpdateSetStatus
+
+
+
+FirmwareUpdateSetStatus defines the observed state of FirmwareUpdateSet.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSet](#firmwareupdateset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `fullyLabeledServers` _integer_ | FullyLabeledServers is the number of servers in the set. |  |  |
+| `availableFirmwareUpdate` _integer_ | AvailableFirmwareUpdate is the number of FirmwareUpdate resources currently created by the set. |  |  |
+| `pendingFirmwareUpdate` _integer_ | PendingFirmwareUpdate is the total number of pending FirmwareUpdate resources in the set. |  |  |
+| `inProgressFirmwareUpdate` _integer_ | InProgressFirmwareUpdate is the total number of FirmwareUpdate resources in the set that are currently in progress. |  |  |
+| `completedFirmwareUpdate` _integer_ | CompletedFirmwareUpdate is the total number of completed FirmwareUpdate resources in the set. |  |  |
+| `failedFirmwareUpdate` _integer_ | FailedFirmwareUpdate is the total number of failed FirmwareUpdate resources in the set. |  |  |
+
+
 #### FirmwareUpdateSpec
 
 
@@ -1227,6 +1285,7 @@ FirmwareUpdateTemplate defines the desired firmware update parameters.
 
 
 _Appears in:_
+- [FirmwareUpdateSetSpec](#firmwareupdatesetspec)
 - [FirmwareUpdateSpec](#firmwareupdatespec)
 
 | Field | Description | Default | Validation |

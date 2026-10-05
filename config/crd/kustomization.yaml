@@ -15,6 +15,7 @@ resources:
 - bases/baseboard.metal.ironcore.dev_bmcversionsets.yaml
 - bases/baseboard.metal.ironcore.dev_bmcusers.yaml
 - bases/system.metal.ironcore.dev_firmwareupdates.yaml
+- bases/system.metal.ironcore.dev_firmwareupdatesets.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
