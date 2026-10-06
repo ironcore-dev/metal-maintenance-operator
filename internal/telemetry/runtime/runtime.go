@@ -202,6 +202,8 @@ func prewarmAlertGauge(ctx context.Context, c client.Client, handler *criticalev
 		cond := apimeta.FindStatusCondition(srv.Status.Conditions, criticalevent.CriticalEventConditionType)
 		if cond != nil && cond.Status == "True" {
 			handler.SetAlertGauge(srv.Name, srv.Namespace, 1)
+		} else if cond != nil {
+			handler.SetAlertGauge(srv.Name, srv.Namespace, 0)
 		}
 	}
 	return nil

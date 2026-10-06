@@ -142,6 +142,23 @@ func (h *ConditionHandler) SetAlertGauge(serverName, namespace string, value flo
 	}).Set(value)
 }
 
+// ClearCriticalAlert sets CriticalEventReceived to False on the Server and
+// sets the alert gauge to 0. Call this when the hardware fault is resolved.
+func (h *ConditionHandler) ClearCriticalAlert(ctx context.Context, server *metalv1alpha1.Server, reason, message string) error {
+	condition := metav1.Condition{
+		Type:               CriticalEventConditionType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: server.Generation,
+	}
+	if err := h.patchCondition(ctx, server, condition); err != nil {
+		return err
+	}
+	h.SetAlertGauge(server.Name, server.Namespace, 0)
+	return nil
+}
+
 // sanitizeEventID strips characters apiserver's Reason validation
 // rejects (regex `^([A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?)?$`).
 func sanitizeEventID(id string) string {
