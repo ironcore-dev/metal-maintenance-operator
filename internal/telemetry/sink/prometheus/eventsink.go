@@ -36,6 +36,10 @@ const (
 // counter mutation.
 type OnCriticalFunc func(ctx context.Context, bmcName string, event sink.Event) error
 
+// OnWarningFunc is invoked for every Warning-severity event after
+// counter mutation.
+type OnWarningFunc func(ctx context.Context, bmcName string, event sink.Event) error
+
 // maxSeenIDsPerBMC bounds dedup state per BMC. Once exceeded, oldest
 // entry evicts FIFO so EventIDs reused after a BMC reset/firmware-update
 // become eligible to be counted again — process-lifetime memory would
@@ -54,8 +58,8 @@ type alertLabelKey struct {
 // EventSink publishes Redfish events as the redfish_event_alert_total
 // counter, deduplicated by EventID per BMC so resent pushes for the
 // same active event don't double-count. Optionally fires OnCritical for
-// every Critical-severity event so the readiness bridge can attach
-// without a wrapper layer.
+// every Critical-severity event and OnWarning for every Warning-severity
+// event so downstream handlers can attach without a wrapper layer.
 //
 // Label set matches metal-operator's production schema:
 // {hostname, severity, message_id, component}. component is derived from
@@ -65,6 +69,7 @@ type EventSink struct {
 	log     logr.Logger
 
 	OnCritical OnCriticalFunc
+	OnWarning  OnWarningFunc
 
 	mu         sync.Mutex
 	seenForBMC map[string]*seenSet
@@ -137,7 +142,11 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 	seenIDs := s.ensureSeenSet(bmcName)
 	keys := s.ensureSeriesMap(bmcName)
 
-	var toDispatch []sink.Event
+	type dispatchEntry struct {
+		event      sink.Event
+		isCritical bool
+	}
+	var toDispatch []dispatchEntry
 	for _, ev := range events {
 		// EventID-less events can't be deduped reliably; skip rather
 		// than miscount.
@@ -156,9 +165,14 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 		if sev == "" || sev == "OK" || sev == "Info" {
 			continue
 		}
-		if s.OnCritical != nil && strings.EqualFold(ev.Severity, severityCritical) {
+		if s.OnCritical != nil && sev == severityCritical {
 			// Defer commit until OnCritical succeeds — see method doc.
-			toDispatch = append(toDispatch, ev)
+			toDispatch = append(toDispatch, dispatchEntry{event: ev, isCritical: true})
+			continue
+		}
+		if s.OnWarning != nil && sev == "Warning" {
+			// Defer commit until OnWarning succeeds.
+			toDispatch = append(toDispatch, dispatchEntry{event: ev, isCritical: false})
 			continue
 		}
 		seenIDs.add(ev.EventID)
@@ -167,14 +181,24 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 	s.mu.Unlock()
 
 	var failed []error
-	for _, ev := range toDispatch {
-		if err := s.OnCritical(ctx, bmcName, ev); err != nil {
-			s.log.Error(err, "Critical-event handler failed; event will be retried on the next BMC push",
-				"hostname", bmcName, "eventID", ev.EventID)
-			failed = append(failed, fmt.Errorf("critical event %q: %w", ev.EventID, err))
+	for _, entry := range toDispatch {
+		var err error
+		if entry.isCritical {
+			err = s.OnCritical(ctx, bmcName, entry.event)
+		} else {
+			err = s.OnWarning(ctx, bmcName, entry.event)
+		}
+		if err != nil {
+			severity := "warning"
+			if entry.isCritical {
+				severity = "critical"
+			}
+			s.log.Error(err, "Event handler failed; event will be retried on the next BMC push",
+				"hostname", bmcName, "eventID", entry.event.EventID, "severity", severity)
+			failed = append(failed, fmt.Errorf("%s event %q: %w", severity, entry.event.EventID, err))
 			continue
 		}
-		s.commitCritical(bmcName, ev)
+		s.commitCritical(bmcName, entry.event)
 	}
 	if len(failed) > 0 {
 		return errors.Join(failed...)
