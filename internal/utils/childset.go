@@ -138,18 +138,16 @@ func (m *ChildManager[C]) DeleteOrphans(
 			continue
 		}
 
-		if adapter.IsInProgress(child) {
-			refs := adapter.MaintenanceRefs(child)
-			if len(refs) > 0 {
-				active, err := IsAnyServerMaintenanceActive(ctx, m.Client, refs)
-				if err != nil {
-					errs = append(errs, fmt.Errorf("failed to check maintenance state for %s: %w", child.GetName(), err))
-					continue
-				}
-				if active {
-					log.V(1).Info("Waiting for maintenance to complete before deletion", "Child", child.GetName())
-					continue
-				}
+		refs := adapter.MaintenanceRefs(child)
+		if len(refs) > 0 {
+			active, err := IsAnyServerMaintenanceActive(ctx, m.Client, refs)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to check maintenance state for %s: %w", child.GetName(), err))
+				continue
+			}
+			if active {
+				log.V(1).Info("Waiting for maintenance to complete before deletion", "Child", child.GetName())
+				continue
 			}
 		}
 		if err := m.Client.Delete(ctx, child); err != nil {

@@ -3291,6 +3291,239 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
+  name: firmwareupdatesets.system.metal.ironcore.dev
+spec:
+  group: system.metal.ironcore.dev
+  names:
+    kind: FirmwareUpdateSet
+    listKind: FirmwareUpdateSetList
+    plural: firmwareupdatesets
+    shortNames:
+    - fwus
+    singular: firmwareupdateset
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.fullyLabeledServers
+      name: TotalServers
+      type: string
+    - jsonPath: .status.availableFirmwareUpdate
+      name: AvailableFirmwareUpdate
+      type: string
+    - jsonPath: .status.pendingFirmwareUpdate
+      name: Pending
+      type: string
+    - jsonPath: .status.inProgressFirmwareUpdate
+      name: InProgress
+      type: string
+    - jsonPath: .status.completedFirmwareUpdate
+      name: Completed
+      type: string
+    - jsonPath: .status.failedFirmwareUpdate
+      name: Failed
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: FirmwareUpdateSet is the Schema for the firmwareupdatesets API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: FirmwareUpdateSetSpec defines the desired state of FirmwareUpdateSet.
+            properties:
+              firmwareUpdateTemplate:
+                description: FirmwareUpdateTemplate defines the template for the FirmwareUpdate
+                  resource to be applied to the servers.
+                properties:
+                  dellRepository:
+                    description: DellRepository describes the network share hosting
+                      the Dell update repository/catalog.
+                    properties:
+                      address:
+                        description: Address is the share's hostname or IP address
+                          (e.g. downloads.dell.com).
+                        type: string
+                      applyVersionPolicy:
+                        description: |-
+                          ApplyVersionPolicy controls whether packages already at the same version and/or older
+                          than the currently installed version are applied. If unset, only genuine upgrades are applied.
+                        enum:
+                        - AllowSameVersion
+                        - AllowDowngradeVersion
+                        - AllowSameAndDowngradeVersion
+                        type: string
+                      catalogFile:
+                        description: CatalogFile is the catalog file name within the
+                          share. Defaults to "Catalog.xml".
+                        type: string
+                      credentialsRef:
+                        description: |-
+                          CredentialsRef references the credentials used to authenticate against the share, if required.
+                          Must not be set when ShareType is HTTP.
+                        properties:
+                          name:
+                            description: name is unique within a namespace to reference
+                              a secret resource.
+                            type: string
+                          namespace:
+                            description: namespace defines the space within which
+                              the secret name must be unique.
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      rebootNeeded:
+                        description: RebootNeeded, if true, allows the BMC to reboot
+                          the server to apply updates.
+                        type: boolean
+                      shareName:
+                        description: ShareName is the network share name. Not required
+                          for HTTP/HTTPS catalogs.
+                        type: string
+                      shareType:
+                        description: ShareType is the type of network share hosting
+                          the repository.
+                        enum:
+                        - NFS
+                        - CIFS
+                        - HTTP
+                        - HTTPS
+                        type: string
+                    required:
+                    - shareType
+                    type: object
+                  retryPolicy:
+                    description: RetryPolicy defines the retry behavior for automatic
+                      retries on transient failures.
+                    properties:
+                      maxAttempts:
+                        description: |-
+                          MaxAttempts is the maximum number of automatic retry attempts after failure.
+                          0 means no automatic retries. Must be between 0 and 10 inclusive.
+                          If not set, the operator-level default is used.
+                        format: int32
+                        maximum: 10
+                        minimum: 0
+                        type: integer
+                    type: object
+                  serverMaintenancePolicy:
+                    description: ServerMaintenancePolicy is a maintenance policy to
+                      be enforced on the server.
+                    type: string
+                type: object
+              serverSelector:
+                description: ServerSelector specifies a label selector to identify
+                  the servers that are to be selected.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - firmwareUpdateTemplate
+            - serverSelector
+            type: object
+          status:
+            description: FirmwareUpdateSetStatus defines the observed state of FirmwareUpdateSet.
+            properties:
+              availableFirmwareUpdate:
+                description: AvailableFirmwareUpdate is the number of FirmwareUpdate
+                  resources currently created by the set.
+                format: int32
+                type: integer
+              completedFirmwareUpdate:
+                description: CompletedFirmwareUpdate is the total number of completed
+                  FirmwareUpdate resources in the set.
+                format: int32
+                type: integer
+              failedFirmwareUpdate:
+                description: FailedFirmwareUpdate is the total number of failed FirmwareUpdate
+                  resources in the set.
+                format: int32
+                type: integer
+              fullyLabeledServers:
+                description: FullyLabeledServers is the number of servers in the set.
+                format: int32
+                type: integer
+              inProgressFirmwareUpdate:
+                description: InProgressFirmwareUpdate is the total number of FirmwareUpdate
+                  resources in the set that are currently in progress.
+                format: int32
+                type: integer
+              pendingFirmwareUpdate:
+                description: PendingFirmwareUpdate is the total number of pending
+                  FirmwareUpdate resources in the set.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: servermaintenances.maintenance.metal.ironcore.dev
 spec:
   group: maintenance.metal.ironcore.dev

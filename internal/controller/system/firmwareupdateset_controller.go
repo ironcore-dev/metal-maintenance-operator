@@ -316,8 +316,8 @@ func (r *FirmwareUpdateSetReconciler) enqueueByServer(ctx context.Context, obj c
 	for _, set := range setList.Items {
 		selector, err := metav1.LabelSelectorAsSelector(&set.Spec.ServerSelector)
 		if err != nil {
-			log.Error(err, "Failed to convert label selector")
-			return nil
+			log.Error(err, "Failed to convert label selector", "FirmwareUpdateSet", client.ObjectKeyFromObject(&set))
+			continue
 		}
 		// If the Server label matches the selector, enqueue the request
 		if selector.Matches(labels.Set(server.GetLabels())) {
@@ -327,8 +327,8 @@ func (r *FirmwareUpdateSetReconciler) enqueueByServer(ctx context.Context, obj c
 		// if the label has been removed, still enqueue if we currently own a FirmwareUpdate for this server
 		owned, err := r.getOwnedFirmwareUpdates(ctx, &set)
 		if err != nil {
-			log.Error(err, "Failed to get owned FirmwareUpdates")
-			return nil
+			log.Error(err, "Failed to get owned FirmwareUpdates", "FirmwareUpdateSet", client.ObjectKeyFromObject(&set))
+			continue
 		}
 		for _, fwUpdate := range owned {
 			if fwUpdate.Spec.ServerRef != nil && fwUpdate.Spec.ServerRef.Name == server.Name {
