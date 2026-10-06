@@ -989,12 +989,12 @@ var _ = Describe("BIOSSettings Controller", func() {
 			biosSettings.Spec.SettingsFlow[0].Settings = map[string]string{"EmbeddedSata": "NonRaid"}
 		})).Should(Succeed())
 
-		By("Ensuring the completion condition is reset to False on the Server once drift is detected")
+		By("Ensuring the completion condition is reset away from True on the Server once drift is detected")
 		Eventually(Object(server)).Should(
 			HaveField("Status.Conditions", ContainElement(
 				SatisfyAll(
 					HaveField("Type", "BIOSSettingsApplied"),
-					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Status", Not(Equal(metav1.ConditionTrue))),
 				),
 			)),
 		)

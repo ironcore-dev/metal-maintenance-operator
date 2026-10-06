@@ -455,12 +455,12 @@ var _ = Describe("BIOSVersion Controller", func() {
 			biosVersion.Spec.Image = api.ImageSpec{URI: upgradeServerBiosVersion}
 		})).Should(Succeed())
 
-		By("Ensuring the completion condition is reset to False on the Server once drift is detected")
+		By("Ensuring the completion condition is reset away from True on the Server once drift is detected")
 		Eventually(Object(server)).Should(
 			HaveField("Status.Conditions", ContainElement(
 				SatisfyAll(
 					HaveField("Type", "BIOSVersionUpgraded"),
-					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Status", Not(Equal(metav1.ConditionTrue))),
 				),
 			)),
 		)

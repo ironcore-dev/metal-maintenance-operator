@@ -20,19 +20,24 @@
 - `status.state` reflects the overall lifecycle: `Pending`, `InProgress`, `Applied`, or `Failed`.
 - `spec.retryPolicy.maxAttempts` bounds automatic retries after a transient failure; if unset, the
   operator-level default (`--default-failed-auto-retry-count`) is used.
+- `spec.readinessGates`/`spec.completionConditionType` (optional) let this object participate in a manual
+  cross-resource sequencing chain — see [Readiness Gates](readiness-gates.md).
 
 ## Workflow
 
 1. The controller resolves the referenced `BMC` and waits until its firmware version matches `spec.version`.
-2. It fetches every `Server` managed by the BMC and requests `ServerMaintenance` for each one that is not already
+2. If `spec.readinessGates` is set, it waits until those conditions are satisfied on every `Server` managed by the
+   BMC before proceeding (see [Readiness Gates](readiness-gates.md)).
+3. It fetches every `Server` managed by the BMC and requests `ServerMaintenance` for each one that is not already
    in maintenance, according to `spec.serverMaintenancePolicy`.
-3. Once all required servers are in maintenance, the controller resolves `spec.variables` and diffs the desired
+4. Once all required servers are in maintenance, the controller resolves `spec.variables` and diffs the desired
    `spec.settings` against the BMC's current manager settings.
-4. Any drifted settings are issued to the BMC. If the BMC requires a reset to apply them, the controller powers the
+5. Any drifted settings are issued to the BMC. If the BMC requires a reset to apply them, the controller powers the
    BMC off/on as needed and waits for it to come back.
-5. The controller verifies the settings converged and marks `status.state` as `Applied`; on unrecoverable failure,
-   `Failed` (subject to `spec.retryPolicy`).
-6. On deletion, the controller cleans up the `ServerMaintenance` objects it created and removes its finalizer once
+6. The controller verifies the settings converged and marks `status.state` as `Applied` (patching
+   `spec.completionConditionType` `True` on every related `Server`, if set); on unrecoverable failure, `Failed`
+   (subject to `spec.retryPolicy`).
+7. On deletion, the controller cleans up the `ServerMaintenance` objects it created and removes its finalizer once
    no maintenance for this object is still in progress.
 
 ## Example

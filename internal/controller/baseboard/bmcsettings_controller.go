@@ -13,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -58,16 +59,17 @@ const (
 	ConditionBMCSettingsValidationFailed = "SettingsValidationFailed"
 	ConditionReadinessGatesSatisfied     = "ReadinessGatesSatisfied"
 
-	ReasonBMCPoweredOff                         = "PoweredOff"
-	ReasonBMCVersionMatching                    = "VersionMatching"
-	ReasonBMCSettingsChangesIssued              = "ChangesIssued"
-	ReasonBMCSettingsChangesVerified            = "ChangesVerified"
-	ReasonBMCSettingsVerificationPending        = "SettingsVerificationPending"
-	ReasonBMCSettingsValidationFailed           = "SettingsValidationFailed"
-	ReasonReadinessGatesNotSatisfied            = "ReadinessGatesNotSatisfied"
-	ReasonReadinessGatesSatisfied               = "ReadinessGatesSatisfied"
-	ReasonBMCSettingsCompletionConditionApplied = "BMCSettingsApplied"
-	ReasonBMCSettingsCompletionConditionReset   = "BMCSettingsDriftDetected"
+	ReasonBMCPoweredOff                             = "PoweredOff"
+	ReasonBMCVersionMatching                        = "VersionMatching"
+	ReasonBMCSettingsChangesIssued                  = "ChangesIssued"
+	ReasonBMCSettingsChangesVerified                = "ChangesVerified"
+	ReasonBMCSettingsVerificationPending            = "SettingsVerificationPending"
+	ReasonBMCSettingsValidationFailed               = "SettingsValidationFailed"
+	ReasonReadinessGatesNotSatisfied                = "ReadinessGatesNotSatisfied"
+	ReasonReadinessGatesSatisfied                   = "ReadinessGatesSatisfied"
+	ReasonBMCSettingsCompletionConditionApplied     = "BMCSettingsApplied"
+	ReasonBMCSettingsCompletionConditionInitialized = "BMCSettingsNotYetApplied"
+	ReasonBMCSettingsCompletionConditionInProgress  = "BMCSettingsApplyInProgress"
 )
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcsettings,verbs=get;list;watch;create;update;patch;delete
@@ -253,6 +255,9 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 			}
 			return ctrl.Result{}, nil
 		}
+		if err := r.ensureCompletionConditionInitialized(ctx, bmcObj, bmcClient, settings); err != nil {
+			return ctrl.Result{}, err
+		}
 		var state = baseboardv1alpha1.BMCSettingsStateInProgress
 		if satisfied, reasons := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
@@ -268,16 +273,10 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 			); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
 			}
-			if err := r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStatePending, condition); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+			return ctrl.Result{}, r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStatePending, condition)
 		}
 
-		// Gates are satisfied: ensure the condition reflects that (it may be stale False from a
-		// previous reconcile), independent of which path below this object takes next. Skip
-		// entirely when no gates are configured, so resources without ReadinessGates never gain
-		// this condition.
+		// Gates are satisfied: ensure the condition reflects that (it may be stale False from a previous reconcile)
 		if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, settings.Status.State); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -313,37 +312,7 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 	case baseboardv1alpha1.BMCSettingsStateInProgress:
 		return r.handleSettingInProgressState(ctx, settings, bmcObj, bmcClient)
 	case baseboardv1alpha1.BMCSettingsStateApplied:
-		// Re-check readiness gates on every resync while Applied: a sibling object sharing the
-		// same BMCRef may depend on THIS object's completion condition to unblock, and conversely
-		// this object's gates may reference a sibling that is still mid-rollout. If gates are no
-		// longer satisfied, stay Applied without touching the BMC/hardware or releasing the
-		// ServerMaintenance claim, so we never redrive/fight an active sibling.
-		if satisfied, reasons := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); !satisfied {
-			log.V(1).Info("Readiness gates no longer satisfied, staying Applied", "Reasons", reasons)
-			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
-			}
-			if err := r.Conditions.Update(
-				condition,
-				conditionutils.UpdateStatus(corev1.ConditionFalse),
-				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
-				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
-			); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to update readiness gates condition: %w", err)
-			}
-			if err := r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied, condition); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-		}
-		if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := r.handleSettingAppliedState(ctx, settings, bmcObj, bmcClient); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.handleSettingAppliedState(ctx, settings, bmcObj, bmcClient)
 	case baseboardv1alpha1.BMCSettingsStateFailed:
 		return ctrl.Result{}, r.handleFailedState(ctx, settings, bmcObj)
 	}
@@ -359,11 +328,56 @@ func (r *BMCSettingsReconciler) checkBMCSettingsReadinessGates(ctx context.Conte
 	return utils.GatesSatisfiedForServers(servers, settings.Spec.ReadinessGates)
 }
 
+// ensureCompletionConditionInitialized makes sure Spec.CompletionConditionType, if set, is
+// present on every Server with an explicit status (False)
+func (r *BMCSettingsReconciler) ensureCompletionConditionInitialized(ctx context.Context, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings) error {
+	if settings.Spec.CompletionConditionType == "" {
+		return nil
+	}
+	servers, err := r.getServers(ctx, bmcObj, bmcClient)
+	if err != nil {
+		return fmt.Errorf("failed to get servers for completion condition initialization: %w", err)
+	}
+	for _, server := range servers {
+		if apimeta.FindStatusCondition(server.Status.Conditions, settings.Spec.CompletionConditionType) != nil {
+			continue
+		}
+		if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBMCSettingsCompletionConditionInitialized, fmt.Sprintf("BMCSettings %s has not yet applied", settings.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureCompletionConditionInProgress patches Spec.CompletionConditionType, if set, to
+// Status=Unknown with ReasonBMCSettingsCompletionConditionInProgress on every Server, once
+// maintenance has been granted and the real apply work is about to start. so any chained object gating on this condition
+// (e.g. requiredStatus: False) sees its gate go unsatisfied now and freezes itself before a conflicting write can happen,
+func (r *BMCSettingsReconciler) ensureCompletionConditionInProgress(ctx context.Context, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings) error {
+	if settings.Spec.CompletionConditionType == "" {
+		return nil
+	}
+	servers, err := r.getServers(ctx, bmcObj, bmcClient)
+	if err != nil {
+		return fmt.Errorf("failed to get servers for completion condition in-progress patch: %w", err)
+	}
+	for _, server := range servers {
+		existing := apimeta.FindStatusCondition(server.Status.Conditions, settings.Spec.CompletionConditionType)
+		if existing != nil && existing.Reason == ReasonBMCSettingsCompletionConditionInProgress {
+			continue
+		}
+		if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionUnknown, ReasonBMCSettingsCompletionConditionInProgress, fmt.Sprintf("BMCSettings %s apply in progress", settings.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // markBMCSettingsReadinessGatesSatisfied patches ConditionReadinessGatesSatisfied to True if it
-// isn't already, so a previously-recorded failure does not remain stale once gates pass. It is a
-// no-op when no ReadinessGates are configured, so ungated resources never gain this condition.
+// isn't already, so a previously-recorded failure does not remain stale once gates pass.
 func (r *BMCSettingsReconciler) markBMCSettingsReadinessGatesSatisfied(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, state baseboardv1alpha1.BMCSettingsState) error {
-	if len(settings.Spec.ReadinessGates) == 0 {
+	hasExisting := apimeta.FindStatusCondition(settings.Status.Conditions, ConditionReadinessGatesSatisfied) != nil
+	if len(settings.Spec.ReadinessGates) == 0 && !hasExisting {
 		return nil
 	}
 	condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
@@ -439,6 +453,11 @@ func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context
 			return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings ServerMaintenance waiting conditions: %w", err)
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Now that maintenance is granted, publish an early "in progress" signal on the
+	if err := r.ensureCompletionConditionInProgress(ctx, bmcObj, bmcClient, settings); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Reset the BMC to ensure it's in a stable state before proceeding
@@ -641,6 +660,27 @@ func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context,
 func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 
+	// Re-check readiness gates, actual state on every resync while Applied:
+	if satisfied, reasons := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); !satisfied {
+		log.V(1).Info("Readiness gates no longer satisfied, staying Applied", "Reasons", reasons)
+		condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+		if err != nil {
+			return fmt.Errorf("failed to get readiness gates condition: %w", err)
+		}
+		if err := r.Conditions.Update(
+			condition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+			conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+		); err != nil {
+			return fmt.Errorf("failed to update readiness gates condition: %w", err)
+		}
+		return r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied, condition)
+	}
+	if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied); err != nil {
+		return err
+	}
+
 	settingsDiff, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient)
 	if err != nil {
 		return fmt.Errorf("failed to fetch and check BMCSettings: %w", err)
@@ -655,7 +695,7 @@ func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, s
 				return fmt.Errorf("failed to get servers for completion condition reset: %w", err)
 			}
 			for _, server := range servers {
-				if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBMCSettingsCompletionConditionReset, fmt.Sprintf("BMCSettings %s no longer applied, drift detected", settings.Name)); err != nil {
+				if err := utils.PatchServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType, metav1.ConditionFalse, utils.CompletionConditionReset, fmt.Sprintf("BMCSettings %s no longer applied, drift detected", settings.Name)); err != nil {
 					return err
 				}
 			}

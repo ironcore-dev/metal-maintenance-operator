@@ -689,11 +689,13 @@ func VersionSetChildName(setName, targetName string) string {
 
 // --- Readiness gate helpers ---
 
+// CompletionConditionReset is the Reason patched onto a Server's CompletionConditionType
+// condition (Status=False) by any baseboard/system controller when a previously-Completed object
+// detects its live hardware no longer matches its spec ("drift").
+const CompletionConditionReset = "DriftDetected"
+
 // GatesSatisfied reports whether every gate in gates is satisfied by conditions. A gate is
-// satisfied when a condition of the given Type is present and its Status matches
-// RequiredStatus (ConditionTrue is assumed when RequiredStatus is empty). It returns true
-// together with a nil reasons slice when all gates are satisfied, or false together with a
-// human-readable reason per unsatisfied gate otherwise.
+// satisfied when a condition of the given Type is present
 func GatesSatisfied(conditions []metav1.Condition, gates []metalv1alpha1.ConditionRequirement) (bool, []string) {
 	if len(gates) == 0 {
 		return true, nil
@@ -710,6 +712,8 @@ func GatesSatisfied(conditions []metav1.Condition, gates []metalv1alpha1.Conditi
 		switch {
 		case condition == nil:
 			reasons = append(reasons, fmt.Sprintf("condition %q not present", gate.Type))
+		case condition.Reason == CompletionConditionReset:
+			reasons = append(reasons, fmt.Sprintf("condition %q is a transient drift-reset, not yet settled", gate.Type))
 		case condition.Status != requiredStatus:
 			reasons = append(reasons, fmt.Sprintf("condition %q is %q, want %q", gate.Type, condition.Status, requiredStatus))
 		}
