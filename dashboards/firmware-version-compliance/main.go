@@ -224,6 +224,7 @@ func main() {
 		dashboard.AddVariable("region",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("region",
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(
 						"metal_maintenance_biosversion_info",
 						"metal_maintenance_bmcversion_info",
@@ -241,6 +242,7 @@ func main() {
 					bb, _, _ := topologyMetricLabels(cfg)
 					return bb
 				}(),
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(
 						`kube_ironcore_info{customresource_kind="BMC"}`,
 						`kube_ironcore_info{customresource_kind="Server"}`,
@@ -252,23 +254,10 @@ func main() {
 				listvariable.DisplayName(cfg.Topology.BB.DisplayName),
 			),
 		),
-		dashboard.AddVariable("state",
-			listvariable.List(
-				labelvalues.PrometheusLabelValues("state",
-					labelvalues.Matchers(
-						`metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer"}`,
-						`metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer"}`,
-					),
-				),
-				listvariable.AllowAllValue(true),
-				listvariable.AllowMultiple(true),
-				listvariable.DefaultValue("$__all"),
-				listvariable.DisplayName("State"),
-			),
-		),
 		dashboard.AddVariable("manufacturer",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("manufacturer",
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(
 						`metal_maintenance_biosversion_info{region=~"$region"}`,
 						`metal_maintenance_bmcversion_info{region=~"$region"}`,
@@ -283,6 +272,7 @@ func main() {
 		dashboard.AddVariable("bios_model",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer"}`),
 				),
 				listvariable.AllowAllValue(true),
@@ -294,6 +284,7 @@ func main() {
 		dashboard.AddVariable("bmc_model",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer"}`),
 				),
 				listvariable.AllowAllValue(true),
@@ -348,7 +339,7 @@ func main() {
 				),
 				panel.AddQuery(
 					mmo.PromQL(
-						withComplianceLabel(topologyJoin(cfg, `metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model",state=~"$state"}`, "Server", "server")),
+						withComplianceLabel(topologyJoin(cfg, `metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server")),
 						"$datasource",
 					),
 				),
@@ -400,7 +391,7 @@ func main() {
 				),
 				panel.AddQuery(
 					mmo.PromQL(
-						withComplianceLabel(topologyJoin(cfg, `metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model",state=~"$state"}`, "BMC", "bmc")),
+						withComplianceLabel(topologyJoin(cfg, `metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc")),
 						"$datasource",
 					),
 				),

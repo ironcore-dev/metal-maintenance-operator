@@ -6,35 +6,17 @@ package common
 
 import (
 	"github.com/perses/perses/go-sdk/query"
-	"github.com/perses/spec/go/plugin"
+	promquery "github.com/perses/plugins/prometheus/sdk/go/query"
 )
 
-// promQuerySpec mirrors the Prometheus time-series query plugin spec, but uses
-// interface{} for Datasource so that a bare variable reference like "$datasource"
-// serialises as a JSON string rather than an object.  The SDK's typed
-// datasource.Selector always produces {"kind":"...","name":"..."} which Perses
-// treats as a literal lookup rather than a variable substitution.
-type promQuerySpec struct {
-	Datasource       interface{} `json:"datasource,omitempty"`
-	Query            string      `json:"query"`
-	SeriesNameFormat string      `json:"seriesNameFormat,omitempty"`
-}
-
-// PromQL builds a Prometheus time-series query option.  datasource should be a
+// PromQL builds a Prometheus time-series query option. datasource should be a
 // variable reference like "$datasource"; seriesNameFormat is optional.
 func PromQL(expr, datasource string, seriesNameFormat ...string) query.Option {
-	spec := promQuerySpec{
-		Datasource: datasource,
-		Query:      expr,
+	opts := []promquery.Option{
+		promquery.Datasource(datasource),
 	}
 	if len(seriesNameFormat) > 0 {
-		spec.SeriesNameFormat = seriesNameFormat[0]
+		opts = append(opts, promquery.SeriesNameFormat(seriesNameFormat[0]))
 	}
-	return query.Option{
-		Kind: plugin.KindTimeSeriesQuery,
-		Plugin: plugin.Plugin{
-			Kind: "PrometheusTimeSeriesQuery",
-			Spec: spec,
-		},
-	}
+	return promquery.PromQL(expr, opts...)
 }

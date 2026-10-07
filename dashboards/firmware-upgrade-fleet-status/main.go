@@ -45,6 +45,7 @@ func main() {
 		dashboard.AddVariable("manufacturer",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("manufacturer",
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(
 						biosVersionMetric,
 						bmcVersionMetric,
@@ -58,6 +59,7 @@ func main() {
 		dashboard.AddVariable("model",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
+					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(
 						biosVersionMetric+`{manufacturer=~"$manufacturer"}`,
 						bmcVersionMetric+`{manufacturer=~"$manufacturer"}`,
