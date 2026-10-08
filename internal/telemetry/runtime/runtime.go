@@ -103,7 +103,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		handler := &criticalevent.ConditionHandler{
 			Client:        mgr.GetClient(),
 			Log:           ctrl.Log.WithName("telemetry").WithName("readiness"),
-			EventRecorder: mgr.GetEventRecorderFor("metal-maintenance-operator"),
+			EventRecorder: mgr.GetEventRecorder("metal-maintenance-operator"),
 			AlertGauge:    alertGauge,
 		}
 		// Attach the readiness bridge directly to the Prometheus sink so
@@ -128,7 +128,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		handler := &warningevent.Handler{
 			Client:        mgr.GetClient(),
 			Log:           ctrl.Log.WithName("telemetry").WithName("warning"),
-			EventRecorder: mgr.GetEventRecorderFor("metal-maintenance-operator"),
+			EventRecorder: mgr.GetEventRecorder("metal-maintenance-operator"),
 		}
 		eventSink.OnWarning = handler.HandleWarning
 	}

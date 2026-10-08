@@ -14,8 +14,8 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/recorder"
 )
 
 const (
@@ -30,7 +30,7 @@ type Handler struct {
 	// BMCRefField indexer.
 	Client        client.Client
 	Log           logr.Logger
-	EventRecorder record.EventRecorder
+	EventRecorder recorder.EventRecorder
 }
 
 // HandleWarning lists Servers indexed by bmcName and emits a Kubernetes Event
@@ -57,7 +57,7 @@ func (h *Handler) HandleWarning(ctx context.Context, bmcName string, event sink.
 
 	for i := range serverList.Items {
 		server := &serverList.Items[i]
-		h.EventRecorder.Eventf(server, corev1.EventTypeWarning, "HardwareAlert",
+		h.EventRecorder.Eventf(server, nil, corev1.EventTypeWarning, "HardwareAlert", "HardwareAlertReceived",
 			"Warning Redfish event [%s]: %s (component: %s, at: %s)",
 			event.MessageID, event.Message, event.OriginOfCondition, event.EventTimestamp)
 		h.Log.V(1).Info("Warning event emitted",

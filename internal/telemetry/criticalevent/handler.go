@@ -16,8 +16,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/recorder"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -53,7 +53,7 @@ type ConditionHandler struct {
 	Log    logr.Logger
 	// EventRecorder is optional. When set, a Kubernetes Event is emitted
 	// for each Server after the CriticalEventReceived condition is patched.
-	EventRecorder record.EventRecorder
+	EventRecorder recorder.EventRecorder
 	// AlertGauge is optional. When set, it is set to 1 for each Server
 	// after the CriticalEventReceived condition is patched.
 	AlertGauge *prometheus.GaugeVec
@@ -104,7 +104,7 @@ func (h *ConditionHandler) HandleCritical(ctx context.Context, bmcName string, e
 			}).Set(1)
 		}
 		if h.EventRecorder != nil {
-			h.EventRecorder.Eventf(server, corev1.EventTypeWarning, "HardwareAlert",
+			h.EventRecorder.Eventf(server, nil, corev1.EventTypeWarning, "HardwareAlert", "HardwareAlertReceived",
 				"Critical Redfish event [%s]: %s (component: %s, at: %s)",
 				event.MessageID, event.Message, event.OriginOfCondition, event.EventTimestamp)
 		}
