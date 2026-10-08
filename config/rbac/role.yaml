@@ -29,7 +29,9 @@ rules:
   resources:
   - bmcsettings
   - bmcsettingssets
+  - bmcuserrotations
   - bmcusers
+  - bmcusersets
   - bmcversions
   - bmcversionsets
   verbs:
@@ -46,6 +48,7 @@ rules:
   - bmcsettings/finalizers
   - bmcsettingssets/finalizers
   - bmcusers/finalizers
+  - bmcusersets/finalizers
   - bmcversions/finalizers
   - bmcversionsets/finalizers
   verbs:
@@ -55,7 +58,9 @@ rules:
   resources:
   - bmcsettings/status
   - bmcsettingssets/status
+  - bmcuserrotations/status
   - bmcusers/status
+  - bmcusersets/status
   - bmcversions/status
   - bmcversionsets/status
   verbs:

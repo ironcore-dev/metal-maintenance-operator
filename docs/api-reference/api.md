@@ -16,6 +16,8 @@ Package v1alpha1 contains API Schema definitions for the baseboard v1alpha1 API 
 - [BMCSettings](#bmcsettings)
 - [BMCSettingsSet](#bmcsettingsset)
 - [BMCUser](#bmcuser)
+- [BMCUserRotation](#bmcuserrotation)
+- [BMCUserSet](#bmcuserset)
 - [BMCVersion](#bmcversion)
 - [BMCVersionSet](#bmcversionset)
 
@@ -217,6 +219,161 @@ BMCUser is the Schema for the bmcusers API.
 | `status` _[BMCUserStatus](#bmcuserstatus)_ |  |  |  |
 
 
+#### BMCUserRotation
+
+
+
+BMCUserRotation is the Schema for the bmcuserrotations API.
+Each object represents one rotation event for a BMCUser. Spec is immutable after creation.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `BMCUserRotation` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[BMCUserRotationSpec](#bmcuserrotationspec)_ |  |  |  |
+| `status` _[BMCUserRotationStatus](#bmcuserrotationstatus)_ |  |  |  |
+
+
+#### BMCUserRotationPhase
+
+_Underlying type:_ _string_
+
+BMCUserRotationPhase describes the current phase of a BMCUserRotation.
+
+_Validation:_
+- Enum: [Pending InProgress Succeeded Failed]
+
+_Appears in:_
+- [BMCUserRotationStatus](#bmcuserrotationstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` |  |
+| `InProgress` |  |
+| `Succeeded` |  |
+| `Failed` |  |
+
+
+#### BMCUserRotationSpec
+
+
+
+BMCUserRotationSpec defines the desired state of BMCUserRotation.
+Spec is immutable after creation.
+
+
+
+_Appears in:_
+- [BMCUserRotation](#bmcuserrotation)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `bmcUserRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCUserRef references the BMCUser this rotation was triggered for. |  |  |
+| `type` _[RotationStrategy](#rotationstrategy)_ | Type is the rotation strategy used for this rotation event. |  | Enum: [DualAccount SingleAccount] <br /> |
+| `triggeredAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | TriggeredAt is the timestamp when the rotation was initiated. |  |  |
+| `triggerReason` _[BMCUserRotationTrigger](#bmcuserrotationtrigger)_ | TriggerReason describes what caused this rotation. |  | Enum: [RotationPeriod Annotation PasswordExpiry] <br /> |
+
+
+#### BMCUserRotationStatus
+
+
+
+BMCUserRotationStatus defines the observed state of BMCUserRotation.
+
+
+
+_Appears in:_
+- [BMCUserRotation](#bmcuserrotation)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `phase` _[BMCUserRotationPhase](#bmcuserrotationphase)_ | Phase is the current lifecycle phase of this rotation. | Pending | Enum: [Pending InProgress Succeeded Failed] <br /> |
+| `completedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | CompletedAt is the timestamp when the rotation finished (succeeded or failed). |  |  |
+| `newSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | NewSecretRef references the BMCSecret created by this rotation.<br />Set on success. |  |  |
+| `message` _string_ | Message provides a human-readable description of the current state,<br />especially useful when Phase is Failed. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the progress of this rotation. |  |  |
+
+
+#### BMCUserRotationTrigger
+
+_Underlying type:_ _string_
+
+BMCUserRotationTrigger describes what caused a rotation to be initiated.
+
+
+
+_Appears in:_
+- [BMCUserRotationSpec](#bmcuserrotationspec)
+
+| Field | Description |
+| --- | --- |
+| `RotationPeriod` |  |
+| `Annotation` |  |
+| `PasswordExpiry` |  |
+
+
+#### BMCUserSet
+
+
+
+BMCUserSet is the Schema for the bmcusersets API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `BMCUserSet` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[BMCUserSetSpec](#bmcusersetspec)_ |  |  |  |
+| `status` _[BMCUserSetStatus](#bmcusersetstatus)_ |  |  |  |
+
+
+#### BMCUserSetSpec
+
+
+
+BMCUserSetSpec defines the desired state of BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSet](#bmcuserset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `bmcSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | BMCSelector selects which BMC objects this set manages. |  |  |
+| `setupCredentialRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | SetupCredentialRef references a corev1.Secret (keys: username, password) in the<br />operator namespace used for first contact with a new BMC before operator accounts exist.<br />This credential is used only during the bootstrap phase; once operator accounts<br />are proven it is never used again for that BMC. |  |  |
+| `rotationStrategy` _[RotationStrategy](#rotationstrategy)_ | RotationStrategy determines how many BMCUser objects are created per BMC.<br />DualAccount (default) creates two users per BMC; SingleAccount creates one. | DualAccount | Enum: [DualAccount SingleAccount] <br /> |
+| `template` _[BMCUserTemplate](#bmcusertemplate)_ | Template defines the common fields for BMCUser objects created by this set. |  |  |
+
+
+#### BMCUserSetStatus
+
+
+
+BMCUserSetStatus defines the observed state of BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSet](#bmcuserset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `totalBMCs` _integer_ | TotalBMCs is the number of BMCs matched by the selector. |  |  |
+| `bootstrappedBMCs` _integer_ | BootstrappedBMCs is the number of BMCs where all operator accounts are proven<br />and the factory account has been handled. |  |  |
+| `pendingBMCs` _integer_ | PendingBMCs is the number of BMCs still in the bootstrap phase. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the aggregate state of the BMCUserSet. |  |  |
+
+
 #### BMCUserSpec
 
 
@@ -236,6 +393,8 @@ _Appears in:_
 | `rotationPeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | RotationPeriod defines how often the password should be rotated.<br />If not set, the password will not be rotated. |  |  |
 | `bmcSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCSecretRef references the BMCSecret containing the credentials for this user.<br />If not set, the operator will generate a secure password based on BMC manufacturer requirements. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef references the BMC this user should be created on. |  |  |
+| `type` _[BMCUserType](#bmcusertype)_ | Type identifies the role of this BMCUser within the operator.<br />OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef<br />and use dual-account rotation. Defaults to ServiceAccount. | ServiceAccount | Enum: [OperatorAdmin ServiceAccount] <br /> |
+| `rotationHistoryLimit` _integer_ | RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)<br />BMCUserRotation objects to retain. Older objects beyond this limit are pruned.<br />Defaults to 10. | 10 | Minimum: 1 <br /> |
 
 
 #### BMCUserStatus
@@ -256,6 +415,46 @@ _Appears in:_
 | `passwordExpiration` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | PasswordExpiration is the timestamp when the password will expire. |  |  |
 | `id` _string_ | ID is the identifier of the user in the BMC system. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the current state of the BMCUser. |  |  |
+| `managedBy` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ManagedBy references the BMCUserSet that created and manages this BMCUser, if any. |  |  |
+
+
+#### BMCUserTemplate
+
+
+
+BMCUserTemplate defines the fields templated onto each BMCUser created by a BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSetSpec](#bmcusersetspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `userName` _string_ | UserName is the base username for the BMC account.<br />For DualAccount strategy, -a and -b suffixes are appended per instance. |  |  |
+| `roleID` _string_ | RoleID is the Redfish role to assign (e.g. "Administrator", "ReadOnly"). |  |  |
+| `rotationPeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | RotationPeriod defines how often the password should be rotated. |  |  |
+| `credentialSecretNameTemplate` _string_ | CredentialSecretNameTemplate is a Go template for the stable corev1.Secret<br />name written for each BMC after the first successful credential promotion.<br />Available variable: .BMCName. Example: "bmc-operator-cred-\{\{ .BMCName \}\}".<br />If empty, no stable Secret is written. |  |  |
+| `credentialSecretNamespace` _string_ | CredentialSecretNamespace is the namespace in which stable credential Secrets<br />are created. Defaults to the operator namespace if empty. |  |  |
+| `rotationHistoryLimit` _integer_ | RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)<br />BMCUserRotation objects to retain per BMCUser. Older objects are pruned once<br />the limit is exceeded. Defaults to 10. | 10 | Minimum: 1 <br /> |
+
+
+#### BMCUserType
+
+_Underlying type:_ _string_
+
+BMCUserType identifies the role of a BMCUser within the operator.
+
+_Validation:_
+- Enum: [OperatorAdmin ServiceAccount]
+
+_Appears in:_
+- [BMCUserSpec](#bmcuserspec)
+
+| Field | Description |
+| --- | --- |
+| `OperatorAdmin` | BMCUserTypeOperatorAdmin marks this BMCUser as the operator's own admin<br />credential for its referenced BMC. After a successful credential rotation<br />and live-auth verification, the controller updates BMC.Spec.BMCSecretRef<br />so all operator controllers pick up the new credential.<br /> |
+| `ServiceAccount` | BMCUserTypeServiceAccount is the default type for a non-elevated BMCUser.<br /> |
 
 
 #### BMCVersion
@@ -414,6 +613,26 @@ _Appears in:_
 | `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+
+
+#### RotationStrategy
+
+_Underlying type:_ _string_
+
+RotationStrategy determines how many BMCUser objects are created per BMC
+and how rotation is executed.
+
+_Validation:_
+- Enum: [DualAccount SingleAccount]
+
+_Appears in:_
+- [BMCUserRotationSpec](#bmcuserrotationspec)
+- [BMCUserSetSpec](#bmcusersetspec)
+
+| Field | Description |
+| --- | --- |
+| `DualAccount` | RotationStrategyDualAccount creates two BMCUser objects per BMC.<br />The account being rotated is never the one currently in use,<br />eliminating any lockout window. Required for operator admin accounts.<br /> |
+| `SingleAccount` | RotationStrategySingleAccount creates one BMCUser per BMC.<br />A narrow failure window exists between hardware password change and<br />Secret update. Acceptable for non-critical read-only accounts.<br /> |
 
 
 

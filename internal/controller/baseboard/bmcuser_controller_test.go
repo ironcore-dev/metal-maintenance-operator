@@ -390,4 +390,129 @@ var _ = Describe("BMCUser Controller", func() {
 		})).To(Succeed())
 	})
 
+	It("should create a Failed BMCUserRotation when only one OperatorAdmin BMCUser exists for a BMC", func(ctx SpecContext) {
+		By("Creating a single OperatorAdmin BMCUser with a short rotation period")
+		singleAdmin := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "single-operator-admin",
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName: "single-admin",
+				RoleID:   "Administrator",
+				Type:     baseboardv1alpha1.BMCUserTypeOperatorAdmin,
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+				RotationPeriod: &metav1.Duration{
+					Duration: 1 * time.Second,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, singleAdmin)).To(Succeed())
+		Eventually(Get(singleAdmin)).Should(Succeed())
+
+		By("Waiting for EffectiveBMCSecretRef to be set (initial setup still works)")
+		Eventually(Object(singleAdmin), "4s").Should(SatisfyAll(
+			HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())),
+		))
+		initialSecretName := singleAdmin.Status.EffectiveBMCSecretRef.Name
+
+		By("Waiting for a BMCUserRotation to be created and fail with no-peer message")
+		rotationList := &baseboardv1alpha1.BMCUserRotationList{}
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.List(ctx, rotationList)).To(Succeed())
+			var found bool
+			for _, rot := range rotationList.Items {
+				if rot.Spec.BMCUserRef.Name == singleAdmin.Name &&
+					rot.Status.Phase == baseboardv1alpha1.BMCUserRotationPhaseFailed {
+					found = true
+				}
+			}
+			g.Expect(found).To(BeTrue(), "expected a Failed BMCUserRotation for single-operator-admin")
+		}, "8s").Should(Succeed())
+
+		By("Ensuring EffectiveBMCSecretRef has NOT changed (rotation was blocked)")
+		Consistently(Object(singleAdmin), "2s").Should(
+			HaveField("Status.EffectiveBMCSecretRef.Name", Equal(initialSecretName)),
+		)
+
+		By("Cleaning up")
+		Expect(k8sClient.Delete(ctx, singleAdmin)).To(Succeed())
+		secretList := &metalv1alpha1.BMCSecretList{}
+		Expect(k8sClient.List(ctx, secretList)).To(Succeed())
+		for _, s := range secretList.Items {
+			for _, ref := range s.OwnerReferences {
+				if ref.UID == singleAdmin.UID {
+					Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &s))).To(Succeed())
+				}
+			}
+		}
+	})
+
+	It("should update BMC.Spec.BMCSecretRef when OperatorAdmin type is set and password is rotated", func(ctx SpecContext) {
+		By("Creating two OperatorAdmin BMCUsers (rotation pair) with short rotation period")
+		adminUserA := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "operator-admin-a",
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName: "operator-admin-a",
+				RoleID:   "Administrator",
+				Type:     baseboardv1alpha1.BMCUserTypeOperatorAdmin,
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+				RotationPeriod: &metav1.Duration{
+					Duration: 1 * time.Second,
+				},
+			},
+		}
+		adminUserB := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "operator-admin-b",
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName: "operator-admin-b",
+				RoleID:   "Administrator",
+				Type:     baseboardv1alpha1.BMCUserTypeOperatorAdmin,
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+				RotationPeriod: &metav1.Duration{
+					Duration: 1 * time.Second,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, adminUserA)).To(Succeed())
+		Expect(k8sClient.Create(ctx, adminUserB)).To(Succeed())
+		Eventually(Get(adminUserA)).Should(Succeed())
+		Eventually(Get(adminUserB)).Should(Succeed())
+
+		By("Waiting for EffectiveBMCSecretRef to be set for both users")
+		Eventually(Object(adminUserA), "4s").Should(SatisfyAll(
+			HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())),
+		))
+
+		By("Ensuring BMC.Spec.BMCSecretRef matches one of the effective secrets after rotation")
+		Eventually(Object(adminUserA), "8s").Should(SatisfyAll(
+			HaveField("Status.LastRotation", Not(BeNil())),
+		))
+		Eventually(Object(bmcObj), "4s").Should(SatisfyAll(
+			HaveField("Spec.BMCSecretRef.Name", Not(Equal(bmcSecret.Name))),
+		))
+
+		By("Cleaning up both BMCUsers and all owned secrets")
+		Expect(k8sClient.Delete(ctx, adminUserA)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, adminUserB)).To(Succeed())
+		secretList := &metalv1alpha1.BMCSecretList{}
+		Expect(k8sClient.List(ctx, secretList)).To(Succeed())
+		for _, s := range secretList.Items {
+			for _, ref := range s.OwnerReferences {
+				if ref.UID == adminUserA.UID || ref.UID == adminUserB.UID {
+					Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &s))).To(Succeed())
+				}
+			}
+		}
+	})
+
 })

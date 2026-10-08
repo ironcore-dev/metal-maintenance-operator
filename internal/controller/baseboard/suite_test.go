@@ -176,6 +176,7 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 		Expect((&BMCUserReconciler{
 			Client:             k8sManager.GetClient(),
 			Scheme:             k8sManager.GetScheme(),
+			ManagerNamespace:   ns.Name,
 			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
 			SkipCertValidation: true,
 			BMCOptions: bmc.Options{
@@ -183,6 +184,33 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 				PowerPollingTimeout:  200 * time.Millisecond,
 				BasicAuth:            true,
 			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		Expect((&BMCUserSetReconciler{
+			Client:             k8sManager.GetClient(),
+			Scheme:             k8sManager.GetScheme(),
+			ManagerNamespace:   ns.Name,
+			ResyncInterval:     10 * time.Millisecond,
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+		}).SetupWithManager(k8sManager)).To(Succeed())
+
+		Expect((&BMCUserRotationReconciler{
+			Client:             k8sManager.GetClient(),
+			Scheme:             k8sManager.GetScheme(),
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			BMCOptions: bmc.Options{
+				PowerPollingInterval: 50 * time.Millisecond,
+				PowerPollingTimeout:  200 * time.Millisecond,
+				BasicAuth:            true,
+			},
+			ResyncInterval: 10 * time.Millisecond,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real
@@ -303,6 +331,8 @@ func EnsureCleanState() {
 		&baseboardv1alpha1.BMCVersionList{},
 		&baseboardv1alpha1.BMCVersionSetList{},
 		&baseboardv1alpha1.BMCUserList{},
+		&baseboardv1alpha1.BMCUserSetList{},
+		&baseboardv1alpha1.BMCUserRotationList{},
 	}
 
 	for _, list := range objectLists {

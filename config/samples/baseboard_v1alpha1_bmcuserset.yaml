@@ -1,0 +1,53 @@
+---
+# Operator admin credential set — DualAccount strategy (recommended for admin accounts).
+# Creates two BMCUser objects per matched BMC (maint-admin-a / maint-admin-b).
+# The account being rotated is never the one currently in use, eliminating any
+# lockout window. BMC.Spec.BMCSecretRef is updated after each proven rotation.
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCUserSet
+metadata:
+  name: maintenance-operator-admin
+spec:
+  bmcSelector:
+    matchLabels:
+      metal.ironcore.dev/site: dc-1
+  setupCredentialRef:
+    name: operator-setup-secret
+    namespace: metal-maintenance-system
+  rotationStrategy: DualAccount
+  factoryAccountRemoval:
+    enabled: true
+    ignoreVendors:
+      - HPE
+    factoryUserNames:
+      - root
+      - calvin
+      - Administrator
+  template:
+    userName: maint-admin
+    roleID: Administrator
+    rotationPeriod: 720h0m0s
+    credentialSecretNameTemplate: "bmc-operator-cred-{{ .BMCName }}"
+    credentialSecretNamespace: metal-maintenance-system
+---
+# Read-only credential set for the redfish-exporter — SingleAccount strategy.
+# Acceptable for non-critical accounts where a brief auth failure during
+# rotation is tolerable. Stable Secret written to the monitoring namespace.
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCUserSet
+metadata:
+  name: redfish-exporter
+spec:
+  bmcSelector:
+    matchLabels:
+      metal.ironcore.dev/site: dc-1
+  setupCredentialRef:
+    name: operator-setup-secret
+    namespace: metal-maintenance-system
+  rotationStrategy: SingleAccount
+  template:
+    userName: redfish-exporter
+    roleID: ReadOnly
+    rotationPeriod: 2160h0m0s
+    credentialSecretNameTemplate: "bmc-redfish-cred-{{ .BMCName }}"
+    credentialSecretNamespace: monitoring
