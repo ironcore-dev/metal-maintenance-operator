@@ -100,10 +100,29 @@ spec:
               roleID:
                 description: RoleID is the ID of the role to assign to the user.
                 type: string
+              rotationHistoryLimit:
+                default: 10
+                description: |-
+                  RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)
+                  BMCUserRotation objects to retain. Older objects beyond this limit are pruned.
+                  Defaults to 10.
+                format: int32
+                minimum: 1
+                type: integer
               rotationPeriod:
                 description: |-
                   RotationPeriod defines how often the password should be rotated.
                   If not set, the password will not be rotated.
+                type: string
+              type:
+                default: ServiceAccount
+                description: |-
+                  Type identifies the role of this BMCUser within the operator.
+                  OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef
+                  and use dual-account rotation. Defaults to ServiceAccount.
+                enum:
+                - OperatorAdmin
+                - ServiceAccount
                 type: string
               userName:
                 description: UserName is the username of the BMC user.
@@ -195,6 +214,21 @@ spec:
                 description: LastRotation is the timestamp of the last password rotation.
                 format: date-time
                 type: string
+              managedBy:
+                description: ManagedBy references the BMCUserSet that created and
+                  manages this BMCUser, if any.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               passwordExpiration:
                 description: PasswordExpiration is the timestamp when the password
                   will expire.

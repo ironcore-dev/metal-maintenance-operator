@@ -1,42 +1,39 @@
-{{- if .Values.crd.enabled }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: bmcusers.baseboard.metal.ironcore.dev
+  name: bmcuserrotations.baseboard.metal.ironcore.dev
 spec:
   group: baseboard.metal.ironcore.dev
   names:
-    kind: BMCUser
-    listKind: BMCUserList
-    plural: bmcusers
+    kind: BMCUserRotation
+    listKind: BMCUserRotationList
+    plural: bmcuserrotations
     shortNames:
-    - bmcu
-    singular: bmcuser
+    - bmcur
+    singular: bmcuserrotation
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .spec.bmcUserRef.name
+      name: BMCUser
       type: string
-    - jsonPath: .status.id
-      name: ID
+    - jsonPath: .spec.type
+      name: Type
       type: string
-    - jsonPath: .spec.userName
-      name: UserName
+    - jsonPath: .spec.triggerReason
+      name: Trigger
       type: string
-    - jsonPath: .spec.roleID
-      name: RoleID
+    - jsonPath: .status.phase
+      name: Phase
       type: string
-    - jsonPath: .status.lastRotation
-      name: LastRotation
+    - jsonPath: .spec.triggeredAt
+      name: TriggeredAt
       type: date
-    - jsonPath: .status.passwordExpiration
-      name: PasswordExpiration
+    - jsonPath: .status.completedAt
+      name: CompletedAt
       type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -44,7 +41,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: BMCUser is the Schema for the bmcusers API.
+        description: |-
+          BMCUserRotation is the Schema for the bmcuserrotations API.
+          Each object represents one rotation event for a BMCUser. Spec is immutable after creation.
         properties:
           apiVersion:
             description: |-
@@ -64,11 +63,13 @@ spec:
           metadata:
             type: object
           spec:
-            description: BMCUserSpec defines the desired state of BMCUser.
+            description: |-
+              BMCUserRotationSpec defines the desired state of BMCUserRotation.
+              Spec is immutable after creation.
             properties:
-              bmcRef:
-                description: BMCRef references the BMC this user should be created
-                  on.
+              bmcUserRef:
+                description: BMCUserRef references the BMCUser this rotation was triggered
+                  for.
                 properties:
                   name:
                     default: ""
@@ -81,64 +82,43 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              bmcSecretRef:
-                description: |-
-                  BMCSecretRef references the BMCSecret containing the credentials for this user.
-                  If not set, the operator will generate a secure password based on BMC manufacturer requirements.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-              description:
-                description: Description is a description for the BMC user.
+              triggerReason:
+                description: TriggerReason describes what caused this rotation.
+                enum:
+                - RotationPeriod
+                - Annotation
+                - PasswordExpiry
                 type: string
-              roleID:
-                description: RoleID is the ID of the role to assign to the user.
-                type: string
-              rotationHistoryLimit:
-                default: 10
-                description: |-
-                  RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)
-                  BMCUserRotation objects to retain. Older objects beyond this limit are pruned.
-                  Defaults to 10.
-                format: int32
-                minimum: 1
-                type: integer
-              rotationPeriod:
-                description: |-
-                  RotationPeriod defines how often the password should be rotated.
-                  If not set, the password will not be rotated.
+              triggeredAt:
+                description: TriggeredAt is the timestamp when the rotation was initiated.
+                format: date-time
                 type: string
               type:
-                default: ServiceAccount
-                description: |-
-                  Type identifies the role of this BMCUser within the operator.
-                  OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef
-                  and use dual-account rotation. Defaults to ServiceAccount.
+                description: Type is the rotation strategy used for this rotation
+                  event.
                 enum:
-                - OperatorAdmin
-                - ServiceAccount
-                type: string
-              userName:
-                description: UserName is the username of the BMC user.
+                - DualAccount
+                - SingleAccount
                 type: string
             required:
-            - roleID
-            - userName
+            - bmcUserRef
+            - triggerReason
+            - triggeredAt
+            - type
             type: object
+            x-kubernetes-validations:
+            - message: BMCUserRotationSpec is immutable
+              rule: self == oldSelf
           status:
-            description: BMCUserStatus defines the observed state of BMCUser.
+            description: BMCUserRotationStatus defines the observed state of BMCUserRotation.
             properties:
+              completedAt:
+                description: CompletedAt is the timestamp when the rotation finished
+                  (succeeded or failed).
+                format: date-time
+                type: string
               conditions:
-                description: Conditions reflects the current state of the BMCUser.
+                description: Conditions reflects the progress of this rotation.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -194,10 +174,15 @@ spec:
                   - type
                   type: object
                 type: array
-              effectiveBMCSecretRef:
+              message:
                 description: |-
-                  EffectiveBMCSecretRef references the BMCSecret currently used for this user.
-                  This may differ from Spec.BMCSecretRef if the operator generated a password.
+                  Message provides a human-readable description of the current state,
+                  especially useful when Phase is Failed.
+                type: string
+              newSecretRef:
+                description: |-
+                  NewSecretRef references the BMCSecret created by this rotation.
+                  Set on success.
                 properties:
                   name:
                     default: ""
@@ -210,32 +195,14 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              id:
-                description: ID is the identifier of the user in the BMC system.
-                type: string
-              lastRotation:
-                description: LastRotation is the timestamp of the last password rotation.
-                format: date-time
-                type: string
-              managedBy:
-                description: ManagedBy references the BMCUserSet that created and
-                  manages this BMCUser, if any.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-              passwordExpiration:
-                description: PasswordExpiration is the timestamp when the password
-                  will expire.
-                format: date-time
+              phase:
+                default: Pending
+                description: Phase is the current lifecycle phase of this rotation.
+                enum:
+                - Pending
+                - InProgress
+                - Succeeded
+                - Failed
                 type: string
             type: object
         type: object
@@ -243,4 +210,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

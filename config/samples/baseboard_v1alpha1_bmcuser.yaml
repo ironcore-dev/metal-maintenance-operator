@@ -14,3 +14,35 @@ spec:
     name: bmc-secret-sample
   bmcRef:
     name: bmc-sample
+---
+# Two-user pattern for the operator's own admin credential.
+# Both users reference the same BMC with type: OperatorAdmin.
+# The controller rotates each account independently; BMC.Spec.BMCSecretRef
+# is updated to whichever account was most recently verified to work.
+# This ensures the operator never loses BMC access during rotation, since
+# the account being rotated is never the one currently in BMC.Spec.BMCSecretRef.
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCUser
+metadata:
+  name: operator-admin-a-sample
+spec:
+  userName: maint-admin-a
+  roleID: "Administrator"
+  description: "Operator admin credential A (two-user rotation pair)"
+  rotationPeriod: 720h0m0s
+  type: OperatorAdmin
+  bmcRef:
+    name: bmc-sample
+---
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCUser
+metadata:
+  name: operator-admin-b-sample
+spec:
+  userName: maint-admin-b
+  roleID: "Administrator"
+  description: "Operator admin credential B (two-user rotation pair)"
+  rotationPeriod: 720h0m0s
+  type: OperatorAdmin
+  bmcRef:
+    name: bmc-sample

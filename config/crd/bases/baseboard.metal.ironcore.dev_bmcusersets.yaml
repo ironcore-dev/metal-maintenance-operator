@@ -1,0 +1,259 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: bmcusersets.baseboard.metal.ironcore.dev
+spec:
+  group: baseboard.metal.ironcore.dev
+  names:
+    kind: BMCUserSet
+    listKind: BMCUserSetList
+    plural: bmcusersets
+    shortNames:
+    - bmcus
+    singular: bmcuserset
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.rotationStrategy
+      name: Strategy
+      type: string
+    - jsonPath: .status.totalBMCs
+      name: Total
+      type: integer
+    - jsonPath: .status.bootstrappedBMCs
+      name: Bootstrapped
+      type: integer
+    - jsonPath: .status.pendingBMCs
+      name: Pending
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BMCUserSet is the Schema for the bmcusersets API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BMCUserSetSpec defines the desired state of BMCUserSet.
+            properties:
+              bmcSelector:
+                description: BMCSelector selects which BMC objects this set manages.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              rotationStrategy:
+                default: DualAccount
+                description: |-
+                  RotationStrategy determines how many BMCUser objects are created per BMC.
+                  DualAccount (default) creates two users per BMC; SingleAccount creates one.
+                enum:
+                - DualAccount
+                - SingleAccount
+                type: string
+              setupCredentialRef:
+                description: |-
+                  SetupCredentialRef references a corev1.Secret (keys: username, password) in the
+                  operator namespace used for first contact with a new BMC before operator accounts exist.
+                  This credential is used only during the bootstrap phase; once operator accounts
+                  are proven it is never used again for that BMC.
+                properties:
+                  name:
+                    description: name is unique within a namespace to reference a
+                      secret resource.
+                    type: string
+                  namespace:
+                    description: namespace defines the space within which the secret
+                      name must be unique.
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              template:
+                description: Template defines the common fields for BMCUser objects
+                  created by this set.
+                properties:
+                  credentialSecretNameTemplate:
+                    description: |-
+                      CredentialSecretNameTemplate is a Go template for the stable corev1.Secret
+                      name written for each BMC after the first successful credential promotion.
+                      Available variable: .BMCName. Example: "bmc-operator-cred-{{ .BMCName }}".
+                      If empty, no stable Secret is written.
+                    type: string
+                  credentialSecretNamespace:
+                    description: |-
+                      CredentialSecretNamespace is the namespace in which stable credential Secrets
+                      are created. Defaults to the operator namespace if empty.
+                    type: string
+                  roleID:
+                    description: RoleID is the Redfish role to assign (e.g. "Administrator",
+                      "ReadOnly").
+                    type: string
+                  rotationHistoryLimit:
+                    default: 10
+                    description: |-
+                      RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)
+                      BMCUserRotation objects to retain per BMCUser. Older objects are pruned once
+                      the limit is exceeded. Defaults to 10.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  rotationPeriod:
+                    description: RotationPeriod defines how often the password should
+                      be rotated.
+                    type: string
+                  userName:
+                    description: |-
+                      UserName is the base username for the BMC account.
+                      For DualAccount strategy, -a and -b suffixes are appended per instance.
+                    type: string
+                required:
+                - roleID
+                - userName
+                type: object
+            required:
+            - bmcSelector
+            - setupCredentialRef
+            - template
+            type: object
+          status:
+            description: BMCUserSetStatus defines the observed state of BMCUserSet.
+            properties:
+              bootstrappedBMCs:
+                description: |-
+                  BootstrappedBMCs is the number of BMCs where all operator accounts are proven
+                  and the factory account has been handled.
+                format: int32
+                type: integer
+              conditions:
+                description: Conditions reflects the aggregate state of the BMCUserSet.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              pendingBMCs:
+                description: PendingBMCs is the number of BMCs still in the bootstrap
+                  phase.
+                format: int32
+                type: integer
+              totalBMCs:
+                description: TotalBMCs is the number of BMCs matched by the selector.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

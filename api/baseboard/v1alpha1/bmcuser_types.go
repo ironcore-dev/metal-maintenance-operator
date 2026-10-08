@@ -9,6 +9,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// BMCUserType identifies the role of a BMCUser within the operator.
+// +kubebuilder:validation:Enum=OperatorAdmin;ServiceAccount
+type BMCUserType string
+
+const (
+	// BMCUserTypeOperatorAdmin marks this BMCUser as the operator's own admin
+	// credential for its referenced BMC. After a successful credential rotation
+	// and live-auth verification, the controller updates BMC.Spec.BMCSecretRef
+	// so all operator controllers pick up the new credential.
+	BMCUserTypeOperatorAdmin BMCUserType = "OperatorAdmin"
+
+	// BMCUserTypeServiceAccount is the default type for a non-elevated BMCUser.
+	BMCUserTypeServiceAccount BMCUserType = "ServiceAccount"
+)
+
 // BMCUserSpec defines the desired state of BMCUser.
 type BMCUserSpec struct {
 	// UserName is the username of the BMC user.
@@ -30,6 +45,21 @@ type BMCUserSpec struct {
 
 	// BMCRef references the BMC this user should be created on.
 	BMCRef *v1.LocalObjectReference `json:"bmcRef,omitempty"`
+
+	// Type identifies the role of this BMCUser within the operator.
+	// OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef
+	// and use dual-account rotation. Defaults to ServiceAccount.
+	// +kubebuilder:default=ServiceAccount
+	// +optional
+	Type BMCUserType `json:"type,omitempty"`
+
+	// RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)
+	// BMCUserRotation objects to retain. Older objects beyond this limit are pruned.
+	// Defaults to 10.
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RotationHistoryLimit *int32 `json:"rotationHistoryLimit,omitempty"`
 }
 
 // BMCUserStatus defines the observed state of BMCUser.
@@ -49,6 +79,10 @@ type BMCUserStatus struct {
 
 	// Conditions reflects the current state of the BMCUser.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ManagedBy references the BMCUserSet that created and manages this BMCUser, if any.
+	// +optional
+	ManagedBy *v1.LocalObjectReference `json:"managedBy,omitempty"`
 }
 
 // +kubebuilder:object:root=true
