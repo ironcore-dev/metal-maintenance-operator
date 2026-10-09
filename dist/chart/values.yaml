@@ -377,7 +377,7 @@ kubeStateMetrics:
   ## configured to discover ConfigMaps carrying the label below (see the concept
   ## doc); keep it unless you mount the config another way.
   labels:
-    dev.custom.kube-state-metrics: "true"
+    dev.custom.shoot-kube-state-metrics: "true"
 
   ## Extra CustomResourceState resource entries appended to the built-in
   ## ironcore.dev set. Use this to scrape additional
