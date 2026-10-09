@@ -57,6 +57,29 @@ data:
                   labelsFromPath:
                     "*": [metadata, labels]
         {{- end }}
+        # BMC hardware identity: exposes status/spec fields not in metadata labels.
+        # Separate metric name (kube_ironcore_bmc_info) avoids polluting other ironcore
+        # CRDs (Server, Machine, etc.) with empty manufacturer/model labels.
+        - groupVersionKind:
+            group: metal.ironcore.dev
+            version: "*"
+            kind: BMC
+          metricNamePrefix: kube_ironcore
+          labelsFromPath:
+            name: [metadata, name]
+            namespace: [metadata, namespace]
+            manufacturer: [status, manufacturer]
+            model: [status, model]
+            firmware_version: [status, firmwareVersion]
+            bmc_hostname: [spec, hostname]
+          metrics:
+            - name: bmc_info
+              help: "Hardware identity for metal.ironcore.dev BMC resources"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    "*": [metadata, labels]
         {{- with .Values.kubeStateMetrics.extraResources }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
