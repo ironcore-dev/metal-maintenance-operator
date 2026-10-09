@@ -1224,31 +1224,32 @@ func (r *BIOSVersionReconciler) enqueueBiosVersionByServerRefs(ctx context.Conte
 		return nil
 	}
 
+	var requests []ctrl.Request
 	for _, biosVersion := range biosVersionList.Items {
 		if biosVersion.Spec.ServerRef == nil || biosVersion.Spec.ServerRef.Name != host.Name {
 			continue
 		}
 		// states where we do not need to requeue for host changes
 		if biosVersion.Status.State == systemv1alpha1.BIOSVersionStateFailed {
-			return nil
+			continue
 		}
 		switch biosVersion.Status.State {
 		case systemv1alpha1.BIOSVersionStateCompleted, "", systemv1alpha1.BIOSVersionStatePending:
 			// These states only depend on Server changes through ReadinessGates (before, or
 			// in the absence of, a ServerMaintenanceRef) or via an active ServerMaintenanceRef.
 			if len(biosVersion.Spec.ReadinessGates) == 0 && biosVersion.Spec.ServerMaintenanceRef == nil {
-				return nil
+				continue
 			}
 		default:
 			if biosVersion.Spec.ServerMaintenanceRef == nil {
-				return nil
+				continue
 			}
 		}
-		return []ctrl.Request{{
+		requests = append(requests, ctrl.Request{
 			NamespacedName: types.NamespacedName{Namespace: biosVersion.Namespace, Name: biosVersion.Name},
-		}}
+		})
 	}
-	return nil
+	return requests
 }
 
 func (r *BIOSVersionReconciler) enqueueBiosSettingsByBMC(ctx context.Context, obj client.Object) []ctrl.Request {

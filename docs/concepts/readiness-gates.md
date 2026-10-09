@@ -40,10 +40,9 @@ behave exactly as described in their own concept pages, unaffected by any of thi
 
 ## How Gating Works
 
-1. On every reconcile while `Pending` (and again on every reconcile of an already-terminal object, so a later
-   regression upstream is noticed), the controller first ensures its own `completionConditionType` (if set) exists
-   on the related `Server`(s), initializing it to `False` if absent. This happens *before* checking its own
-   gates, so a sibling relying on this condition never races against it simply not existing yet.
+1. On every reconcile while `Pending`, the controller first ensures its own `completionConditionType` (if set)
+   exists on the related `Server`(s), initializing it to `False` if absent. This happens *before* checking its
+   own gates, so a sibling relying on this condition never races against it simply not existing yet.
 2. The controller then evaluates `spec.readinessGates` against the related `Server`(s)' current conditions. If any
    gate is unsatisfied, it records the reasons on its own `ReadinessGatesSatisfied` condition (`False`) and waits;
    it is re-triggered automatically via a `Server` watch once the relevant condition changes, no polling required.
@@ -85,8 +84,11 @@ spec:
   bmcRef:
     name: endpoint-sample
   version: 1.46.455b66-rev1
-  settings:
-    bootMode: "UEFI"
+  settingsFlow:
+    - name: boot-settings
+      priority: 10
+      settings:
+        bootMode: "UEFI"
   readinessGates:
     - type: rollout/step1-bmc-version-done
       requiredStatus: "True"

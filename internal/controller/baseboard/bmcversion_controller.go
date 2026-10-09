@@ -762,6 +762,10 @@ func (r *BMCVersionReconciler) removeServerMaintenanceRefAndResetConditions(
 		return r.patchBMCVersionStatusAndCondition(ctx, bmcVersion, state, upgradeTask, retryFailedCondition)
 	}
 
+	if wasCompleted && state == baseboardv1alpha1.BMCVersionStateCompleted {
+		return nil
+	}
+
 	err = r.patchBMCVersionStatusAndCondition(ctx, bmcVersion, state, upgradeTask, nil)
 	return err
 }
