@@ -637,6 +637,8 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 		applyDowngradeVersions = true
 	}
 
+	ignoreCertWarning := ptr.Deref(repo.CertificateVerification, "") == systemv1alpha1.DellCertificateVerificationPolicyIgnore
+
 	return &bmc.RepositoryUpdateParameters{
 		ShareType:              string(repo.ShareType),
 		IPAddress:              repo.Address,
@@ -644,6 +646,7 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 		CatalogFile:            catalogFile,
 		UserName:               username,
 		Password:               password,
+		IgnoreCertWarning:      ignoreCertWarning,
 		ApplyUpdate:            applyUpdate,
 		RebootNeeded:           applyUpdate && repo.RebootNeeded,
 		ApplySameVersions:      applySameVersions,

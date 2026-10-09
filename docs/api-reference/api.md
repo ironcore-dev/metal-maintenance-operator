@@ -1080,6 +1080,25 @@ _Appears in:_
 | `failed` _integer_ | Failed is the number of component jobs that finished in a failed state. |  |  |
 
 
+#### DellCertificateVerificationPolicy
+
+_Underlying type:_ _string_
+
+DellCertificateVerificationPolicy controls whether iDRAC verifies the TLS certificate
+presented by the repository share (HTTPS/CIFS) before connecting, or ignores certificate
+warnings (e.g. self-signed/untrusted certificates). If unset, certificates are verified.
+
+
+
+_Appears in:_
+- [DellFirmwareRepository](#dellfirmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `Verify` | DellCertificateVerificationPolicyVerify requires the share's TLS certificate to be valid<br />and trusted. This is the default behavior when the field is unset.<br /> |
+| `Ignore` | DellCertificateVerificationPolicyIgnore instructs iDRAC to ignore certificate warnings<br />(e.g. self-signed or untrusted certificates) when connecting to the share.<br /> |
+
+
 #### DellFirmwareRepository
 
 
@@ -1102,6 +1121,7 @@ _Appears in:_
 | `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required.<br />Must not be set when ShareType is HTTP. |  |  |
 | `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
 | `applyVersionPolicy` _[DellVersionApplyPolicy](#dellversionapplypolicy)_ | ApplyVersionPolicy controls whether packages already at the same version and/or older<br />than the currently installed version are applied. If unset, only genuine upgrades are applied. |  | Enum: [AllowSameVersion AllowDowngradeVersion AllowSameAndDowngradeVersion] <br /> |
+| `certificateVerification` _[DellCertificateVerificationPolicy](#dellcertificateverificationpolicy)_ | CertificateVerification controls whether iDRAC verifies the TLS certificate presented by<br />the repository share, or ignores certificate warnings (e.g. self-signed/untrusted<br />certificates). If unset, certificates are verified. |  | Enum: [Verify Ignore] <br /> |
 
 
 #### DellFirmwareUpdateStatus
