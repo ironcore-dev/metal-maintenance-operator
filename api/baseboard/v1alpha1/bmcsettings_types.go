@@ -42,10 +42,10 @@ const (
 // +kubebuilder:validation:XValidation:rule="!has(self.variables) || self.variables.all(v, self.variables.filter(w, w.key == v.key).size() == 1)",message="variable keys must be unique"
 type BMCSettingsTemplate struct {
 	api.SettingsTemplate `json:",inline"`
+	api.ReadinessGating  `json:",inline"`
 }
 
 // BMCSettingsSpec defines the desired state of BMCSettings.
-// +kubebuilder:validation:XValidation:rule="size(self.version) > 0",message="version is required"
 type BMCSettingsSpec struct {
 	BMCSettingsTemplate `json:",inline"`
 

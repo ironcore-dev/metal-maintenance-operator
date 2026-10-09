@@ -16,6 +16,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -926,6 +927,272 @@ var _ = Describe("BMCSettings Controller", func() {
 		Expect(mockServers[0].GetBMCSettingAttr("BMC")).To(HaveKeyWithValue("abc", "license-key-for-"+bmc.Name))
 
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+
+	It("should reset the completion condition on the Server when a previously Applied BMCSettings drifts", func(ctx SpecContext) {
+		bmcSetting := map[string]string{"abc": "initial-drift-value"}
+
+		By("Creating a BMCSettings with a CompletionConditionType")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-drift-reset-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						CompletionConditionType: "BMCSettingsApplied",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring that the BMCSettings has reached Applied state")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Simulating drift by changing the desired settings")
+		Eventually(Update(settings, func() {
+			settings.Spec.SettingsFlow[0].Settings = map[string]string{"abc": "drifted-value"}
+		})).Should(Succeed())
+
+		By("Ensuring the completion condition is reset away from True on the Server once drift is detected")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsApplied"),
+					HaveField("Status", Not(Equal(metav1.ConditionTrue))),
+				),
+			)),
+		)
+
+		By("Ensuring the BMCSettings re-applies and moves back to Applied")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition is patched True again once re-applied")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BMCSettings")
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should apply settings without waiting on a BMC version when Spec.Version is not set", func(ctx SpecContext) {
+		bmcSetting := map[string]string{"abc": "no-version-value"}
+
+		By("Creating a BMCSettings without a Version")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-no-version-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring that the BMCSettings reaches Applied state without waiting on a version match")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Deleting the BMCSettings")
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should wait for readiness gates to be satisfied before applying settings", func(ctx SpecContext) {
+		bmcSetting := map[string]string{"abc": "readiness-gate-value"}
+
+		By("Creating a BMCSettings with a ReadinessGate that is not yet satisfied on the Server")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-readiness-gate-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SomePrerequisiteReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring that the BMCSettings remains Pending because the readiness gate is not satisfied")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStatePending),
+		)
+		Consistently(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStatePending),
+		)
+
+		By("Ensuring the ReadinessGatesSatisfied condition is False on the BMCSettings")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Satisfying the readiness gate on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring that the BMCSettings now proceeds and reaches Applied")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Deleting the BMCSettings")
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should stay Applied and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {
+		bmcSetting := map[string]string{"abc": "readiness-gate-recheck-value"}
+
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating a BMCSettings gated on that condition, with a CompletionConditionType")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-readiness-gate-recheck-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: bmcSetting}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SiblingGateReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+						CompletionConditionType: "BMCSettingsGateRecheckApplied",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring the BMCSettings reaches Applied")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsGateRecheckApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Flipping the readiness gate back to unsatisfied on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionFalse,
+				Reason: "NoLongerReady",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the ReadinessGatesSatisfied condition goes False on the BMCSettings")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Ensuring the BMCSettings stays Applied and does not re-actuate")
+		Consistently(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+		)
+
+		By("Ensuring the completion condition on the Server is left untouched (still True) while gates are unsatisfied")
+		Consistently(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCSettingsGateRecheckApplied"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BMCSettings")
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })
 

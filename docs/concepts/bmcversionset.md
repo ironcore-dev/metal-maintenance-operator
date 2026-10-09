@@ -12,6 +12,10 @@ creating and managing one child [`BMCVersion`](bmcversion.md) per selected BMC.
   children whose BMC no longer matches the selector (once the child is no longer `InProgress`).
 - `status` aggregates rollout progress across all children: `fullyLabeledBMCs`, `availableBMCVersion`,
   `pendingBMCVersion`, `inProgressBMCVersion`, `completedBMCVersion`, and `failedBMCVersion`.
+- `spec.bmcVersionTemplate.readinessGates`/`completionConditionType` (optional) are propagated as-is to every
+  child, so the whole fleet can participate in a manual [Readiness Gates](readiness-gates.md) chain; since each
+  child targets a distinct `BMC`, using the same `completionConditionType` across all children is safe (no
+  collision, as each is patched onto that child's own servers).
 
 ## Workflow
 

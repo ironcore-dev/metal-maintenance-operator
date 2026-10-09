@@ -16,17 +16,21 @@ served from an external location.
   BMC-reported upgrade task (state, status, percent complete).
 - `status.state` reflects the overall lifecycle: `Pending`, `InProgress`, `Completed`, or `Failed`.
 - `spec.retryPolicy.maxAttempts` bounds automatic retries after a transient failure.
+- `spec.readinessGates`/`spec.completionConditionType` (optional) let this object participate in a manual
+  cross-resource sequencing chain — see [Readiness Gates](readiness-gates.md).
 
 ## Workflow
 
-1. The controller requests (or reuses) `ServerMaintenance` for the server per `spec.serverMaintenancePolicy`.
-2. Once the server is in maintenance, it issues the firmware upgrade using `spec.image`, then powers the server
+1. If `spec.readinessGates` is set, the controller waits until those conditions are satisfied on the server before
+   proceeding (see [Readiness Gates](readiness-gates.md)).
+2. The controller requests (or reuses) `ServerMaintenance` for the server per `spec.serverMaintenancePolicy`.
+3. Once the server is in maintenance, it issues the firmware upgrade using `spec.image`, then powers the server
    off/on as needed to complete the upgrade.
-3. It polls the BMC-reported task in `status.upgradeTask` until it completes, fails, or times out
+4. It polls the BMC-reported task in `status.upgradeTask` until it completes, fails, or times out
    (`spec.rebootTimeoutExpiry` bounds the reboot wait, configured at the operator level).
-4. On success, `status.state` becomes `Completed`; on unrecoverable failure, `Failed` (subject to
-   `spec.retryPolicy`).
-5. On deletion, the controller cleans up the `ServerMaintenance` it requested and removes its finalizer once the
+5. On success, `status.state` becomes `Completed` (patching `spec.completionConditionType` `True` on the server, if
+   set); on unrecoverable failure, `Failed` (subject to `spec.retryPolicy`).
+6. On deletion, the controller cleans up the `ServerMaintenance` it requested and removes its finalizer once the
    upgrade is no longer in progress.
 
 ## Example

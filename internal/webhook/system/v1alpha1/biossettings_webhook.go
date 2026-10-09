@@ -103,8 +103,11 @@ func checkForDuplicateBIOSSettingsRefToServer(settingsList *systemv1alpha1.BIOSS
 		if bs.Spec.ServerRef == nil {
 			continue
 		}
-		if settings.Spec.ServerRef.Name == bs.Spec.ServerRef.Name {
-			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s",
+		if settings.Spec.ServerRef.Name != bs.Spec.ServerRef.Name {
+			continue
+		}
+		if len(settings.Spec.ReadinessGates) == 0 && len(bs.Spec.ReadinessGates) == 0 {
+			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s without readinessGates",
 				settings.Spec.ServerRef.Name, settings.Name, bs.Spec.ServerRef.Name, bs.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: settings.GroupVersionKind().Group, Kind: settings.Kind},

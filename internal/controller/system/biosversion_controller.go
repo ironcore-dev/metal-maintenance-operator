@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
@@ -23,6 +24,7 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -42,11 +44,14 @@ const (
 	ConditionUpgradeRebootTimedOut      = "VersionUpgradeRebootTimedOut"
 	ConditionUpgradeServerPowerOnIssued = "VersionUpgradeServerPowerOnIssued"
 
-	ReasonRebootIssued        = "RebootRequestIssuedToBMC"
-	ReasonRebootObservedOff   = "RebootObservedServerLeftPowerOnState"
-	ReasonRebootPowerOn       = "RebootPowerOn"
-	ReasonRebootTimedOut      = "RebootTimedOutWaitingForPowerState"
-	ReasonServerPowerOnIssued = "ServerPowerOnIssuedToBMC"
+	ReasonRebootIssued                              = "RebootRequestIssuedToBMC"
+	ReasonRebootObservedOff                         = "RebootObservedServerLeftPowerOnState"
+	ReasonRebootPowerOn                             = "RebootPowerOn"
+	ReasonRebootTimedOut                            = "RebootTimedOutWaitingForPowerState"
+	ReasonServerPowerOnIssued                       = "ServerPowerOnIssuedToBMC"
+	ReasonBIOSVersionCompletionConditionApplied     = "BIOSVersionUpgraded"
+	ReasonBIOSVersionCompletionConditionInitialized = "BIOSVersionNotYetUpgraded"
+	ReasonBIOSVersionCompletionConditionInProgress  = "BIOSVersionUpgradeInProgress"
 )
 
 type BIOSVersionReconciler struct {
@@ -66,6 +71,7 @@ type BIOSVersionReconciler struct {
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biosversions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biosversions/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -220,6 +226,31 @@ func (r *BIOSVersionReconciler) transitionState(ctx context.Context, biosVersion
 			log.V(1).Info("Removed retry annotation from BIOSVersion for retrying", "BIOSVersion", biosVersion.Annotations)
 			return false, nil
 		}
+		if err := r.ensureCompletionConditionInitialized(ctx, server, biosVersion); err != nil {
+			return true, err
+		}
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return true, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return true, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			if err := r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStatePending, biosVersion.Status.UpgradeTask, condition); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+		if err := r.markBIOSVersionReadinessGatesSatisfied(ctx, biosVersion, biosVersion.Status.State); err != nil {
+			return true, err
+		}
 		return false, r.cleanup(ctx, bmcClient, biosVersion, server)
 	case systemv1alpha1.BIOSVersionStateInProgress:
 		if ok, err := r.handleServerMaintenance(ctx, bmcClient, biosVersion, server); err != nil || !ok {
@@ -228,12 +259,43 @@ func (r *BIOSVersionReconciler) transitionState(ctx context.Context, biosVersion
 
 		return r.processInProgressState(ctx, bmcClient, biosVersion, server)
 	case systemv1alpha1.BIOSVersionStateCompleted:
-		return false, r.cleanup(ctx, bmcClient, biosVersion, server)
+		return r.handleCompletedState(ctx, bmcClient, biosVersion, server)
 	case systemv1alpha1.BIOSVersionStateFailed:
 		return r.processFailedState(ctx, biosVersion, server)
 	}
 
 	log.V(1).Info("Unknown State found", "State", biosVersion.Status.State)
+	return false, nil
+}
+
+// handleCompletedState re-checks readiness gates, actual state on every resync while Completed
+func (r *BIOSVersionReconciler) handleCompletedState(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
+		log.V(1).Info("Readiness gates no longer satisfied, staying Completed", "Reasons", reasons)
+		condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
+		if err != nil {
+			return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+		}
+		if err := r.Conditions.Update(
+			condition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+			conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+		); err != nil {
+			return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+		}
+		if err := r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStateCompleted, biosVersion.Status.UpgradeTask, condition); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err := r.markBIOSVersionReadinessGatesSatisfied(ctx, biosVersion, systemv1alpha1.BIOSVersionStateCompleted); err != nil {
+		return false, err
+	}
+	if err := r.cleanup(ctx, bmcClient, biosVersion, server); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
@@ -259,6 +321,25 @@ func (r *BIOSVersionReconciler) handleServerMaintenance(ctx context.Context, bmc
 	}
 	if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "ServerMaintenanceState", maintenance.Status.State)
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates no longer satisfied while waiting for maintenance approval, reverting to Pending", "Reasons", reasons)
+			if err := r.cleanupServerMaintenanceReferences(ctx, biosVersion); err != nil {
+				return false, err
+			}
+			gatesCondition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				gatesCondition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStatePending, biosVersion.Status.UpgradeTask, gatesCondition)
+		}
 		if condition.Status != metav1.ConditionTrue {
 			if err := r.Conditions.Update(
 				condition,
@@ -288,6 +369,9 @@ func (r *BIOSVersionReconciler) handleServerMaintenance(ctx context.Context, bmc
 			return false, fmt.Errorf("failed to patch BIOSVersion ServerMaintenance waiting conditions: %w", err)
 		}
 		return false, nil
+	}
+	if err := r.ensureCompletionConditionInProgress(ctx, biosVersion, server); err != nil {
+		return false, err
 	}
 
 	if ok, err := r.handleBMCReset(ctx, bmcClient, biosVersion, server); !ok || err != nil {
@@ -594,12 +678,17 @@ func (r *BIOSVersionReconciler) getBIOSVersionFromBMC(ctx context.Context, bmcCl
 
 func (r *BIOSVersionReconciler) cleanup(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) error {
 	log := ctrl.LoggerFrom(ctx)
+	wasCompleted := biosVersion.Status.State == systemv1alpha1.BIOSVersionStateCompleted
 	currentBiosVersion, err := r.getBIOSVersionFromBMC(ctx, bmcClient, server)
 	if err != nil {
 		return err
 	}
 
 	if currentBiosVersion == biosVersion.Spec.Version {
+		if err := utils.PatchServerCondition(ctx, r.Client, server, biosVersion.Spec.CompletionConditionType, metav1.ConditionTrue, ReasonBIOSVersionCompletionConditionApplied, fmt.Sprintf("BIOSVersion %s upgraded to %s", biosVersion.Name, currentBiosVersion)); err != nil {
+			return err
+		}
+
 		if err := r.cleanupServerMaintenanceReferences(ctx, biosVersion); err != nil {
 			return err
 		}
@@ -607,14 +696,22 @@ func (r *BIOSVersionReconciler) cleanup(ctx context.Context, bmcClient bmc.BMC, 
 		log.V(1).Info("Upgraded BIOS version", "Version", currentBiosVersion, "Server", server.Name)
 		return r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStateCompleted, nil, nil)
 	}
+	state := systemv1alpha1.BIOSVersionStateInProgress
+	if wasCompleted {
+		log.V(1).Info("BIOS version drift detected after completion, resetting completion condition", "Server", server.Name)
+		if err := utils.PatchServerCondition(ctx, r.Client, server, biosVersion.Spec.CompletionConditionType, metav1.ConditionFalse, utils.CompletionConditionReset, fmt.Sprintf("BIOSVersion %s no longer upgraded, drift detected", biosVersion.Name)); err != nil {
+			return err
+		}
+		state = systemv1alpha1.BIOSVersionStatePending
+	}
 	retryFailedCondition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionRetryOfFailedResourceIssued)
 	if err != nil {
 		return fmt.Errorf("failed to get retry condition for BIOSVersion: %w", err)
 	}
 	if retryFailedCondition.Status == metav1.ConditionTrue {
-		return r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStateInProgress, nil, retryFailedCondition)
+		return r.updateStatus(ctx, biosVersion, state, nil, retryFailedCondition)
 	}
-	return r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStateInProgress, nil, nil)
+	return r.updateStatus(ctx, biosVersion, state, nil, nil)
 }
 
 func (r *BIOSVersionReconciler) getServerMaintenanceForRef(ctx context.Context, serverMaintenanceRef *metalv1alpha1.ObjectReference) (*maintenancev1alpha1.ServerMaintenance, error) {
@@ -666,6 +763,62 @@ func (r *BIOSVersionReconciler) updateStatus(
 	}
 
 	return nil
+}
+
+// ensureCompletionConditionInitialized makes sure Spec.CompletionConditionType, if set, is
+// present on server with an explicit status (False)
+func (r *BIOSVersionReconciler) ensureCompletionConditionInitialized(ctx context.Context, server *metalv1alpha1.Server, biosVersion *systemv1alpha1.BIOSVersion) error {
+	if biosVersion.Spec.CompletionConditionType == "" {
+		return nil
+	}
+	if apimeta.FindStatusCondition(server.Status.Conditions, biosVersion.Spec.CompletionConditionType) != nil {
+		return nil
+	}
+	return utils.PatchServerCondition(ctx, r.Client, server, biosVersion.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonBIOSVersionCompletionConditionInitialized, fmt.Sprintf("BIOSVersion %s has not yet upgraded", biosVersion.Name))
+}
+
+// ensureCompletionConditionInProgress patches Spec.CompletionConditionType, if set, to
+// Status=Unknown with ReasonBIOSVersionCompletionConditionInProgress, once maintenance has been
+// granted and the real upgrade work is about to start. It is a no-op if the condition is already
+// recording this phase, so it isn't re-patched every reconcile.
+func (r *BIOSVersionReconciler) ensureCompletionConditionInProgress(ctx context.Context, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) error {
+	if biosVersion.Spec.CompletionConditionType == "" {
+		return nil
+	}
+	existing := apimeta.FindStatusCondition(server.Status.Conditions, biosVersion.Spec.CompletionConditionType)
+	if existing != nil && existing.Reason == ReasonBIOSVersionCompletionConditionInProgress {
+		return nil
+	}
+	return utils.PatchServerCondition(ctx, r.Client, server, biosVersion.Spec.CompletionConditionType, metav1.ConditionUnknown, ReasonBIOSVersionCompletionConditionInProgress, fmt.Sprintf("BIOSVersion %s upgrade in progress", biosVersion.Name))
+}
+
+// markBIOSVersionReadinessGatesSatisfied patches ConditionReadinessGatesSatisfied to True if it
+// isn't already, so a previously-recorded failure does not remain stale once gates pass. It is a
+// no-op when no ReadinessGates are configured and no condition has been recorded yet, so ungated
+// resources never gain this condition out of nowhere; but if one was already set (e.g. from a
+// transient error on an otherwise-ungated resource), it gets cleared to True instead of staying
+// stuck at False forever.
+func (r *BIOSVersionReconciler) markBIOSVersionReadinessGatesSatisfied(ctx context.Context, biosVersion *systemv1alpha1.BIOSVersion, state systemv1alpha1.BIOSVersionState) error {
+	hasExisting := apimeta.FindStatusCondition(biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied) != nil
+	if len(biosVersion.Spec.ReadinessGates) == 0 && !hasExisting {
+		return nil
+	}
+	condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if condition.Status == metav1.ConditionTrue {
+		return nil
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(ReasonReadinessGatesSatisfied),
+		conditionutils.UpdateMessage("Readiness gates satisfied"),
+	); err != nil {
+		return fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	return r.updateStatus(ctx, biosVersion, state, biosVersion.Status.UpgradeTask, condition)
 }
 
 func (r *BIOSVersionReconciler) patchServerMaintenanceRef(ctx context.Context, biosVersion *systemv1alpha1.BIOSVersion, serverMaintenance *maintenancev1alpha1.ServerMaintenance) error {
@@ -852,8 +1005,8 @@ func (r *BIOSVersionReconciler) requestServerMaintenance(ctx context.Context, bi
 	}
 
 	opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {
-		if biosVersion.Spec.ServerMaintenancePolicy != nil {
-			serverMaintenance.Spec.Policy = *biosVersion.Spec.ServerMaintenancePolicy
+		if biosVersion.Spec.ServerMaintenancePolicy != "" {
+			serverMaintenance.Spec.Policy = biosVersion.Spec.ServerMaintenancePolicy
 		}
 		serverMaintenance.Spec.ServerRef = &corev1.LocalObjectReference{Name: server.Name}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance && serverMaintenance.Status.State != "" {
@@ -967,15 +1120,14 @@ func (r *BIOSVersionReconciler) checkUpdateBiosUpgradeStatus(
 		return false, fmt.Errorf("failed to update conditions: %w", err)
 	}
 
-	ok, err := checkpoint.Transitioned(r.Conditions, *completedCondition)
-	if !ok && err == nil {
+	if ok, err := checkpoint.Transitioned(r.Conditions, *completedCondition); !ok && err == nil {
 		log.V(1).Info("BIOS upgrade task has not progressed, retrying")
-		// The upgrade job has stalled or is too slow. We need to requeue with exponential backoff.
-		return true, nil
 	}
 
 	// TODO: Fail the state after certain timeout
-	return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, upgradeCurrentTaskStatus, completedCondition)
+	// Task is still in progress - keep requesting a requeue until it reaches a terminal
+	// state.
+	return true, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, upgradeCurrentTaskStatus, completedCondition)
 }
 
 func (r *BIOSVersionReconciler) upgradeBIOSVersion(
@@ -1072,21 +1224,32 @@ func (r *BIOSVersionReconciler) enqueueBiosVersionByServerRefs(ctx context.Conte
 		return nil
 	}
 
+	var requests []ctrl.Request
 	for _, biosVersion := range biosVersionList.Items {
 		if biosVersion.Spec.ServerRef == nil || biosVersion.Spec.ServerRef.Name != host.Name {
 			continue
 		}
 		// states where we do not need to requeue for host changes
-		if biosVersion.Spec.ServerMaintenanceRef == nil ||
-			biosVersion.Status.State == systemv1alpha1.BIOSVersionStateCompleted ||
-			biosVersion.Status.State == systemv1alpha1.BIOSVersionStateFailed {
-			return nil
+		if biosVersion.Status.State == systemv1alpha1.BIOSVersionStateFailed {
+			continue
 		}
-		return []ctrl.Request{{
+		switch biosVersion.Status.State {
+		case systemv1alpha1.BIOSVersionStateCompleted, "", systemv1alpha1.BIOSVersionStatePending:
+			// These states only depend on Server changes through ReadinessGates (before, or
+			// in the absence of, a ServerMaintenanceRef) or via an active ServerMaintenanceRef.
+			if len(biosVersion.Spec.ReadinessGates) == 0 && biosVersion.Spec.ServerMaintenanceRef == nil {
+				continue
+			}
+		default:
+			if biosVersion.Spec.ServerMaintenanceRef == nil {
+				continue
+			}
+		}
+		requests = append(requests, ctrl.Request{
 			NamespacedName: types.NamespacedName{Namespace: biosVersion.Namespace, Name: biosVersion.Name},
-		}}
+		})
 	}
-	return nil
+	return requests
 }
 
 func (r *BIOSVersionReconciler) enqueueBiosSettingsByBMC(ctx context.Context, obj client.Object) []ctrl.Request {
