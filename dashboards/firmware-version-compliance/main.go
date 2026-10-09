@@ -124,71 +124,6 @@ func bmcVersionColumns(cfg mmo.DashboardConfig) []table.ColumnSettings {
 	}
 }
 
-// topologyMetricLabels returns the actual Prometheus label names on kube_ironcore_info
-// for each canonical topology field. When a labelKey is configured it is used
-// directly (the existing Greenhouse/SAP KSM emits long underscore-separated names
-// like kubernetes_metal_cloud_sap_bb); when empty the canonical name is used
-// (new deployments using the MMO chart's CustomResourceState config emit bb,
-// nodename, zone directly).
-func topologyMetricLabels(cfg mmo.DashboardConfig) (bb, nodename, zone string) {
-	bb = "bb"
-	if cfg.Topology.BB.LabelKey != "" {
-		bb = cfg.Topology.BB.LabelKey
-	}
-	nodename = "nodename"
-	if cfg.Topology.Nodename.LabelKey != "" {
-		nodename = cfg.Topology.Nodename.LabelKey
-	}
-	zone = "zone"
-	if cfg.Topology.Zone.LabelKey != "" {
-		zone = cfg.Topology.Zone.LabelKey
-	}
-	return
-}
-
-// normaliseTopologyLabels wraps expr with label_replace calls that rename the
-// actual metric label names to the canonical names (bb, nodename, zone) expected
-// by column definitions. No-ops when the labelKey already equals the canonical name.
-func normaliseTopologyLabels(cfg mmo.DashboardConfig, expr string) string {
-	bb, nodename, zone := topologyMetricLabels(cfg)
-	if bb != "bb" {
-		expr = `label_replace(` + expr + `, "bb", "$1", "` + bb + `", "(.*)")`
-	}
-	if nodename != "nodename" {
-		expr = `label_replace(` + expr + `, "nodename", "$1", "` + nodename + `", "(.*)")`
-	}
-	if zone != "zone" {
-		expr = `label_replace(` + expr + `, "zone", "$1", "` + zone + `", "(.*)")`
-	}
-	return expr
-}
-
-// ksmJoinExpr builds the right-hand side of a PromQL binary join against
-// kube_ironcore_info. joinKey is the canonical label name to create on the
-// right side (matching the join label on the left side). kind is the
-// customresource_kind selector ("BMC" or "Server").
-func ksmJoinExpr(cfg mmo.DashboardConfig, kind, joinKey string) string {
-	bb, _, _ := topologyMetricLabels(cfg)
-	filter := `kube_ironcore_info{customresource_kind="` + kind + `",` + bb + `=~"$bb"}`
-	return `label_replace(` + filter + `, "` + joinKey + `", "$1", "name", "(.*)")`
-}
-
-// topologyJoin enriches a firmware metric with topology labels for table display.
-// kind is the customresource_kind value ("BMC" or "Server"); joinKey is the
-// label that links the firmware metric to the kube_ironcore_info series.
-func topologyJoin(cfg mmo.DashboardConfig, expr, kind, joinKey string) string {
-	bb, nodename, zone := topologyMetricLabels(cfg)
-	joined := expr +
-		` * on(` + joinKey + `) group_left(` + bb + `, ` + nodename + `, ` + zone + `)` +
-		` ` + ksmJoinExpr(cfg, kind, joinKey)
-	return normaliseTopologyLabels(cfg, joined)
-}
-
-// countJoin wraps a firmware metric in a count(), applying the $bb join for filtering.
-func countJoin(cfg mmo.DashboardConfig, expr, kind, joinKey string) string {
-	return `count(` + expr + ` * on(` + joinKey + `) group_left() ` + ksmJoinExpr(cfg, kind, joinKey) + `) or vector(0)`
-}
-
 // withComplianceLabel adds a synthetic "compliance" label to every series:
 // "Non-Compliant" for state != "Completed", "Compliant" for state = "Completed".
 // The inner replace sets all non-empty states to Non-Compliant; the outer
@@ -238,7 +173,7 @@ func main() {
 		dashboard.AddVariable("bb",
 			listvariable.List(
 				labelvalues.PrometheusLabelValues(func() string {
-					bb, _, _ := topologyMetricLabels(cfg)
+					bb, _, _ := mmo.TopologyMetricLabels(cfg)
 					return bb
 				}(),
 					labelvalues.Datasource("$datasource"),
@@ -300,27 +235,30 @@ func main() {
 			panelgroup.PanelHeight(4),
 			panelgroup.AddPanel("Compliant (on target version)",
 				stat.Chart(),
+				panel.Description("Servers whose observed BIOS version matches the desired version in the upgrade policy. When this count is nonzero and equals Total Tracked Servers, the upgrade campaign for the selected hardware is complete."),
 				panel.AddQuery(
 					mmo.PromQL(
-						countJoin(cfg, `metal_maintenance_biosversion_info{state="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server"),
+						mmo.CountJoin(cfg, `metal_maintenance_biosversion_info{state="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server"),
 						"$datasource",
 					),
 				),
 			),
 			panelgroup.AddPanel("Non-Compliant (not on target version)",
 				stat.Chart(),
+				panel.Description("Servers where the observed BIOS version does not yet match the desired version. These servers are pending, in-progress, or failed. Use the detail table below to identify which servers are affected and what state they are in."),
 				panel.AddQuery(
 					mmo.PromQL(
-						countJoin(cfg, `metal_maintenance_biosversion_info{state!="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server"),
+						mmo.CountJoin(cfg, `metal_maintenance_biosversion_info{state!="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server"),
 						"$datasource",
 					),
 				),
 			),
 			panelgroup.AddPanel("Total Tracked Servers",
 				stat.Chart(),
+				panel.Description("Total servers for which a BIOS firmware target is defined. Use this as the denominator when interpreting the Compliant and Non-Compliant counts. A count lower than expected means some servers have not yet had a BIOSVersion CR created."),
 				panel.AddQuery(
 					mmo.PromQL(
-						countJoin(cfg, `metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server"),
+						mmo.CountJoin(cfg, `metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server"),
 						"$datasource",
 					),
 				),
@@ -336,9 +274,10 @@ func main() {
 					table.WithColumnSettings(biosVersionColumns(cfg)),
 					table.WithEnableFiltering(true),
 				),
+				panel.Description("Per-server BIOS compliance detail showing observed and desired firmware versions alongside topology (building block, zone) and hardware identity (manufacturer, model). Non-Compliant rows sort to the top. Use the manufacturer and model filters above to focus on a specific hardware family, or the building block filter to scope to a deployment zone."),
 				panel.AddQuery(
 					mmo.PromQL(
-						withComplianceLabel(topologyJoin(cfg, `metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server")),
+						withComplianceLabel(mmo.TopologyJoin(cfg, `metal_maintenance_biosversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bios_model"}`, "Server", "server")),
 						"$datasource",
 					),
 				),
@@ -352,27 +291,30 @@ func main() {
 			panelgroup.PanelHeight(4),
 			panelgroup.AddPanel("Compliant (on target version)",
 				stat.Chart(),
+				panel.Description("Servers whose observed BMC firmware version matches the desired version in the upgrade policy. BMC upgrades require a BMC reboot, so a rising compliant count during an upgrade campaign indicates the operator is successfully cycling through the fleet."),
 				panel.AddQuery(
 					mmo.PromQL(
-						countJoin(cfg, `metal_maintenance_bmcversion_info{state="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc"),
+						mmo.CountJoin(cfg, `metal_maintenance_bmcversion_info{state="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc"),
 						"$datasource",
 					),
 				),
 			),
 			panelgroup.AddPanel("Non-Compliant (not on target version)",
 				stat.Chart(),
+				panel.Description("Servers where the observed BMC firmware version does not yet match the desired version. Use the detail table below to distinguish servers that are pending, actively upgrading, or in a failed state — each requires a different response."),
 				panel.AddQuery(
 					mmo.PromQL(
-						countJoin(cfg, `metal_maintenance_bmcversion_info{state!="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc"),
+						mmo.CountJoin(cfg, `metal_maintenance_bmcversion_info{state!="Completed",region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc"),
 						"$datasource",
 					),
 				),
 			),
 			panelgroup.AddPanel("Total Tracked Servers",
 				stat.Chart(),
+				panel.Description("Total servers for which a BMC firmware target is defined. Compare against the building block's total BMC count to confirm all servers are enrolled in firmware management."),
 				panel.AddQuery(
 					mmo.PromQL(
-						countJoin(cfg, `metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc"),
+						mmo.CountJoin(cfg, `metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc"),
 						"$datasource",
 					),
 				),
@@ -388,9 +330,10 @@ func main() {
 					table.WithColumnSettings(bmcVersionColumns(cfg)),
 					table.WithEnableFiltering(true),
 				),
+				panel.Description("Per-server BMC compliance detail showing observed and desired firmware versions alongside topology and hardware identity. Non-Compliant rows sort to the top. A server stuck in Non-Compliant with state InProgress for more than the expected upgrade duration (typically 10–20 min for a BMC reboot cycle) may require manual intervention."),
 				panel.AddQuery(
 					mmo.PromQL(
-						withComplianceLabel(topologyJoin(cfg, `metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc")),
+						withComplianceLabel(mmo.TopologyJoin(cfg, `metal_maintenance_bmcversion_info{region=~"$region",manufacturer=~"$manufacturer",model=~"$bmc_model"}`, "BMC", "bmc")),
 						"$datasource",
 					),
 				),
