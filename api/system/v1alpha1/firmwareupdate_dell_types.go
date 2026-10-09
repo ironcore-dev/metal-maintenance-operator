@@ -31,6 +31,20 @@ const (
 	DellVersionApplyPolicyAllowSameAndDowngradeVersion DellVersionApplyPolicy = "AllowSameAndDowngradeVersion"
 )
 
+// DellCertificateVerificationPolicy controls whether iDRAC verifies the TLS certificate
+// presented by the repository share (HTTPS/CIFS) before connecting, or ignores certificate
+// warnings (e.g. self-signed/untrusted certificates). If unset, certificates are verified.
+type DellCertificateVerificationPolicy string
+
+const (
+	// DellCertificateVerificationPolicyVerify requires the share's TLS certificate to be valid
+	// and trusted. This is the default behavior when the field is unset.
+	DellCertificateVerificationPolicyVerify DellCertificateVerificationPolicy = "Verify"
+	// DellCertificateVerificationPolicyIgnore instructs iDRAC to ignore certificate warnings
+	// (e.g. self-signed or untrusted certificates) when connecting to the share.
+	DellCertificateVerificationPolicyIgnore DellCertificateVerificationPolicy = "Ignore"
+)
+
 // RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
 // operation. State is intentionally a plain string mirroring bmc.DellJob.
 type RepositoryJob struct {
@@ -132,4 +146,11 @@ type DellFirmwareRepository struct {
 	// +kubebuilder:validation:Enum=AllowSameVersion;AllowDowngradeVersion;AllowSameAndDowngradeVersion
 	// +optional
 	ApplyVersionPolicy *DellVersionApplyPolicy `json:"applyVersionPolicy,omitempty"`
+
+	// CertificateVerification controls whether iDRAC verifies the TLS certificate presented by
+	// the repository share, or ignores certificate warnings (e.g. self-signed/untrusted
+	// certificates). If unset, certificates are verified.
+	// +kubebuilder:validation:Enum=Verify;Ignore
+	// +optional
+	CertificateVerification *DellCertificateVerificationPolicy `json:"certificateVerification,omitempty"`
 }

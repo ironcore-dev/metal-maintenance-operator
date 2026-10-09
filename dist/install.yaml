@@ -3013,6 +3013,15 @@ spec:
                     description: CatalogFile is the catalog file name within the share.
                       Defaults to "Catalog.xml".
                     type: string
+                  certificateVerification:
+                    description: |-
+                      CertificateVerification controls whether iDRAC verifies the TLS certificate presented by
+                      the repository share, or ignores certificate warnings (e.g. self-signed/untrusted
+                      certificates). If unset, certificates are verified.
+                    enum:
+                    - Verify
+                    - Ignore
+                    type: string
                   credentialsRef:
                     description: |-
                       CredentialsRef references the credentials used to authenticate against the share, if required.
