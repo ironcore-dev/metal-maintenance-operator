@@ -352,9 +352,39 @@ ingress:
   annotations: {}
 
 ## Namespaces to create for ServerReadinessCheck objects.
-## Argora (or other spec writers) create ServerReadinessCheck objects in these namespaces.
+## Spec writers create ServerReadinessCheck objects in these namespaces.
 ## Example: ["metal-servers"]
 serverReadinessNamespaces: []
+
+## kube-state-metrics CustomResourceState integration.
+## When enabled, deploys a ConfigMap holding a CustomResourceStateMetrics spec
+## (in templates/extras/kube-state-metrics-crs.yaml) for the ironcore.dev
+## CRs, producing kube_ironcore_info metrics.
+##
+## IMPORTANT: this ConfigMap does nothing on its own. Upstream kube-state-metrics
+## has NO label-based ConfigMap discovery — it reads a single CRS file via
+## --custom-resource-state-config-file, once, at startup. A sidecar/initContainer
+## must copy the label-matched ConfigMap(s) into that file. Open-source options:
+## kiwigrid/k8s-sidecar (single ConfigMap) or the Greenhouse kube-monitoring
+## plugin. The private cobaltcore-dev/ksm-crs-sidecar additionally merges/validates
+## multiple ConfigMaps. See docs/concepts/kube-state-metrics.md for the wiring.
+## Set enabled: true when running without Greenhouse.
+##
+kubeStateMetrics:
+  enabled: false
+
+  ## Labels applied to the ConfigMap. The consuming KSM sidecar/initContainer is
+  ## configured to discover ConfigMaps carrying the label below (see the concept
+  ## doc); keep it unless you mount the config another way.
+  labels:
+    dev.custom.kube-state-metrics: "true"
+
+  ## Extra CustomResourceState resource entries appended to the built-in
+  ## ironcore.dev set. Use this to scrape additional
+  ## third-party CRD groups without editing the template — each entry is a
+  ## standard kube-state-metrics CustomResourceState resource. Mirrors the
+  ## `additionalResources` key in Greenhouse's kube-state-metrics-shoots.yaml.
+  extraResources: []
 
 ## Additional Kubernetes objects to deploy alongside the operator.
 ## Accepts any valid Kubernetes manifest as a list entry.

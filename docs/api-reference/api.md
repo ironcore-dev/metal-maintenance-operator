@@ -56,7 +56,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `uri` _string_ | URI is the Redfish resource URI from the apply response.<br />For PATCH operations this is the request URI; for POST operations this is<br />the Location header value pointing to the created resource. |  |  |
 | `etag` _string_ | ETag is the drift-detection token captured after the last successful apply.<br />Either a real ETag returned by the BMC (e.g. W/"20B77DA6") or a SHA-256<br />hash of the GET response body prefixed with "hash:sha256:" for BMCs that<br />do not return ETag headers. |  |  |
-| `valueHash` _string_ | ValueHash is the SHA-256 hash of the effective (resolved) value at apply time.<br />Used to detect desired-state changes from ConfigMap/Secret rotation independent<br />of BMC-side drift. |  |  |
+| `valueHash` _string_ | ValueHash is the keyed HMAC-SHA256 fingerprint of the effective (resolved) value<br />at apply time. Used to detect desired-state changes from ConfigMap/Secret rotation<br />independent of BMC-side drift. |  |  |
+| `applyMethod` _string_ | ApplyMethod is the HTTP method used to apply the value (e.g. "POST" or "PATCH").<br />Values applied via POST create a (possibly ephemeral) resource whose URI cannot be<br />used for ETag-based drift detection. These keys are not read back from the BMC;<br />they are re-applied only when the desired value fingerprint (ValueHash) changes. |  |  |
 
 
 #### BMCSettingsSet
@@ -138,6 +139,7 @@ _Appears in:_
 | `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 | `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each<br />server that needs to be updated with the BMC settings. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
+| `writeOnlyDriftPolicy` _[WriteOnlyDriftPolicy](#writeonlydriftpolicy)_ | WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for<br />a resource containing a write-only key changes.  Defaults to Conservative.<br />See WriteOnlyDriftPolicy for full semantics and limitations. | Conservative | Enum: [Conservative Strict] <br /> |
 
 
 #### BMCSettingsState
@@ -424,6 +426,35 @@ _Appears in:_
 | `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 
 
+#### WriteOnlyDriftPolicy
+
+_Underlying type:_ _string_
+
+WriteOnlyDriftPolicy controls how the operator responds when the ETag for a
+resource that contains a write-only key changes.
+
+Write-only fields (e.g. passwords) cannot be read back from the BMC, so the
+operator cannot determine whether their values have drifted. The policy lets
+the operator accept the risk of an undetected drift, or always re-apply when
+an external write is detected (ETag changed), at the cost of a maintenance
+cycle on the server.
+
+Note: In conservative mode an externally changed write-only value
+(e.g. a password changed directly on the BMC) will NOT be automatically
+corrected unless the desired value in the referenced Secret is also changed.
+
+_Validation:_
+- Enum: [Conservative Strict]
+
+_Appears in:_
+- [BMCSettingsSpec](#bmcsettingsspec)
+
+| Field | Description |
+| --- | --- |
+| `Conservative` | WriteOnlyDriftPolicyConservative (default) — if the desired value<br />fingerprint has not changed since the last apply, do not re-apply the<br />write-only key even when the ETag has changed.<br /> |
+| `Strict` | WriteOnlyDriftPolicyStrict — re-apply write-only keys whenever the ETag<br />changes (external write detected), regardless of the desired value<br />fingerprint. No-op when the ETag is unchanged.<br /> |
+
+
 
 ## maintenance.metal.ironcore.dev/v1alpha1
 
@@ -470,6 +501,8 @@ _Appears in:_
 - [BMCSettingsTemplate](#bmcsettingstemplate)
 - [BMCVersionSpec](#bmcversionspec)
 - [BMCVersionTemplate](#bmcversiontemplate)
+- [FirmwareUpdateSpec](#firmwareupdatespec)
+- [FirmwareUpdateTemplate](#firmwareupdatetemplate)
 - [ServerMaintenanceSpec](#servermaintenancespec)
 - [SettingsTemplate](#settingstemplate)
 - [VersionTemplate](#versiontemplate)
@@ -675,6 +708,7 @@ Package v1alpha1 contains API Schema definitions for the system v1alpha1 API gro
 - [BIOSSettingsSet](#biossettingsset)
 - [BIOSVersion](#biosversion)
 - [BIOSVersionSet](#biosversionset)
+- [FirmwareUpdate](#firmwareupdate)
 
 
 
@@ -1040,6 +1074,236 @@ _Appears in:_
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
 | `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
+
+
+#### ComponentJobsSummary
+
+
+
+ComponentJobsSummary tallies the current pass's per-component jobs (ComponentJobs) by
+completion state, computed by the controller purely for observability (e.g. printcolumns);
+controller logic drives off ComponentJobs directly rather than this summary.
+
+
+
+_Appears in:_
+- [DellFirmwareUpdateStatus](#dellfirmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `total` _integer_ | Total is the number of component jobs discovered so far in the current pass. |  |  |
+| `completed` _integer_ | Completed is the number of component jobs that finished successfully. |  |  |
+| `inProgress` _integer_ | InProgress is the number of component jobs that have not yet reached a terminal state. |  |  |
+| `failed` _integer_ | Failed is the number of component jobs that finished in a failed state. |  |  |
+
+
+#### DellFirmwareRepository
+
+
+
+DellFirmwareRepository describes the network share hosting Dell's update repository/catalog,
+as consumed by DellSoftwareInstallationService.InstallFromRepository.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSpec](#firmwareupdatespec)
+- [FirmwareUpdateTemplate](#firmwareupdatetemplate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `shareType` _[DellShareType](#dellsharetype)_ | ShareType is the type of network share hosting the repository. |  | Enum: [NFS CIFS HTTP HTTPS] <br /> |
+| `address` _string_ | Address is the share's hostname or IP address (e.g. downloads.dell.com). |  |  |
+| `shareName` _string_ | ShareName is the network share name. Not required for HTTP/HTTPS catalogs. |  |  |
+| `catalogFile` _string_ | CatalogFile is the catalog file name within the share. Defaults to "Catalog.xml". |  |  |
+| `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required.<br />Must not be set when ShareType is HTTP. |  |  |
+| `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
+| `applyVersionPolicy` _[DellVersionApplyPolicy](#dellversionapplypolicy)_ | ApplyVersionPolicy controls whether packages already at the same version and/or older<br />than the currently installed version are applied. If unset, only genuine upgrades are applied. |  | Enum: [AllowSameVersion AllowDowngradeVersion AllowSameAndDowngradeVersion] <br /> |
+
+
+#### DellFirmwareUpdateStatus
+
+
+
+DellFirmwareUpdateStatus contains status fields specific to Dell's repository-based firmware
+update mechanism (DellSoftwareInstallationService.InstallFromRepository). Keeping these fields
+vendor-namespaced (rather than flat on FirmwareUpdateStatus) mirrors DellFirmwareRepository in
+the spec and leaves room for sibling vendor-specific status structs (e.g. for Fujitsu/Lenovo
+image-based updates) to be added to FirmwareUpdateStatus without colliding field names.
+
+
+
+_Appears in:_
+- [FirmwareUpdateStatus](#firmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `checkJob` _[RepositoryJob](#repositoryjob)_ | CheckJob contains the state of the dry-run catalog-check job. |  |  |
+| `updateJob` _[RepositoryJob](#repositoryjob)_ | UpdateJob contains the state of the main apply job. |  |  |
+| `componentJobs` _[RepositoryJob](#repositoryjob) array_ | ComponentJobs contains the state of the per-component jobs spawned by the current pass's apply job. |  |  |
+| `componentJobsSummary` _[ComponentJobsSummary](#componentjobssummary)_ | ComponentJobsSummary tallies ComponentJobs by completion state. |  |  |
+| `baselineJobIDs` _string array_ | BaselineJobIDs contains the iDRAC job IDs present just before issuing the apply call for the<br />current pass, used to diff and discover newly spawned component jobs. A non-nil (possibly<br />empty) slice indicates the baseline has been captured for the current pass. |  |  |
+
+
+#### DellShareType
+
+_Underlying type:_ _string_
+
+DellShareType is the type of network share hosting the Dell update repository/catalog.
+
+
+
+_Appears in:_
+- [DellFirmwareRepository](#dellfirmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `NFS` |  |
+| `CIFS` |  |
+| `HTTP` |  |
+| `HTTPS` |  |
+
+
+#### DellVersionApplyPolicy
+
+_Underlying type:_ _string_
+
+DellVersionApplyPolicy controls whether Dell's InstallFromRepository job applies packages
+that are already at the same version and/or older than the currently installed version.
+If unset, only genuine upgrades (newer than the installed version) are applied.
+
+
+
+_Appears in:_
+- [DellFirmwareRepository](#dellfirmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `AllowSameVersion` | DellVersionApplyPolicyAllowSameVersion re-applies packages already at the same version.<br /> |
+| `AllowDowngradeVersion` | DellVersionApplyPolicyAllowDowngradeVersion allows applying packages older than the currently installed version.<br /> |
+| `AllowSameAndDowngradeVersion` | DellVersionApplyPolicyAllowSameAndDowngradeVersion allows both re-applying same-version packages and downgrades.<br /> |
+
+
+#### FirmwareUpdate
+
+
+
+FirmwareUpdate is the Schema for the firmwareupdates API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `FirmwareUpdate` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[FirmwareUpdateSpec](#firmwareupdatespec)_ |  |  |  |
+| `status` _[FirmwareUpdateStatus](#firmwareupdatestatus)_ |  |  |  |
+
+
+#### FirmwareUpdateSpec
+
+
+
+FirmwareUpdateSpec defines the desired state of FirmwareUpdate.
+
+
+
+_Appears in:_
+- [FirmwareUpdate](#firmwareupdate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
+| `progressDeadlineSeconds` _integer_ | ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward<br />progress before the update is marked Failed. Defaults to 3600 (1 hour). | 3600 |  |
+| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection. |  |  |
+
+
+#### FirmwareUpdateState
+
+_Underlying type:_ _string_
+
+FirmwareUpdateState describes the current state of a FirmwareUpdate.
+
+
+
+_Appears in:_
+- [FirmwareUpdateStatus](#firmwareupdatestatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | FirmwareUpdateStatePending specifies that the firmware update is waiting.<br /> |
+| `InProgress` | FirmwareUpdateStateInProgress specifies that the firmware update is in progress.<br /> |
+| `Completed` | FirmwareUpdateStateCompleted specifies that the firmware update has been completed.<br /> |
+| `Failed` | FirmwareUpdateStateFailed specifies that the firmware update has failed.<br /> |
+
+
+#### FirmwareUpdateStatus
+
+
+
+FirmwareUpdateStatus defines the observed state of FirmwareUpdate.
+
+
+
+_Appears in:_
+- [FirmwareUpdate](#firmwareupdate)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `state` _[FirmwareUpdateState](#firmwareupdatestate)_ | State represents the current state of the firmware update. |  |  |
+| `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to the ServerMaintenance object the controller created for this update. |  |  |
+| `dellStatus` _[DellFirmwareUpdateStatus](#dellfirmwareupdatestatus)_ | DellStatus contains status fields specific to Dell's repository-based firmware update<br />mechanism. Populated only when Spec.DellRepository is set. |  |  |
+| `lastProgressTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastProgressTime records the last time the controller observed forward progress.<br />Used together with ProgressDeadlineSeconds to detect stalled updates. |  |  |
+| `passCount` _integer_ | PassCount is the number of check->apply->track->recheck passes completed so far. |  |  |
+| `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
+| `observedGeneration` _integer_ | ObservedGeneration is the most recent generation observed by the controller. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest available observations of the firmware update state. |  |  |
+
+
+#### FirmwareUpdateTemplate
+
+
+
+FirmwareUpdateTemplate defines the desired firmware update parameters.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSpec](#firmwareupdatespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+
+
+#### RepositoryJob
+
+
+
+RepositoryJob represents a Dell iDRAC job resource tracking a repository-based firmware
+operation. State is intentionally a plain string mirroring bmc.DellJob.
+
+
+
+_Appears in:_
+- [DellFirmwareUpdateStatus](#dellfirmwareupdatestatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `jobID` _string_ |  |  |  |
+| `name` _string_ |  |  |  |
+| `jobType` _string_ |  |  |  |
+| `state` _string_ |  |  |  |
+| `message` _string_ |  |  |  |
+| `percentComplete` _integer_ |  |  |  |
 
 
 

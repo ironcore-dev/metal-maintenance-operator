@@ -33,6 +33,23 @@ dist/chart/charts/
 # Local telemetry collector binary for smoke tests; not part of the source tree.
 /telemetry-collector
 
+# Perses plugin tarballs — bin/plugins-archive/ is covered by bin/* above.
+# The root-level plugins-archive is a symlink into bin/ created by make perses-server.
+# The root-level plugins/ is extracted by the perses server at startup from plugins-archive/.
+/plugins-archive
+/plugins
+
+# Local datasource config — contains environment-specific Prometheus URLs; copy from datasource.yaml.example
+dashboards/dev-provisioning/datasource.yaml
+
+# Compiled dashboard binaries produced by `go build .` in each dashboard directory
+dashboards/firmware-version-compliance/firmware-version-compliance
+dashboards/operator-health/operator-health
+dashboards/redfish-telemetry/redfish-telemetry
+
+# percli intermediate output directories (dashboards/built/*.json are the canonical outputs)
+dashboards/built/*/
+
 # Local server lists for hack/verify-test-events contain real BMC credentials.
 hack/verify-test-events/servers.local.yaml
 hack/verify-test-events/*.local.yaml

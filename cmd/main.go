@@ -50,11 +50,15 @@ import (
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/indexers"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	webhookbaseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/baseboard/v1alpha1"
 	webhooksystemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
+
+const maxRepositoryPassesLimit = 5
+const maxFailedAutoRetryCount = 10
 
 var (
 	scheme   = runtime.NewScheme()
@@ -99,6 +103,7 @@ func main() {
 	var resyncInterval time.Duration
 	var biosSettingsTimeoutExpiry time.Duration
 	var rebootTimeoutExpiry time.Duration
+	var maxRepositoryPasses int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -150,6 +155,8 @@ func main() {
 		"Timeout for BIOS settings application before the task is considered expired.")
 	flag.DurationVar(&rebootTimeoutExpiry, "reboot-timeout-expiry", 10*time.Minute,
 		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
+	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", maxRepositoryPassesLimit,
+		"Maximum number of check->apply->track->recheck passes a FirmwareUpdate may take before being marked Failed.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -200,6 +207,19 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	if maxRepositoryPasses < 1 || maxRepositoryPasses > maxRepositoryPassesLimit {
+		setupLog.Error(
+			nil, "Failed to start FirmwareUpdate controller: invalid --max-repository-passes value",
+			"value", maxRepositoryPasses, "min", 1, "max", maxRepositoryPassesLimit)
+		os.Exit(1)
+	}
+
+	if defaultFailedAutoRetryCountInt < 0 || defaultFailedAutoRetryCountInt > maxFailedAutoRetryCount {
+		setupLog.Error(nil, "Failed to start FirmwareUpdate controller: invalid --default-failed-auto-retry-count value",
+			"value", defaultFailedAutoRetryCountInt, "min", 0, "max", maxFailedAutoRetryCount)
+		os.Exit(1)
+	}
+
 	if sanitizationNamespace == "" {
 		setupLog.Error(nil, "Must specify --sanitization-namespace")
 		os.Exit(1)
@@ -210,6 +230,13 @@ func main() {
 	}
 	if reportBaseURL == "" {
 		setupLog.Error(nil, "Must specify --report-base-url")
+		os.Exit(1)
+	}
+	if managerNamespace == "" {
+		managerNamespace = os.Getenv("POD_NAMESPACE")
+	}
+	if managerNamespace == "" {
+		setupLog.Error(nil, "Manager configuration omitted --manager-namespace and POD_NAMESPACE is not set")
 		os.Exit(1)
 	}
 
@@ -391,6 +418,18 @@ func main() {
 	}
 	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
 
+	const hmacKeyName = "metal-maintenance-operator-hmac-key"
+	bootstrapClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		setupLog.Error(err, "Failed to create bootstrap client for HMAC signing key")
+		os.Exit(1)
+	}
+	hmacKey, err := utils.EnsureHMACKey(context.Background(), bootstrapClient, managerNamespace, hmacKeyName)
+	if err != nil {
+		setupLog.Error(err, "Failed to ensure HMAC signing key")
+		os.Exit(1)
+	}
+
 	if err = (&baseboardctrl.BMCSettingsReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
@@ -401,6 +440,7 @@ func main() {
 		Conditions:                  accessor,
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		HMACKey:                     hmacKey,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BMCSettings controller")
 		os.Exit(1)
@@ -472,6 +512,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&systemctrl.FirmwareUpdateReconciler{
+		Client:                      mgr.GetClient(),
+		ManagerNamespace:            managerNamespace,
+		DefaultProtocol:             protocol,
+		SkipCertValidation:          skipCertValidation,
+		Scheme:                      mgr.GetScheme(),
+		ResyncInterval:              resyncInterval,
+		Conditions:                  accessor,
+		BMCOptions:                  bmcOpts,
+		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		MaxRepositoryPasses:         int32(maxRepositoryPasses),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create FirmwareUpdate controller")
+		os.Exit(1)
+	}
+
 	if err = (&systemctrl.BIOSSettingsSetReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
@@ -508,6 +564,11 @@ func main() {
 
 		if err = webhooksystemv1alpha1.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
+			os.Exit(1)
+		}
+
+		if err = webhooksystemv1alpha1.SetupFirmwareUpdateWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up FirmwareUpdate webhook")
 			os.Exit(1)
 		}
 	}

@@ -1,0 +1,33 @@
+name: Dashboard Checks
+
+on:
+  pull_request:
+    paths:
+    - 'dashboards/**'
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard-checks:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: dashboards/go.mod
+    - name: Download percli
+      run: make percli
+    - name: Lint dashboards
+      run: make dashboard-lint
+    - name: Compare the expected and actual dashboards/built/ directory
+      run: |
+        git add -A -- dashboards/built/
+        git diff --cached --quiet -- dashboards/built/ || {
+          echo "Detected uncommitted changes in dashboards/built/. Run 'make dashboard-build' and commit the result."
+          echo "See status below:"
+          git diff --cached -- dashboards/built/
+          exit 1
+        }

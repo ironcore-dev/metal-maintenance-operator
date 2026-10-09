@@ -1,0 +1,86 @@
+{{- if .Values.kubeStateMetrics.enabled }}
+{{- /*
+  Built-in CustomResourceState resource specs. These mirror the groups MMO (and
+  its companion operators) ship CRDs for, so the effective kube-state-metrics
+  config matches the Greenhouse kube-state-metrics-shoots.yaml overlay.
+
+  kube-state-metrics matches `groupVersionKind.group` exactly, so every
+  ironcore.dev sub-group is enumerated separately (a single `ironcore.dev` entry
+  would match none of the real resources). All ironcore sub-groups share the
+  `kube_ironcore` prefix, so each emits `kube_ironcore_info` distinguished by the
+  auto-added customresource_group/customresource_kind labels — keeping the
+  firmware-version-compliance dashboard's `kube_ironcore_info` join intact.
+
+  These are intrinsic to the operator and not meant to be overridden per install.
+  To scrape additional third-party groups, append entries via
+  `kubeStateMetrics.extraResources` in values.yaml instead of editing this list.
+*/}}
+{{- $ironcoreGroups := list
+      "metal.ironcore.dev"
+      "baseboard.metal.ironcore.dev"
+      "config.metal.ironcore.dev"
+      "maintenance.metal.ironcore.dev"
+      "readiness.metal.ironcore.dev"
+      "system.metal.ironcore.dev"
+      "vendorconsole.metal.ironcore.dev"
+      "boot.ironcore.dev"
+}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "metal-maintenance-operator.fullname" . }}-ironcore-crs
+  namespace: {{ include "metal-maintenance-operator.namespaceName" . }}
+  {{- with .Values.kubeStateMetrics.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  custom.yaml: |
+    kind: CustomResourceStateMetrics
+    spec:
+      resources:
+        {{- range $group := $ironcoreGroups }}
+        - groupVersionKind:
+            group: {{ $group }}
+            version: "*"
+            kind: "*"
+          metricNamePrefix: kube_ironcore
+          labelsFromPath:
+            name: [metadata, name]
+            namespace: [metadata, namespace]
+          metrics:
+            - name: info
+              help: "Information and labels for {{ $group }} resources"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    "*": [metadata, labels]
+        {{- end }}
+        # BMC hardware identity: exposes status/spec fields not in metadata labels.
+        # Separate metric name (kube_ironcore_bmc_info) avoids polluting other ironcore
+        # CRDs (Server, Machine, etc.) with empty manufacturer/model labels.
+        - groupVersionKind:
+            group: metal.ironcore.dev
+            version: "*"
+            kind: BMC
+          metricNamePrefix: kube_ironcore
+          labelsFromPath:
+            name: [metadata, name]
+            namespace: [metadata, namespace]
+            manufacturer: [status, manufacturer]
+            model: [status, model]
+            firmware_version: [status, firmwareVersion]
+            bmc_hostname: [spec, hostname]
+          metrics:
+            - name: bmc_info
+              help: "Hardware identity for metal.ironcore.dev BMC resources"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    "*": [metadata, labels]
+        {{- with .Values.kubeStateMetrics.extraResources }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

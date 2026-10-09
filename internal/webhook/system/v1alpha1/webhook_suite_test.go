@@ -118,6 +118,9 @@ var _ = BeforeSuite(func() {
 	err = SetupBIOSVersionWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = SetupFirmwareUpdateWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:webhook
 
 	go func() {

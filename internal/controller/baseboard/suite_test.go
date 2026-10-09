@@ -129,6 +129,7 @@ func SetupTest(redfishMockServers []netip.AddrPort) *corev1.Namespace {
 		Expect((&BMCSettingsReconciler{
 			Client:             k8sManager.GetClient(),
 			ManagerNamespace:   ns.Name,
+			HMACKey:            testHMACKey,
 			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
 			SkipCertValidation: true,
 			Scheme:             k8sManager.GetScheme(),
