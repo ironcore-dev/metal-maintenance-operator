@@ -13,9 +13,13 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/recorder"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -24,7 +28,21 @@ const (
 
 	// CriticalEventConditionType is the condition Type
 	CriticalEventConditionType = "CriticalEventReceived"
+
+	// AlertGaugeMetricName is the Prometheus metric name for the
+	// per-Server critical-alert gauge.
+	AlertGaugeMetricName = "redfish_server_critical_alert"
 )
+
+// NewCriticalAlertGauge creates the redfish_server_critical_alert GaugeVec.
+// It must be registered with a prometheus.Registerer before use.
+func NewCriticalAlertGauge() *prometheus.GaugeVec {
+	return prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: AlertGaugeMetricName,
+		Help: "1 if the Server has an active CriticalEventReceived condition, 0 otherwise. " +
+			"Derived from Server.status.conditions and survives operator restarts.",
+	}, []string{"server", "namespace"})
+}
 
 // ConditionHandler sets CriticalEventReceived on every Server whose
 // spec.bmcRef.name matches bmcName.
@@ -33,6 +51,12 @@ type ConditionHandler struct {
 	// BMCRefField indexer.
 	Client client.Client
 	Log    logr.Logger
+	// EventRecorder is optional. When set, a Kubernetes Event is emitted
+	// for each Server after the CriticalEventReceived condition is patched.
+	EventRecorder recorder.EventRecorder
+	// AlertGauge is optional. When set, it is set to 1 for each Server
+	// after the CriticalEventReceived condition is patched.
+	AlertGauge *prometheus.GaugeVec
 }
 
 // HandleCritical lists Servers indexed by bmcName, sets the condition on each
@@ -73,6 +97,17 @@ func (h *ConditionHandler) HandleCritical(ctx context.Context, bmcName string, e
 		}
 		h.Log.V(1).Info("Critical event condition applied",
 			"server", server.Name, "bmc", bmcName, "eventID", event.EventID)
+		if h.AlertGauge != nil {
+			h.AlertGauge.With(prometheus.Labels{
+				"server":    server.Name,
+				"namespace": server.Namespace,
+			}).Set(1)
+		}
+		if h.EventRecorder != nil {
+			h.EventRecorder.Eventf(server, nil, corev1.EventTypeWarning, "HardwareAlert", "HardwareAlertReceived",
+				"Critical Redfish event [%s]: %s (component: %s, at: %s)",
+				event.MessageID, event.Message, event.OriginOfCondition, event.EventTimestamp)
+		}
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("failed to patch %d/%d servers: %w", len(failed), len(serverList.Items), errors.Join(failed...))
@@ -92,6 +127,35 @@ func (h *ConditionHandler) patchCondition(ctx context.Context, server *metalv1al
 		client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 		return fmt.Errorf("patch server %s status: %w", server.Name, err)
 	}
+	return nil
+}
+
+// SetAlertGauge sets the alert gauge to the given value (0 or 1) for a
+// Server. Used for startup pre-warming and condition clearing.
+func (h *ConditionHandler) SetAlertGauge(serverName, namespace string, value float64) {
+	if h.AlertGauge == nil {
+		return
+	}
+	h.AlertGauge.With(prometheus.Labels{
+		"server":    serverName,
+		"namespace": namespace,
+	}).Set(value)
+}
+
+// ClearCriticalAlert sets CriticalEventReceived to False on the Server and
+// sets the alert gauge to 0. Call this when the hardware fault is resolved.
+func (h *ConditionHandler) ClearCriticalAlert(ctx context.Context, server *metalv1alpha1.Server, reason, message string) error {
+	condition := metav1.Condition{
+		Type:               CriticalEventConditionType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: server.Generation,
+	}
+	if err := h.patchCondition(ctx, server, condition); err != nil {
+		return err
+	}
+	h.SetAlertGauge(server.Name, server.Namespace, 0)
 	return nil
 }
 
