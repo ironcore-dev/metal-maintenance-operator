@@ -15,6 +15,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/subscriptions"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/stmcginnis/gofish/schemas"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -367,4 +368,30 @@ func newRec(t *testing.T, c client.Client, cfg *subscriptions.Config, res *fakeR
 		t.Fatalf("InitForTest: %v", err)
 	}
 	return r
+}
+
+// serverObject builds a Server with the given BMC name reference and status fields.
+func serverObject(name, bmcName, manufacturer, model string) *metalv1alpha1.Server {
+	return &metalv1alpha1.Server{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       metalv1alpha1.ServerSpec{BMCRef: &v1.LocalObjectReference{Name: bmcName}},
+		Status:     metalv1alpha1.ServerStatus{Manufacturer: manufacturer, Model: model},
+	}
+}
+
+// newClientWithServerIndex is newClientWith + a Server field index for
+// spec.bmcRef.name, required for client.MatchingFields in bmcRefWithServerFallback.
+func newClientWithServerIndex(t *testing.T, objs ...client.Object) client.Client {
+	t.Helper()
+	return fake.NewClientBuilder().
+		WithScheme(reconcilerScheme(t)).
+		WithObjects(objs...).
+		WithIndex(&metalv1alpha1.Server{}, "spec.bmcRef.name", func(obj client.Object) []string {
+			srv := obj.(*metalv1alpha1.Server)
+			if srv.Spec.BMCRef == nil {
+				return nil
+			}
+			return []string{srv.Spec.BMCRef.Name}
+		}).
+		Build()
 }

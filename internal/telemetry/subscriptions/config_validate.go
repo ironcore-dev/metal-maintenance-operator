@@ -33,6 +33,7 @@ var knownVendors = map[bmc.Manufacturer]struct{}{
 	bmc.ManufacturerLenovo:     {},
 	bmc.ManufacturerHPE:        {},
 	bmc.ManufacturerSupermicro: {},
+	bmc.ManufacturerBull:       {},
 }
 
 // supportedVendorList returns the canonical vendor strings in a stable
@@ -42,6 +43,7 @@ var supportedVendorList = []string{
 	string(bmc.ManufacturerHPE),
 	string(bmc.ManufacturerLenovo),
 	string(bmc.ManufacturerSupermicro),
+	string(bmc.ManufacturerBull),
 }
 
 func isKnownVendor(v string) bool {
