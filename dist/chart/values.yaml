@@ -142,7 +142,7 @@ rbac:
   ## - false (default): ClusterRole/ClusterRoleBinding (all namespaces)
   ## - true: Role/RoleBinding (release namespace only)
   ##
-  namespaced: true
+  namespaced: false
 
   ## Helper roles for CRD management (admin/editor/viewer)
   ##
