@@ -199,11 +199,14 @@ func prewarmAlertGauge(ctx context.Context, c client.Client, handler *criticalev
 	}
 	for i := range serverList.Items {
 		srv := &serverList.Items[i]
+		if srv.Spec.BMCRef == nil {
+			continue
+		}
 		cond := apimeta.FindStatusCondition(srv.Status.Conditions, criticalevent.CriticalEventConditionType)
 		if cond != nil && cond.Status == "True" {
-			handler.SetAlertGauge(srv.Name, srv.Namespace, 1)
+			handler.SetAlertGauge(srv.Spec.BMCRef.Name, 1)
 		} else if cond != nil {
-			handler.SetAlertGauge(srv.Name, srv.Namespace, 0)
+			handler.SetAlertGauge(srv.Spec.BMCRef.Name, 0)
 		}
 	}
 	return nil

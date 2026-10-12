@@ -41,7 +41,7 @@ func NewCriticalAlertGauge() *prometheus.GaugeVec {
 		Name: AlertGaugeMetricName,
 		Help: "1 if the Server has an active CriticalEventReceived condition, 0 otherwise. " +
 			"Derived from Server.status.conditions and survives operator restarts.",
-	}, []string{"server", "namespace"})
+	}, []string{"hostname"})
 }
 
 // ConditionHandler sets CriticalEventReceived on every Server whose
@@ -99,8 +99,7 @@ func (h *ConditionHandler) HandleCritical(ctx context.Context, bmcName string, e
 			"server", server.Name, "bmc", bmcName, "eventID", event.EventID)
 		if h.AlertGauge != nil {
 			h.AlertGauge.With(prometheus.Labels{
-				"server":    server.Name,
-				"namespace": server.Namespace,
+				"hostname": bmcName,
 			}).Set(1)
 		}
 		if h.EventRecorder != nil {
@@ -131,14 +130,13 @@ func (h *ConditionHandler) patchCondition(ctx context.Context, server *metalv1al
 }
 
 // SetAlertGauge sets the alert gauge to the given value (0 or 1) for a
-// Server. Used for startup pre-warming and condition clearing.
-func (h *ConditionHandler) SetAlertGauge(serverName, namespace string, value float64) {
+// BMC hostname. Used for startup pre-warming and condition clearing.
+func (h *ConditionHandler) SetAlertGauge(hostname string, value float64) {
 	if h.AlertGauge == nil {
 		return
 	}
 	h.AlertGauge.With(prometheus.Labels{
-		"server":    serverName,
-		"namespace": namespace,
+		"hostname": hostname,
 	}).Set(value)
 }
 
@@ -155,7 +153,11 @@ func (h *ConditionHandler) ClearCriticalAlert(ctx context.Context, server *metal
 	if err := h.patchCondition(ctx, server, condition); err != nil {
 		return err
 	}
-	h.SetAlertGauge(server.Name, server.Namespace, 0)
+	hostname := ""
+	if server.Spec.BMCRef != nil {
+		hostname = server.Spec.BMCRef.Name
+	}
+	h.SetAlertGauge(hostname, 0)
 	return nil
 }
 
