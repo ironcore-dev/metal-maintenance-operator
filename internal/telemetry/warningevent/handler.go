@@ -58,8 +58,8 @@ func (h *Handler) HandleWarning(ctx context.Context, bmcName string, event sink.
 	for i := range serverList.Items {
 		server := &serverList.Items[i]
 		h.EventRecorder.Eventf(server, nil, corev1.EventTypeWarning, "HardwareAlert", "HardwareAlertReceived",
-			"Warning Redfish event [%s]: %s (component: %s, at: %s)",
-			event.MessageID, event.Message, event.OriginOfCondition, event.EventTimestamp)
+			"Warning Redfish event [%s]: %s (hostname: %s, component: %s, at: %s)",
+			event.MessageID, event.Message, bmcName, event.OriginOfCondition, event.EventTimestamp)
 		h.Log.V(1).Info("Warning event emitted",
 			"server", server.Name, "bmc", bmcName, "eventID", event.EventID)
 	}

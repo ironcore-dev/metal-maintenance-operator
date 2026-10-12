@@ -105,8 +105,8 @@ func (h *ConditionHandler) HandleCritical(ctx context.Context, bmcName string, e
 		}
 		if h.EventRecorder != nil {
 			h.EventRecorder.Eventf(server, nil, corev1.EventTypeWarning, "HardwareAlert", "HardwareAlertReceived",
-				"Critical Redfish event [%s]: %s (component: %s, at: %s)",
-				event.MessageID, event.Message, event.OriginOfCondition, event.EventTimestamp)
+				"Critical Redfish event [%s]: %s (hostname: %s, component: %s, at: %s)",
+				event.MessageID, event.Message, bmcName, event.OriginOfCondition, event.EventTimestamp)
 		}
 	}
 	if len(failed) > 0 {
