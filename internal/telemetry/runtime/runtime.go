@@ -95,6 +95,8 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		return fmt.Errorf("init test-event sink: %w", err)
 	}
 
+	var criticalHandler *criticalevent.ConditionHandler
+
 	if opts.EnableCriticalEventHandler {
 		alertGauge := criticalevent.NewCriticalAlertGauge()
 		if err := ctrlmetrics.Registry.Register(alertGauge); err != nil {
@@ -110,6 +112,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		// every Critical event writes the CriticalEventReceived condition,
 		// emits a Kubernetes Event, and sets the alert gauge to 1.
 		eventSink.OnCritical = handler.HandleCritical
+		criticalHandler = handler
 
 		// Pre-warm the gauge after the cache syncs so the metric is correct
 		// immediately after a pod restart, before any new events arrive.
@@ -169,6 +172,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		Factory:          &subscriptionClientFactory{insecureTLS: opts.InsecureTLS},
 		Sink:             eventSink,
 		MetricReportSink: metricSink,
+		AlertHandler:     criticalHandler,
 		TestRecorder:     testSink,
 		ReceiverURL:      opts.ReceiverURL,
 		SubscriberID:     opts.SubscriberID,

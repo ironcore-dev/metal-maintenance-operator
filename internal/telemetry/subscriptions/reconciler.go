@@ -66,6 +66,12 @@ type BMCReconciler struct {
 	// same Forget-on-teardown contract as Sink, independent nil-ability.
 	MetricReportSink sink.MetricReportSink
 
+	// AlertHandler is optional. When set, Forget is called on BMC teardown
+	// to delete the per-BMC alert gauge series.
+	AlertHandler interface {
+		Forget(hostname string)
+	}
+
 	// ReceiverURL is the externally-reachable base URL the BMC POSTs to.
 	// Destination URLs are computed as
 	// "<ReceiverURL>/serverevents[/<SubscriberID>]/alerts/{bmcName}".
@@ -188,6 +194,9 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			if r.MetricReportSink != nil {
 				r.MetricReportSink.Forget(req.Name)
 			}
+			if r.AlertHandler != nil {
+				r.AlertHandler.Forget(req.Name)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get BMC %q: %w", req.Name, err)
@@ -209,6 +218,9 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 		if r.MetricReportSink != nil {
 			r.MetricReportSink.Forget(req.Name)
+		}
+		if r.AlertHandler != nil {
+			r.AlertHandler.Forget(req.Name)
 		}
 		if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, bmc, bmcSubscriptionFinalizer); err != nil {
 			return ctrl.Result{}, fmt.Errorf("remove finalizer on BMC %q: %w", req.Name, err)

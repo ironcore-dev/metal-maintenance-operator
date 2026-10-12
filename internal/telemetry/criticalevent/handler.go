@@ -140,6 +140,15 @@ func (h *ConditionHandler) SetAlertGauge(hostname string, value float64) {
 	}).Set(value)
 }
 
+// Forget deletes the alert gauge series for hostname. Call this when a BMC is
+// removed so the metric does not linger after the hardware is gone.
+func (h *ConditionHandler) Forget(hostname string) {
+	if h.AlertGauge == nil {
+		return
+	}
+	h.AlertGauge.Delete(prometheus.Labels{"hostname": hostname})
+}
+
 // ClearCriticalAlert sets CriticalEventReceived to False on the Server and
 // sets the alert gauge to 0. Call this when the hardware fault is resolved.
 func (h *ConditionHandler) ClearCriticalAlert(ctx context.Context, server *metalv1alpha1.Server, reason, message string) error {
