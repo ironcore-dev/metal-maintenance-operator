@@ -58,7 +58,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `uri` _string_ | URI is the Redfish resource URI from the apply response.<br />For PATCH operations this is the request URI; for POST operations this is<br />the Location header value pointing to the created resource. |  |  |
 | `etag` _string_ | ETag is the drift-detection token captured after the last successful apply.<br />Either a real ETag returned by the BMC (e.g. W/"20B77DA6") or a SHA-256<br />hash of the GET response body prefixed with "hash:sha256:" for BMCs that<br />do not return ETag headers. |  |  |
-| `valueHash` _string_ | ValueHash is the SHA-256 hash of the effective (resolved) value at apply time.<br />Used to detect desired-state changes from ConfigMap/Secret rotation independent<br />of BMC-side drift. |  |  |
+| `valueHash` _string_ | ValueHash is the keyed HMAC-SHA256 fingerprint of the effective (resolved) value<br />at apply time. Used to detect desired-state changes from ConfigMap/Secret rotation<br />independent of BMC-side drift. |  |  |
+| `applyMethod` _string_ | ApplyMethod is the HTTP method used to apply the value (e.g. "POST" or "PATCH").<br />Values applied via POST create a (possibly ephemeral) resource whose URI cannot be<br />used for ETag-based drift detection. These keys are not read back from the BMC;<br />they are re-applied only when the desired value fingerprint (ValueHash) changes. |  |  |
 
 
 #### BMCSettingsSet
@@ -138,6 +139,7 @@ _Appears in:_
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each<br />server that needs to be updated with the BMC settings. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
+| `writeOnlyDriftPolicy` _[WriteOnlyDriftPolicy](#writeonlydriftpolicy)_ | WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for<br />a resource containing a write-only key changes.  Defaults to Conservative.<br />See WriteOnlyDriftPolicy for full semantics and limitations. | Conservative | Enum: [Conservative Strict] <br /> |
 
 
 #### BMCSettingsState
@@ -634,6 +636,34 @@ _Appears in:_
 | `DualAccount` | RotationStrategyDualAccount creates two BMCUser objects per BMC.<br />The account being rotated is never the one currently in use,<br />eliminating any lockout window. Required for operator admin accounts.<br /> |
 | `SingleAccount` | RotationStrategySingleAccount creates one BMCUser per BMC.<br />A narrow failure window exists between hardware password change and<br />Secret update. Acceptable for non-critical read-only accounts.<br /> |
 
+
+#### WriteOnlyDriftPolicy
+
+_Underlying type:_ _string_
+
+WriteOnlyDriftPolicy controls how the operator responds when the ETag for a
+resource that contains a write-only key changes.
+
+Write-only fields (e.g. passwords) cannot be read back from the BMC, so the
+operator cannot determine whether their values have drifted. The policy lets
+the operator accept the risk of an undetected drift, or always re-apply when
+an external write is detected (ETag changed), at the cost of a maintenance
+cycle on the server.
+
+Note: In conservative mode an externally changed write-only value
+(e.g. a password changed directly on the BMC) will NOT be automatically
+corrected unless the desired value in the referenced Secret is also changed.
+
+_Validation:_
+- Enum: [Conservative Strict]
+
+_Appears in:_
+- [BMCSettingsSpec](#bmcsettingsspec)
+
+| Field | Description |
+| --- | --- |
+| `Conservative` | WriteOnlyDriftPolicyConservative (default) — if the desired value<br />fingerprint has not changed since the last apply, do not re-apply the<br />write-only key even when the ETag has changed.<br /> |
+| `Strict` | WriteOnlyDriftPolicyStrict — re-apply write-only keys whenever the ETag<br />changes (external write detected), regardless of the desired value<br />fingerprint. No-op when the ETag is unchanged.<br /> |
 
 
 ## maintenance.metal.ironcore.dev/v1alpha1
@@ -1268,6 +1298,25 @@ _Appears in:_
 | `failed` _integer_ | Failed is the number of component jobs that finished in a failed state. |  |  |
 
 
+#### DellCertificateVerificationPolicy
+
+_Underlying type:_ _string_
+
+DellCertificateVerificationPolicy controls whether iDRAC verifies the TLS certificate
+presented by the repository share (HTTPS/CIFS) before connecting, or ignores certificate
+warnings (e.g. self-signed/untrusted certificates). If unset, certificates are verified.
+
+
+
+_Appears in:_
+- [DellFirmwareRepository](#dellfirmwarerepository)
+
+| Field | Description |
+| --- | --- |
+| `Verify` | DellCertificateVerificationPolicyVerify requires the share's TLS certificate to be valid<br />and trusted. This is the default behavior when the field is unset.<br /> |
+| `Ignore` | DellCertificateVerificationPolicyIgnore instructs iDRAC to ignore certificate warnings<br />(e.g. self-signed or untrusted certificates) when connecting to the share.<br /> |
+
+
 #### DellFirmwareRepository
 
 
@@ -1290,6 +1339,7 @@ _Appears in:_
 | `credentialsRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | CredentialsRef references the credentials used to authenticate against the share, if required.<br />Must not be set when ShareType is HTTP. |  |  |
 | `rebootNeeded` _boolean_ | RebootNeeded, if true, allows the BMC to reboot the server to apply updates. |  |  |
 | `applyVersionPolicy` _[DellVersionApplyPolicy](#dellversionapplypolicy)_ | ApplyVersionPolicy controls whether packages already at the same version and/or older<br />than the currently installed version are applied. If unset, only genuine upgrades are applied. |  | Enum: [AllowSameVersion AllowDowngradeVersion AllowSameAndDowngradeVersion] <br /> |
+| `certificateVerification` _[DellCertificateVerificationPolicy](#dellcertificateverificationpolicy)_ | CertificateVerification controls whether iDRAC verifies the TLS certificate presented by<br />the repository share, or ignores certificate warnings (e.g. self-signed/untrusted<br />certificates). If unset, certificates are verified. |  | Enum: [Verify Ignore] <br /> |
 
 
 #### DellFirmwareUpdateStatus
