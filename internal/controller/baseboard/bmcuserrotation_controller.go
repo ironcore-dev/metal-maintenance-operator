@@ -186,7 +186,12 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 		return ctrl.Result{}, fmt.Errorf("failed to test new credentials: %w", err)
 	}
 	if invalidCredentials {
-		return ctrl.Result{}, r.setFailed(ctx, rotation, "New password rejected by BMC during connection test")
+		// The BMC password was already changed and NewSecretRef is persisted.
+		// Leave the rotation non-terminal so the next reconcile retries the
+		// connection test with the stored credential rather than giving up.
+		log := ctrl.LoggerFrom(ctx)
+		log.Info("New credential rejected by BMC during connection test; will retry")
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 
 	if err := r.promoteCredential(ctx, user, secret, bmcObj); err != nil {
