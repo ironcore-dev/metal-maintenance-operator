@@ -200,6 +200,11 @@ var _ = Describe("BMCSettings Webhook", func() {
 				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 			})).Should(Succeed())
 
+			By("Patching the BMCSettings V1 to InProgress state")
+			Eventually(UpdateStatus(BMCSettingsV1, func() {
+				BMCSettingsV1.Status.State = baseboardv1alpha1.BMCSettingsStateInProgress
+			})).Should(Succeed())
+
 			By("Setting ServerMaintenance reference on BMCSettings V1")
 			Eventually(Update(BMCSettingsV1, func() {
 				BMCSettingsV1.Spec.ServerMaintenanceRefs = []api.ServerMaintenanceRefItem{
