@@ -69,6 +69,10 @@ type FirmwareUpdateReconciler struct {
 	// find further packages pending (and thus re-enter InProgress) before the
 	// FirmwareUpdate is marked Failed instead.
 	MaxRepositoryPasses int32
+	// MinBMCResetInterval is the minimum time that must have passed since a BMC's last
+	// completed reset. Set to 0 to always reset.
+	//  Has no effect for servers using an inline Spec.BMC (no managed BMC object to check).
+	MinBMCResetInterval time.Duration
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates,verbs=get;list;watch;create;update;patch;delete
@@ -252,7 +256,7 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 		}
 		return h.handleInProgress(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateFailed:
-		return r.processFailedState(ctx, fw)
+		return r.processFailedState(ctx, bmcClient, fw, server)
 	}
 
 	log.V(1).Info("Unknown State found", "State", fw.Status.State)
@@ -328,7 +332,7 @@ func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, 
 		return false, nil
 	}
 
-	if ok, err := r.handleBMCReset(ctx, bmcClient, fw, server); !ok || err != nil {
+	if ok, err := r.handleBMCReset(ctx, bmcClient, fw, server, constants.ConditionResetIssued); !ok || err != nil {
 		return false, err
 	}
 	return true, nil
@@ -339,61 +343,30 @@ func (r *FirmwareUpdateReconciler) handleBMCReset(
 	bmcClient bmc.BMC,
 	fw *systemv1alpha1.FirmwareUpdate,
 	server *metalv1alpha1.Server,
+	conditionType string,
 ) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
 	// reset BMC if not already done
-	resetBMC, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionResetIssued)
+	resetBMC, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, conditionType)
 	if err != nil {
 		return false, fmt.Errorf("failed to get condition for reset of BMC of server: %w", err)
 	}
 
-	if resetBMC.Status != metav1.ConditionTrue {
-		// once the server is in maintenance, reset the BMC to make sure its in stable state
-		// this avoids problems with some BMCs that hang up in subsequent operations
-		if resetBMC.Reason != constants.ReasonResetIssued {
-			if err := utils.ResetBMCOfServer(ctx, r.Client, server, bmcClient); err == nil {
-				// mark reset to be issued, wait for next reconcile
-				if err := r.Conditions.Update(
-					resetBMC,
-					conditionutils.UpdateStatus(corev1.ConditionFalse),
-					conditionutils.UpdateReason(constants.ReasonResetIssued),
-					conditionutils.UpdateMessage("Issued BMC reset to stabilize BMC of the server"),
-				); err != nil {
-					return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
-				}
-				return false, r.updateStatus(ctx, fw, fw.Status.State, resetBMC)
-			} else {
-				log.Error(err, "Failed to reset BMC of the server")
-				return false, err
-			}
-		} else if server.Spec.BMCRef != nil {
-			// we need to wait until the BMC resource annotation is removed
-			bmcObj := &metalv1alpha1.BMC{}
-			if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name}, bmcObj); err != nil {
-				log.Error(err, "Failed to get referred server's Manager")
-				return false, err
-			}
-			annotations := bmcObj.GetAnnotations()
-			if annotations != nil {
-				if op, ok := annotations[metalv1alpha1.OperationAnnotation]; ok {
-					if op == metalv1alpha1.GracefulRestartBMC {
-						log.V(1).Info("Waiting for BMC reset as annotation on BMC object is set")
-						return false, nil
-					}
-				}
-			}
-		}
-		if err := r.Conditions.Update(
-			resetBMC,
-			conditionutils.UpdateStatus(corev1.ConditionTrue),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("BMC reset to stabilize BMC of the server is completed"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update power on server condition: %w", err)
-		}
-		return false, r.updateStatus(ctx, fw, fw.Status.State, resetBMC)
-	}
-	return true, nil
+	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
+		Condition: resetBMC,
+		Reason:    constants.ReasonResetIssued,
+		RecentlyReset: func(ctx context.Context) (bool, error) {
+			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.MinBMCResetInterval)
+		},
+		IssueReset: func(ctx context.Context) error {
+			return utils.ResetBMCOfServer(ctx, r.Client, server, bmcClient)
+		},
+		ResetPending: func(ctx context.Context) (bool, error) {
+			return utils.IsBMCResetAnnotationPending(ctx, r.Client, server)
+		},
+		Persist: func(ctx context.Context) error {
+			return r.updateStatus(ctx, fw, fw.Status.State, resetBMC)
+		},
+	})
 }
 
 // checkProgressDeadline fails the FirmwareUpdate if no progress was observed within ProgressDeadlineSeconds.
@@ -444,10 +417,13 @@ func (r *FirmwareUpdateReconciler) handleTTL(ctx context.Context, fw *systemv1al
 	return ctrl.Result{}, true, nil
 }
 
-func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate) (bool, error) {
+func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if utils.ShouldRetryReconciliation(fw) {
-		log.V(1).Info("Retrying FirmwareUpdate as per annotation")
+		log.V(1).Info("Retrying FirmwareUpdate after failure")
+		if ready, err := r.ensureResetBeforeRetry(ctx, bmcClient, fw, server); err != nil || !ready {
+			return true, err
+		}
 		fwBase := fw.DeepCopy()
 		fw.Status.FailedAttempts = 0
 		fw.Status.State = systemv1alpha1.FirmwareUpdateStatePending
@@ -492,6 +468,9 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 		}
 		if fw.Status.FailedAttempts < maxAttempts {
 			log.V(1).Info("Retrying FirmwareUpdate automatically", "FailedAttempts", fw.Status.FailedAttempts)
+			if ready, err := r.ensureResetBeforeRetry(ctx, bmcClient, fw, server); err != nil || !ready {
+				return true, err
+			}
 			fwBase := fw.DeepCopy()
 			fw.Status.State = systemv1alpha1.FirmwareUpdateStatePending
 			fw.Status.ObservedGeneration = fw.Generation
@@ -529,6 +508,134 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, fw *s
 	}
 	log.V(1).Info("Failed to apply firmware update", "FirmwareUpdate", fw.Name, "Status", fw.Status)
 	return false, nil
+}
+
+// ensureResetBeforeRetry makes sure the server has an active ServerMaintenance, then resets the
+// BMC and reboots (or powers on) the server before a Failed FirmwareUpdate is retried
+func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if fw.Status.ServerMaintenanceRef == nil {
+		if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
+			return false, err
+		}
+	}
+	active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*fw.Status.ServerMaintenanceRef})
+	if err != nil {
+		return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
+	}
+	if !active {
+		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
+		return false, nil
+	}
+	log.V(1).Info("Resetting BMC for retry")
+	if ok, err := r.handleBMCReset(ctx, bmcClient, fw, server, constants.ConditionRetryResetIssued); !ok || err != nil {
+		return false, err
+	}
+	log.V(1).Info("Resetting server for retry", "Server", server.Name)
+	return r.resetServerForRetry(ctx, bmcClient, fw, server)
+}
+
+// resetServerForRetry power-cycles the server before a Failed FirmwareUpdate is retried.
+func (r *FirmwareUpdateReconciler) resetServerForRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	resetCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionServerResetIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server reset before retry: %w", err)
+	}
+	if resetCondition.Status == metav1.ConditionTrue {
+		return true, nil
+	}
+
+	powerOffCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionServerResetPowerOffIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server power-off before retry: %w", err)
+	}
+
+	if powerOffCondition.Status != metav1.ConditionTrue {
+		if powerOffCondition.Reason != constants.ReasonResetIssued {
+			currentPowerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
+			if err != nil {
+				return false, fmt.Errorf("failed to check server power state: %w", err)
+			}
+			if currentPowerState == metalv1alpha1.ServerOffPowerState {
+				// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
+				if err := r.Conditions.Update(
+					powerOffCondition,
+					conditionutils.UpdateStatus(corev1.ConditionTrue),
+					conditionutils.UpdateReason(constants.ReasonResetIssued),
+					conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
+				); err != nil {
+					return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+				}
+				return false, r.updateStatus(ctx, fw, fw.Status.State, powerOffCondition)
+			}
+			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
+				return false, fmt.Errorf("failed to power off server before retry: %w", err)
+			}
+			if err := r.Conditions.Update(
+				powerOffCondition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(constants.ReasonResetIssued),
+				conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
+			); err != nil {
+				return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, fw, fw.Status.State, powerOffCondition)
+		}
+
+		inOffState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOffPowerState)
+		if err != nil {
+			return false, fmt.Errorf("failed to check server power state: %w", err)
+		}
+		if !inOffState {
+			log.V(1).Info("Waiting for server to power off before retrying", "Server", server.Name)
+			return false, nil
+		}
+		if err := r.Conditions.Update(
+			powerOffCondition,
+			conditionutils.UpdateStatus(corev1.ConditionTrue),
+			conditionutils.UpdateReason(constants.ReasonResetIssued),
+			conditionutils.UpdateMessage("Server confirmed powered off before retry"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+		}
+		return false, r.updateStatus(ctx, fw, fw.Status.State, powerOffCondition)
+	}
+
+	if resetCondition.Reason != constants.ReasonResetIssued {
+		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
+			return false, fmt.Errorf("failed to power on server before retry: %w", err)
+		}
+		if err := r.Conditions.Update(
+			resetCondition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(constants.ReasonResetIssued),
+			conditionutils.UpdateMessage("Issued power-on request to the server before retrying"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update server reset condition: %w", err)
+		}
+		return false, r.updateStatus(ctx, fw, fw.Status.State, resetCondition)
+	}
+
+	inOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+	if err != nil {
+		return false, fmt.Errorf("failed to check server power state: %w", err)
+	}
+	if !inOnState {
+		log.V(1).Info("Waiting for server to power back on before retrying", "Server", server.Name)
+		return false, nil
+	}
+
+	if err := r.Conditions.Update(
+		resetCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonResetIssued),
+		conditionutils.UpdateMessage("Server reset completed before retrying"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update server reset condition: %w", err)
+	}
+	return false, r.updateStatus(ctx, fw, fw.Status.State, resetCondition)
 }
 
 func (r *FirmwareUpdateReconciler) getServerMaintenanceForRef(ctx context.Context, serverMaintenanceRef *metalv1alpha1.ObjectReference) (*maintenancev1alpha1.ServerMaintenance, error) {
@@ -746,8 +853,7 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByServerRefs(ctx context
 		}
 		// states where we do not need to requeue for host changes
 		if fwUpdate.Status.ServerMaintenanceRef == nil ||
-			fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateCompleted ||
-			fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateFailed {
+			fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateCompleted {
 			continue
 		}
 		if _, ok := activeMaintNames[fwUpdate.Status.ServerMaintenanceRef.Name]; !ok {
@@ -795,7 +901,8 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByBMC(ctx context.Contex
 
 	reqs := make([]ctrl.Request, 0)
 	for _, fwUpdate := range fwUpdateList.Items {
-		if fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateInProgress {
+		switch fwUpdate.Status.State {
+		case systemv1alpha1.FirmwareUpdateStateInProgress:
 			resetBMC, err := utils.GetCondition(r.Conditions, fwUpdate.Status.Conditions, constants.ConditionResetIssued)
 			if err != nil {
 				log.Error(err, "Failed to get reset BMC condition")
@@ -808,6 +915,11 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByBMC(ctx context.Contex
 			if resetBMC.Reason == constants.ReasonResetIssued {
 				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: fwUpdate.Namespace, Name: fwUpdate.Name}})
 			}
+		case systemv1alpha1.FirmwareUpdateStateFailed:
+			// Always enqueue Failed FirmwareUpdates on BMC changes: a retry-before-retry BMC
+			// reset may be waiting on this BMC's reset annotation to clear, and reconciling
+			// a Failed object that isn't actually retrying is a cheap no-op.
+			reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: fwUpdate.Namespace, Name: fwUpdate.Name}})
 		}
 	}
 	return reqs

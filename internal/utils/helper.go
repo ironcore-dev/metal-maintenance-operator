@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
@@ -432,6 +433,173 @@ func LabelChangeOrAnyFieldChangeInObject(e event.UpdateEvent, oldFields, newFiel
 	return false
 }
 
+// bmcNativeConditionReset and bmcNativeReasonResetComplete mirror metal-operator's own
+// (unexported, not importable across the module boundary) internal/controller/conditions.go
+// constants ConditionReset = "Reset" and ReasonResetComplete = "ResetComplete". metal-operator's
+// BMCReconciler sets these on the BMC object itself once a reset it issued has completed. Keep
+// these string literals in sync by hand if metal-operator ever renames them.
+const (
+	bmcNativeConditionReset      = "Reset"
+	bmcNativeReasonResetComplete = "ResetComplete"
+)
+
+// IsBMCRecentlyReset reports whether bmcObj's own "Reset" condition (maintained by
+// metal-operator's BMCReconciler) shows a reset completed within the given interval.
+func IsBMCRecentlyReset(bmcObj *metalv1alpha1.BMC, within time.Duration) bool {
+	if bmcObj == nil || within <= 0 {
+		return false
+	}
+	cond := meta.FindStatusCondition(bmcObj.Status.Conditions, bmcNativeConditionReset)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != bmcNativeReasonResetComplete {
+		return false
+	}
+	return time.Since(cond.LastTransitionTime.Time) < within
+}
+
+// BMCWasRecentlyReset is IsBMCRecentlyReset for callers that only have a Server, not the BMC
+// object itself.
+func BMCWasRecentlyReset(ctx context.Context, kClient client.Client, server *metalv1alpha1.Server, within time.Duration) (bool, error) {
+	if within <= 0 || server.Spec.BMCRef == nil {
+		return false, nil
+	}
+	bmcObj := &metalv1alpha1.BMC{}
+	if err := kClient.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name}, bmcObj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get referred server's BMC: %w", err)
+	}
+	return IsBMCRecentlyReset(bmcObj, within), nil
+}
+
+// BMCHasPendingReset reports whether bmcObj currently carries the GracefulRestartBMC operation
+// annotation, meaning a previously issued reset has not yet been picked up/cleared by
+// metal-operator's BMCReconciler.
+func BMCHasPendingReset(bmcObj *metalv1alpha1.BMC) bool {
+	annotations := bmcObj.GetAnnotations()
+	if annotations == nil {
+		return false
+	}
+	op, ok := annotations[metalv1alpha1.OperationAnnotation]
+	return ok && op == metalv1alpha1.GracefulRestartBMC
+}
+
+// IsBMCResetAnnotationPending is BMCHasPendingReset for callers that only have a Server, not the
+// BMC object itself.
+func IsBMCResetAnnotationPending(ctx context.Context, kClient client.Client, server *metalv1alpha1.Server) (bool, error) {
+	if server.Spec.BMCRef == nil {
+		return false, nil
+	}
+	bmcObj := &metalv1alpha1.BMC{}
+	if err := kClient.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name}, bmcObj); err != nil {
+		return false, err
+	}
+	return BMCHasPendingReset(bmcObj), nil
+}
+
+// IssueBMCReset requests a graceful reset of bmcObj by setting the GracefulRestartBMC operation
+// annotation on it.
+func IssueBMCReset(ctx context.Context, kClient client.Client, bmcObj *metalv1alpha1.BMC) error {
+	log := ctrl.LoggerFrom(ctx)
+	annotations := bmcObj.GetAnnotations()
+	if annotations != nil {
+		if op, ok := annotations[metalv1alpha1.OperationAnnotation]; ok {
+			if op == metalv1alpha1.GracefulRestartBMC {
+				log.V(1).Info("Waiting for BMC reset as annotation on BMC object is set")
+				return nil
+			}
+			return fmt.Errorf("unknown annotation on BMC object for operation annotation %v", op)
+		}
+	}
+	log.V(1).Info("Setting annotation on BMC resource to trigger with BMC reset")
+	bmcBase := bmcObj.DeepCopy()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.GracefulRestartBMC
+	bmcObj.SetAnnotations(annotations)
+	return kClient.Patch(ctx, bmcObj, client.MergeFrom(bmcBase))
+}
+
+// BMCResetArgs bundles the callbacks HandleBMCReset needs from each caller to drive the shared
+// "InProgress"-state BMC stabilization reset state machine, abstracting over how each controller
+// stores its own status/conditions and how it reaches the BMC (directly, or via a Server).
+type BMCResetArgs struct {
+	// Condition is the CR's own tracked condition for this reset (e.g. ConditionResetIssued or
+	// ConditionRetryResetIssued), already fetched via GetCondition. Mutated in place.
+	Condition *metav1.Condition
+	// Reason is the Reason string used to mark the condition "issued" and, later, "complete"
+	// (normally constants.ReasonResetIssued).
+	Reason string
+	// RecentlyReset reports whether the target BMC was already reset within the configured
+	// cooldown window, letting the caller skip issuing a redundant reset.
+	RecentlyReset func(ctx context.Context) (bool, error)
+	// IssueReset performs the actual reset action against the target BMC/server. Returning nil
+	// means the reset was issued (or one was already pending); any waiting/confirmation happens
+	// via ResetPending on subsequent calls.
+	IssueReset func(ctx context.Context) error
+	// ResetPending reports whether a previously-issued reset is still in progress.
+	ResetPending func(ctx context.Context) (bool, error)
+	// Persist patches the owning CR's status so the updated Condition is saved.
+	Persist func(ctx context.Context) error
+}
+
+// HandleBMCReset implements the shared "reset the BMC once, then wait for it to settle" state
+// machine
+func HandleBMCReset(ctx context.Context, conditions *conditionutils.Accessor, args BMCResetArgs) (bool, error) {
+	if args.Condition.Status == metav1.ConditionTrue {
+		return true, nil
+	}
+
+	if args.Condition.Reason != args.Reason {
+		recentlyReset, err := args.RecentlyReset(ctx)
+		if err != nil {
+			return false, fmt.Errorf("failed to check last BMC reset time: %w", err)
+		}
+		if recentlyReset {
+			if err := conditions.Update(
+				args.Condition,
+				conditionutils.UpdateStatus(corev1.ConditionTrue),
+				conditionutils.UpdateReason(args.Reason),
+				conditionutils.UpdateMessage("Skipped BMC reset: BMC was already reset recently"),
+			); err != nil {
+				return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
+			}
+			return true, args.Persist(ctx)
+		}
+		if err := args.IssueReset(ctx); err != nil {
+			return false, err
+		}
+		if err := conditions.Update(
+			args.Condition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(args.Reason),
+			conditionutils.UpdateMessage("Issued BMC reset to stabilize BMC of the server"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
+		}
+		return false, args.Persist(ctx)
+	}
+
+	pending, err := args.ResetPending(ctx)
+	if err != nil {
+		return false, err
+	}
+	if pending {
+		return false, nil
+	}
+
+	if err := conditions.Update(
+		args.Condition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(args.Reason),
+		conditionutils.UpdateMessage("BMC reset to stabilize BMC of the server is completed"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update power on server condition: %w", err)
+	}
+	return false, args.Persist(ctx)
+}
+
 // ResetBMCOfServer triggers a graceful BMC reset for the server.
 func ResetBMCOfServer(ctx context.Context, kClient client.Client, server *metalv1alpha1.Server, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
@@ -442,24 +610,7 @@ func ResetBMCOfServer(ctx context.Context, kClient client.Client, server *metalv
 			log.Error(err, "Failed to get referred server's Manager")
 			return err
 		}
-		annotations := bmcObj.GetAnnotations()
-		if annotations != nil {
-			if op, ok := annotations[metalv1alpha1.OperationAnnotation]; ok {
-				if op == metalv1alpha1.GracefulRestartBMC {
-					log.V(1).Info("Waiting for BMC reset as annotation on BMC object is set")
-					return nil
-				}
-				return fmt.Errorf("unknown annotation on BMC object for operation annotation %v", op)
-			}
-		}
-		log.V(1).Info("Setting annotation on BMC resource to trigger with BMC reset")
-		bmcBase := bmcObj.DeepCopy()
-		if annotations == nil {
-			annotations = map[string]string{}
-		}
-		annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.GracefulRestartBMC
-		bmcObj.SetAnnotations(annotations)
-		return kClient.Patch(ctx, bmcObj, client.MergeFrom(bmcBase))
+		return IssueBMCReset(ctx, kClient, bmcObj)
 	} else if server.Spec.BMC != nil {
 		bmcManager, err := bmcClient.GetManager("")
 		if err != nil {
