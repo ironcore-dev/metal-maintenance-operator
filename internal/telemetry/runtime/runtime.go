@@ -147,10 +147,20 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		return fmt.Errorf("add config loader: %w", err)
 	}
 
+	// Resolver is shared by the subscription reconciler and the metric fetcher.
+	resolver := &subscriptions.CacheResolver{Reader: mgr.GetClient()}
+
+	fetcher := NewBMCMetricFetcher(
+		resolver,
+		opts.InsecureTLS,
+		ctrl.Log.WithName("telemetry").WithName("fetcher"),
+	)
+
 	receiver, err := events.New(events.Config{
 		Addr:             opts.EventsAddr,
 		EventSink:        eventSink,
 		MetricReportSink: metricSink,
+		MetricFetcher:    fetcher,
 		SubscriberID:     opts.SubscriberID,
 		Log:              ctrl.Log.WithName("telemetry").WithName("events"),
 	})
@@ -164,7 +174,6 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	// BMCReconciler watches metalv1alpha1.BMC objects through the
 	// controller-runtime cache and converges each BMC's Redfish event
 	// subscriptions. See internal/telemetry/subscriptions/reconciler.go.
-	resolver := &subscriptions.CacheResolver{Reader: mgr.GetClient()}
 	subReconciler := &subscriptions.BMCReconciler{
 		Client:           mgr.GetClient(),
 		Config:           loader.Config,
