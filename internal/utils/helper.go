@@ -554,10 +554,13 @@ func ApplyVariables(settingsMap map[string]string, resolved map[string]string) (
 	return out, nil
 }
 
+// SubstituteVars replaces $(KEY) placeholders in s using the resolved variable map.
 func SubstituteVars(s string, resolved map[string]string) string {
 	return expansion.Expand(s, expansion.MappingFuncFor(resolved))
 }
 
+// resolveVariable resolves a single Variable to its string value by fetching
+// the referenced ConfigMap key or Secret key from the API server.
 func resolveVariable(
 	ctx context.Context,
 	c client.Client,
@@ -617,6 +620,10 @@ func resolveVariable(
 	}
 }
 
+// ResolveFieldRef extracts the string value at fieldPath from the given object's
+// unstructured JSON representation. fieldPath must use JSON field names (e.g.
+// "spec.bmcRef.name"). An optional map-key lookup is supported via
+// "some.path[mapKey]" syntax.
 func ResolveFieldRef(obj client.Object, fieldPath string) (string, error) {
 	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
