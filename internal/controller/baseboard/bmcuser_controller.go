@@ -106,9 +106,11 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	}
 
 	// Bootstrap: account doesn't exist on the BMC yet (no ID) and no working
-	// credential is known. Use the setup credential from the owning BMCUserSet
-	// if available, so we can create the account even before Spec.BMCSecretRef
-	// is set or if a prior attempt failed after setting it.
+	// credential is known. Credential resolution order:
+	//  1. set.Spec.SetupCredentialRef (global setup secret, if configured)
+	//  2. user.Status.BootstrapSecretRef (per-BMC factory secret recorded by the Set
+	//     controller before -a might promote a new credential)
+	//  3. getBMCClient (current BMC.Spec.BMCSecretRef — fallback for standalone users)
 	needsBootstrap := user.Status.ID == "" && user.Status.EffectiveBMCSecretRef == nil
 	var bmcClient bmc.BMC
 	var clientErr error
@@ -119,6 +121,8 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		}
 		if setupRef != nil {
 			bmcClient, clientErr = r.getSetupBMCClient(ctx, bmcObj, *setupRef)
+		} else if user.Status.BootstrapSecretRef != nil {
+			bmcClient, clientErr = r.getBootstrapBMCClient(ctx, bmcObj, user.Status.BootstrapSecretRef.Name)
 		} else {
 			bmcClient, clientErr = r.getBMCClient(ctx, bmcObj)
 		}
@@ -490,9 +494,8 @@ func (r *BMCUserReconciler) getBMCClient(ctx context.Context, bmcObj *metalv1alp
 }
 
 // lookupSetupCredentialRef returns the SetupCredentialRef from the owning
-// BMCUserSet, or nil if the BMCUser has no controller owner of that kind.
-// Uses GetControllerOf rather than Status.ManagedBy so it works before the
-// status back-reference is populated.
+// BMCUserSet, or nil if the BMCUser has no controller owner of that kind or
+// the SetupCredentialRef is not configured.
 func (r *BMCUserReconciler) lookupSetupCredentialRef(ctx context.Context, user *baseboardv1alpha1.BMCUser) (*corev1.SecretReference, error) {
 	owner := metav1.GetControllerOf(user)
 	if owner == nil || owner.Kind != "BMCUserSet" {
@@ -502,7 +505,10 @@ func (r *BMCUserReconciler) lookupSetupCredentialRef(ctx context.Context, user *
 	if err := r.Get(ctx, client.ObjectKey{Name: owner.Name}, set); err != nil {
 		return nil, err
 	}
-	return &set.Spec.SetupCredentialRef, nil
+	if set.Spec.SetupCredentialRef == nil || set.Spec.SetupCredentialRef.Name == "" {
+		return nil, nil
+	}
+	return set.Spec.SetupCredentialRef, nil
 }
 
 // getSetupBMCClient builds a BMC client authenticated with the operator-wide
@@ -530,6 +536,23 @@ func (r *BMCUserReconciler) getSetupBMCClient(ctx context.Context, bmcObj *metal
 	}
 	return bmcutils.CreateBMCClient(ctx, r.Client, protocolScheme, bmcObj.Spec.Protocol.Name,
 		address, bmcObj.Spec.Protocol.Port, syntheticBMCSecret, r.BMCOptions, r.SkipCertValidation)
+}
+
+// getBootstrapBMCClient builds a BMC client authenticated with a specific
+// BMCSecret identified by name. Used during bootstrap when the per-BMC
+// factory credential was recorded in BMCUser.Status.BootstrapSecretRef.
+func (r *BMCUserReconciler) getBootstrapBMCClient(ctx context.Context, bmcObj *metalv1alpha1.BMC, secretName string) (bmc.BMC, error) {
+	secret := &metalv1alpha1.BMCSecret{}
+	if err := r.Get(ctx, client.ObjectKey{Name: secretName}, secret); err != nil {
+		return nil, fmt.Errorf("failed to get bootstrap BMCSecret %s: %w", secretName, err)
+	}
+	protocolScheme := bmcutils.GetProtocolScheme(bmcObj.Spec.Protocol.Scheme, r.DefaultProtocol)
+	address, err := bmcutils.GetBMCAddressForBMC(ctx, r.Client, bmcObj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get BMC address: %w", err)
+	}
+	return bmcutils.CreateBMCClient(ctx, r.Client, protocolScheme, bmcObj.Spec.Protocol.Name,
+		address, bmcObj.Spec.Protocol.Port, secret, r.BMCOptions, r.SkipCertValidation)
 }
 
 // updateEffectiveSecret validates the credentials in the user's referenced

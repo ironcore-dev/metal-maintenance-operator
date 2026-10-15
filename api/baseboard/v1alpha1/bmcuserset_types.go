@@ -72,8 +72,11 @@ type BMCUserSetSpec struct {
 	// operator namespace used for first contact with a new BMC before operator accounts exist.
 	// This credential is used only during the bootstrap phase; once operator accounts
 	// are proven it is never used again for that BMC.
-	// +required
-	SetupCredentialRef corev1.SecretReference `json:"setupCredentialRef"`
+	// When omitted, the controller falls back to the BMCSecret recorded in
+	// BMCUser.Status.BootstrapSecretRef (the factory credential in BMC.Spec.BMCSecretRef
+	// at the time the BMCUser was first created).
+	// +optional
+	SetupCredentialRef *corev1.SecretReference `json:"setupCredentialRef,omitempty"`
 
 	// RotationStrategy determines how many BMCUser objects are created per BMC.
 	// DualAccount (default) creates two users per BMC; SingleAccount creates one.

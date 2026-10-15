@@ -93,7 +93,7 @@ var _ = Describe("BMCUserSet Controller", func() {
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
 				},
-				SetupCredentialRef: corev1.SecretReference{
+				SetupCredentialRef: &corev1.SecretReference{
 					Name:      "setup-cred",
 					Namespace: ns.Name,
 				},
@@ -156,7 +156,7 @@ var _ = Describe("BMCUserSet Controller", func() {
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
 				},
-				SetupCredentialRef: corev1.SecretReference{
+				SetupCredentialRef: &corev1.SecretReference{
 					Name:      "setup-cred",
 					Namespace: ns.Name,
 				},
@@ -197,7 +197,7 @@ var _ = Describe("BMCUserSet Controller", func() {
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
 				},
-				SetupCredentialRef: corev1.SecretReference{
+				SetupCredentialRef: &corev1.SecretReference{
 					Name:      "setup-cred",
 					Namespace: ns.Name,
 				},
@@ -236,7 +236,7 @@ var _ = Describe("BMCUserSet Controller", func() {
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
 				},
-				SetupCredentialRef: corev1.SecretReference{
+				SetupCredentialRef: &corev1.SecretReference{
 					Name:      "setup-cred",
 					Namespace: ns.Name,
 				},
@@ -287,7 +287,7 @@ var _ = Describe("BMCUserSet Controller", func() {
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
 				},
-				SetupCredentialRef: corev1.SecretReference{
+				SetupCredentialRef: &corev1.SecretReference{
 					Name:      "setup-cred",
 					Namespace: ns.Name,
 				},

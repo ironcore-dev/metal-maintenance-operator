@@ -255,6 +255,16 @@ func (r *BMCUserSetReconciler) ensureBMCUsers(
 					continue
 				}
 			}
+			// Record the factory secret once, before -a can promote a new credential
+			// into BMC.Spec.BMCSecretRef. The peer (-b) needs this to bootstrap.
+			if user.Status.BootstrapSecretRef == nil && bmcObj.Spec.BMCSecretRef.Name != "" {
+				userBase := user.DeepCopy()
+				user.Status.BootstrapSecretRef = &corev1.LocalObjectReference{Name: bmcObj.Spec.BMCSecretRef.Name}
+				if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
+					errs = append(errs, fmt.Errorf("failed to set BootstrapSecretRef on BMCUser %s: %w", d.name, err))
+					continue
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)

@@ -68,6 +68,14 @@ type BMCUserStatus struct {
 	// This may differ from Spec.BMCSecretRef if the operator generated a password.
 	EffectiveBMCSecretRef *v1.LocalObjectReference `json:"effectiveBMCSecretRef,omitempty"`
 
+	// BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.
+	// Written once by the BMCUserSet controller before the user is first reconciled, so the
+	// peer (-b) can still bootstrap using the original factory credential even after -a has
+	// promoted a new credential into BMC.Spec.BMCSecretRef.
+	// Never changed after being set.
+	// +optional
+	BootstrapSecretRef *v1.LocalObjectReference `json:"bootstrapSecretRef,omitempty"`
+
 	// LastRotation is the timestamp of the last password rotation.
 	LastRotation *metav1.Time `json:"lastRotation,omitempty"`
 
