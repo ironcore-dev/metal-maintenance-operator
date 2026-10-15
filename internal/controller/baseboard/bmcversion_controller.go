@@ -1125,8 +1125,9 @@ func (r *BMCVersionReconciler) requestMaintenanceOnServers(ctx context.Context, 
 		}
 		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace:    r.ManagerNamespace,
-				GenerateName: "bmc-version-",
+				Namespace: r.ManagerNamespace,
+				// Deterministic name prevents duplicate creation on cache-stale re-reconciles.
+				Name: utils.VersionSetChildName(bmcVersion.Name, server.Name),
 			},
 		}
 
