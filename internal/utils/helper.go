@@ -7,6 +7,7 @@
 package utils
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -519,12 +520,34 @@ func ResolveVariables(
 // MergeSettingsFlow merges all SettingsFlow items into a single flat settings map.
 // It does not consider the item Priority; if the same setting key is present in
 // multiple items, the value from the later item in the list wins.
+// Used for drift detection where only the final desired state matters.
 func MergeSettingsFlow(flow []api.SettingsFlowItem) map[string]string {
 	merged := make(map[string]string)
 	for _, item := range flow {
 		maps.Copy(merged, item.Settings)
 	}
 	return merged
+}
+
+// SortedSettingsFlowGroups returns the settingsFlow items sorted by ascending priority.
+// Items with the same priority are kept in their original relative order.
+func SortedSettingsFlowGroups(flow []api.SettingsFlowItem) []api.SettingsFlowItem {
+	sorted := append([]api.SettingsFlowItem{}, flow...)
+	slices.SortStableFunc(sorted, func(a, b api.SettingsFlowItem) int {
+		return cmp.Compare(a.Priority, b.Priority)
+	})
+	return sorted
+}
+
+// FilterDiffByFlowItem returns the diff keys owned by the flow item, using that item's desired values.
+func FilterDiffByFlowItem(diff map[string]any, item api.SettingsFlowItem) map[string]any {
+	filtered := make(map[string]any, len(item.Settings))
+	for key, value := range item.Settings {
+		if _, ok := diff[key]; ok {
+			filtered[key] = value
+		}
+	}
+	return filtered
 }
 
 // ApplyVariables substitutes $(KEY) placeholders in settings map keys and values.

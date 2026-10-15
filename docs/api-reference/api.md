@@ -60,6 +60,44 @@ _Appears in:_
 | `applyMethod` _string_ | ApplyMethod is the HTTP method used to apply the value (e.g. "POST" or "PATCH").<br />Values applied via POST create a (possibly ephemeral) resource whose URI cannot be<br />used for ETag-based drift detection. These keys are not read back from the BMC;<br />they are re-applied only when the desired value fingerprint (ValueHash) changes. |  |  |
 
 
+#### BMCSettingsFlowState
+
+_Underlying type:_ _string_
+
+BMCSettingsFlowState describes the state of a single settings-flow priority step.
+
+
+
+_Appears in:_
+- [BMCSettingsFlowStatus](#bmcsettingsflowstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | BMCSettingsFlowStatePending specifies that the settings update for this priority is pending.<br /> |
+| `InProgress` | BMCSettingsFlowStateInProgress specifies that the settings update for this priority is in progress.<br /> |
+| `Applied` | BMCSettingsFlowStateApplied specifies that the settings for this priority have been applied.<br /> |
+| `Failed` | BMCSettingsFlowStateFailed specifies that the settings update for this priority has failed.<br /> |
+
+
+#### BMCSettingsFlowStatus
+
+
+
+BMCSettingsFlowStatus describes the per-priority-step reconciliation state.
+
+
+
+_Appears in:_
+- [BMCSettingsStatus](#bmcsettingsstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `priority` _integer_ |  |  |  |
+| `name` _string_ |  |  |  |
+| `flowState` _[BMCSettingsFlowState](#bmcsettingsflowstate)_ | State is the current state of this flow step. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents observations for this flow step. |  |  |
+
+
 #### BMCSettingsSet
 
 
@@ -176,6 +214,7 @@ _Appears in:_
 | `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
 | `observedGeneration` _integer_ | ObservedGeneration is the most recent generation observed by the controller. |  |  |
 | `appliedETags` _object (keys:string, values:[BMCSettingsApplyResultEntry](#bmcsettingsapplyresultentry))_ | AppliedETags stores the URI, ETag, and value hash from the last successful<br />apply for each settings key. Used for ETag-based drift detection during<br />verification to avoid unnecessary re-applies and to reliably detect<br />write-only field drift (e.g. passwords) and POST-created resource drift<br />(e.g. certificates). |  |  |
+| `flowState` _[BMCSettingsFlowStatus](#bmcsettingsflowstatus) array_ | FlowState tracks the per-priority-step reconciliation state for settingsFlow items.<br />Each entry corresponds to one priority level in spec.settingsFlow. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest available observations of the BMC Settings Resource state. |  |  |
 
 
