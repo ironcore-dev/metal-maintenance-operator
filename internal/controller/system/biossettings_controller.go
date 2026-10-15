@@ -86,6 +86,10 @@ type BIOSSettingsReconciler struct {
 	RebootTimeoutExpiry         time.Duration
 	Conditions                  *conditionutils.Accessor
 	DefaultFailedAutoRetryCount int32
+	// MinBMCResetInterval is the minimum time that must have passed since a BMC's last
+	// completed reset. Set to 0 to always reset.
+	// Has no effect for servers using an inline Spec.BMC (no managed BMC object to check).
+	MinBMCResetInterval time.Duration
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biossettings,verbs=get;list;watch;create;update;patch;delete
@@ -256,7 +260,7 @@ func (r *BIOSSettingsReconciler) ensureBIOSSettingsStateTransition(ctx context.C
 	case systemv1alpha1.BIOSSettingsStateApplied:
 		return r.handleAppliedState(ctx, bmcClient, settings, server)
 	case systemv1alpha1.BIOSSettingsStateFailed:
-		return r.handleFailedState(ctx, settings, server)
+		return r.handleFailedState(ctx, bmcClient, settings, server)
 	default:
 		return ctrl.Result{}, fmt.Errorf("invalid BIOSSettings state: %s", settings.Status.State)
 	}
@@ -433,7 +437,7 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 		return ctrl.Result{}, nil
 	}
 
-	if ok, err := r.handleBMCReset(ctx, bmcClient, settings, server); !ok || err != nil {
+	if ok, err := r.handleBMCReset(ctx, bmcClient, settings, server, constants.ConditionResetIssued); !ok || err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -518,56 +522,28 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 	return ctrl.Result{}, r.updateStatus(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied, nil)
 }
 
-func (r *BIOSSettingsReconciler) handleBMCReset(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
-	resetBMC, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionResetIssued)
+func (r *BIOSSettingsReconciler) handleBMCReset(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server, conditionType string) (bool, error) {
+	resetBMC, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, conditionType)
 	if err != nil {
 		return false, fmt.Errorf("failed to get condition for reset of BMC of server: %w", err)
 	}
 
-	if resetBMC.Status != metav1.ConditionTrue {
-		// once the server is powered on, reset the BMC to make sure its in stable state
-		// this avoids problems with some BMCs that hang up in subsequent operations
-		if resetBMC.Reason != constants.ReasonResetIssued {
-			if err := utils.ResetBMCOfServer(ctx, r.Client, server, bmcClient); err == nil {
-				// mark reset to be issued, wait for next reconcile
-				if err := r.Conditions.Update(
-					resetBMC,
-					conditionutils.UpdateStatus(corev1.ConditionFalse),
-					conditionutils.UpdateReason(constants.ReasonResetIssued),
-					conditionutils.UpdateMessage("Issued BMC reset to stabilize BMC of the server"),
-				); err != nil {
-					return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
-				}
-				return false, r.updateStatus(ctx, settings, settings.Status.State, resetBMC)
-			} else {
-				return false, fmt.Errorf("failed to reset BMC: %w", err)
-			}
-		} else if server.Spec.BMCRef != nil {
-			// we need to wait until the BMC resource annotation is removed
-			bmcObj := &metalv1alpha1.BMC{}
-			if err := r.Get(ctx, client.ObjectKey{Name: server.Spec.BMCRef.Name}, bmcObj); err != nil {
-				return false, err
-			}
-			annotations := bmcObj.GetAnnotations()
-			if op, ok := annotations[metalv1alpha1.OperationAnnotation]; ok {
-				if op == metalv1alpha1.GracefulRestartBMC {
-					log.V(1).Info("Waiting for BMC reset as annotation on BMC object is set")
-					return false, nil
-				}
-			}
-		}
-		if err := r.Conditions.Update(
-			resetBMC,
-			conditionutils.UpdateStatus(corev1.ConditionTrue),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("BMC reset to stabilize BMC of the server is completed"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update power on server condition: %w", err)
-		}
-		return false, r.updateStatus(ctx, settings, settings.Status.State, resetBMC)
-	}
-	return true, nil
+	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
+		Condition: resetBMC,
+		Reason:    constants.ReasonResetIssued,
+		RecentlyReset: func(ctx context.Context) (bool, error) {
+			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.MinBMCResetInterval)
+		},
+		IssueReset: func(ctx context.Context) error {
+			return utils.ResetBMCOfServer(ctx, r.Client, server, bmcClient)
+		},
+		ResetPending: func(ctx context.Context) (bool, error) {
+			return utils.IsBMCResetAnnotationPending(ctx, r.Client, server)
+		},
+		Persist: func(ctx context.Context) error {
+			return r.updateStatus(ctx, settings, settings.Status.State, resetBMC)
+		},
+	})
 }
 
 func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, flowItem *api.SettingsFlowItem, flowStatus *systemv1alpha1.BIOSSettingsFlowStatus, server *metalv1alpha1.Server) (bool, error) {
@@ -1086,10 +1062,13 @@ func (r *BIOSSettingsReconciler) handleAppliedState(ctx context.Context, bmcClie
 	return ctrl.Result{}, nil
 }
 
-func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (ctrl.Result, error) {
+func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if utils.ShouldRetryReconciliation(settings) {
-		log.V(1).Info("Retrying reconciliation")
+		log.V(1).Info("Retrying BIOSSettings after failure")
+		if ready, err := r.ensureResetBeforeRetry(ctx, bmcClient, settings, server); err != nil || !ready {
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
+		}
 		biosSettingsBase := settings.DeepCopy()
 		settings.Status.FailedAttempts = 0
 		settings.Status.State = systemv1alpha1.BIOSSettingsStatePending
@@ -1131,10 +1110,19 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, settings
 	if maxAttempts > 0 {
 		if settings.Status.ObservedGeneration != settings.Generation {
 			// if the generation has changed, it means the spec has been updated after the failure, we can reset the retry count and retry.
+			// Persist FailedAttempts and ObservedGeneration together, atomically, right away.
+			biosSettingsBase := settings.DeepCopy()
 			settings.Status.FailedAttempts = 0
+			settings.Status.ObservedGeneration = settings.Generation
+			if err := r.Status().Patch(ctx, settings, client.MergeFrom(biosSettingsBase)); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to patch BIOSSettings status for retry count reset: %w", err)
+			}
 		}
 		if settings.Status.FailedAttempts < maxAttempts {
 			log.V(1).Info("Retrying BIOSSettings automatically", "FailedAttempts", settings.Status.FailedAttempts)
+			if ready, err := r.ensureResetBeforeRetry(ctx, bmcClient, settings, server); err != nil || !ready {
+				return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
+			}
 			biosSettingsBase := settings.DeepCopy()
 			settings.Status.State = systemv1alpha1.BIOSSettingsStatePending
 			settings.Status.FlowState = []systemv1alpha1.BIOSSettingsFlowStatus{}
@@ -1185,6 +1173,130 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, settings
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// ensureResetBeforeRetry makes sure the server has an active ServerMaintenance, then resets the
+// BMC and reboots (or powers on) the server before a Failed BIOSSettings is retried
+func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if settings.Spec.ServerMaintenanceRef == nil {
+		if req, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || req {
+			return false, err
+		}
+	}
+	if !r.isServerInMaintenance(ctx, settings, server) {
+		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
+		return false, nil
+	}
+	log.V(1).Info("Resetting BMC for retry")
+	if ok, err := r.handleBMCReset(ctx, bmcClient, settings, server, constants.ConditionRetryResetIssued); !ok || err != nil {
+		return false, err
+	}
+	log.V(1).Info("Resetting server for retry", "Server", server.Name)
+	return r.resetServerForRetry(ctx, bmcClient, settings, server)
+}
+
+// resetServerForRetry power-cycles the server before a Failed BIOSSettings is retried.
+func (r *BIOSSettingsReconciler) resetServerForRetry(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	resetCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionServerResetIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server reset before retry: %w", err)
+	}
+	if resetCondition.Status == metav1.ConditionTrue {
+		return true, nil
+	}
+
+	powerOffCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionServerResetPowerOffIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server power-off before retry: %w", err)
+	}
+
+	if powerOffCondition.Status != metav1.ConditionTrue {
+		if powerOffCondition.Reason != constants.ReasonResetIssued {
+			currentPowerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
+			if err != nil {
+				return false, fmt.Errorf("failed to check server power state: %w", err)
+			}
+			if currentPowerState == metalv1alpha1.ServerOffPowerState {
+				// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
+				if err := r.Conditions.Update(
+					powerOffCondition,
+					conditionutils.UpdateStatus(corev1.ConditionTrue),
+					conditionutils.UpdateReason(constants.ReasonResetIssued),
+					conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
+				); err != nil {
+					return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+				}
+				return false, r.updateStatus(ctx, settings, settings.Status.State, powerOffCondition)
+			}
+			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
+				return false, fmt.Errorf("failed to power off server before retry: %w", err)
+			}
+			if err := r.Conditions.Update(
+				powerOffCondition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(constants.ReasonResetIssued),
+				conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
+			); err != nil {
+				return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, settings, settings.Status.State, powerOffCondition)
+		}
+
+		inOffState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOffPowerState)
+		if err != nil {
+			return false, fmt.Errorf("failed to check server power state: %w", err)
+		}
+		if !inOffState {
+			log.V(1).Info("Waiting for server to power off before retrying", "Server", server.Name)
+			return false, nil
+		}
+		if err := r.Conditions.Update(
+			powerOffCondition,
+			conditionutils.UpdateStatus(corev1.ConditionTrue),
+			conditionutils.UpdateReason(constants.ReasonResetIssued),
+			conditionutils.UpdateMessage("Server confirmed powered off before retry"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+		}
+		return false, r.updateStatus(ctx, settings, settings.Status.State, powerOffCondition)
+	}
+
+	if resetCondition.Reason != constants.ReasonResetIssued {
+		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
+			return false, fmt.Errorf("failed to power on server before retry: %w", err)
+		}
+		if err := r.Conditions.Update(
+			resetCondition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(constants.ReasonResetIssued),
+			conditionutils.UpdateMessage("Issued power-on request to the server before retrying"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update server reset condition: %w", err)
+		}
+		return false, r.updateStatus(ctx, settings, settings.Status.State, resetCondition)
+	}
+
+	inOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+	if err != nil {
+		return false, fmt.Errorf("failed to check server power state: %w", err)
+	}
+	if !inOnState {
+		log.V(1).Info("Waiting for server to power back on before retrying", "Server", server.Name)
+		return false, nil
+	}
+
+	if err := r.Conditions.Update(
+		resetCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonResetIssued),
+		conditionutils.UpdateMessage("Server reset completed before retrying"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update server reset condition: %w", err)
+	}
+	return false, r.updateStatus(ctx, settings, settings.Status.State, resetCondition)
 }
 
 func (r *BIOSSettingsReconciler) getPendingBIOSSettings(ctx context.Context, bmcClient bmc.BMC, server *metalv1alpha1.Server) (schemas.SettingsAttributes, error) {
@@ -1487,9 +1599,9 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByServerRefs(ctx context.Con
 
 	reqs := make([]ctrl.Request, 0, len(settingsList.Items))
 	for _, settings := range settingsList.Items {
+		// Applied is excluded since there's nothing left to do.
 		if settings.Spec.ServerMaintenanceRef == nil ||
-			settings.Status.State == systemv1alpha1.BIOSSettingsStateApplied ||
-			settings.Status.State == systemv1alpha1.BIOSSettingsStateFailed {
+			settings.Status.State == systemv1alpha1.BIOSSettingsStateApplied {
 			continue
 		}
 		reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
@@ -1516,12 +1628,18 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByBMC(ctx context.Context, o
 		}
 		for i := range settingsList.Items {
 			settings := &settingsList.Items[i]
-			// Only enqueue if BMC reset was issued but not yet completed
-			if settings.Status.State == systemv1alpha1.BIOSSettingsStateInProgress {
+			switch settings.Status.State {
+			case systemv1alpha1.BIOSSettingsStateInProgress:
+				// Only enqueue if BMC reset was issued but not yet completed
 				resetCond, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionResetIssued)
 				if err == nil && resetCond.Status != metav1.ConditionTrue && resetCond.Reason == constants.ReasonResetIssued {
 					reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
 				}
+			case systemv1alpha1.BIOSSettingsStateFailed:
+				// Always enqueue Failed BIOSSettings on BMC changes: a retry-before-retry BMC
+				// reset may be waiting on this BMC's reset annotation to clear, and
+				// reconciling a Failed object that isn't actually retrying is a cheap no-op.
+				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
 			}
 		}
 	}

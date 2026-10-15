@@ -157,6 +157,9 @@ func main() {
 		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
 	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", maxRepositoryPassesLimit,
 		"Maximum number of check->apply->track->recheck passes a FirmwareUpdate may take before being marked Failed.")
+	var minBMCResetInterval time.Duration
+	flag.DurationVar(&minBMCResetInterval, "min-bmc-reset-interval", 24*time.Hour,
+		"Minimum time that must have passed since a BMC's last completed reset to reissue another reset.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -441,6 +444,7 @@ func main() {
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		HMACKey:                     hmacKey,
+		MinBMCResetInterval:         minBMCResetInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BMCSettings controller")
 		os.Exit(1)
@@ -456,6 +460,7 @@ func main() {
 		Conditions:                  accessor,
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		MinBMCResetInterval:         minBMCResetInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BMCVersion controller")
 		os.Exit(1)
@@ -491,6 +496,7 @@ func main() {
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		TimeoutExpiry:               biosSettingsTimeoutExpiry,
 		RebootTimeoutExpiry:         rebootTimeoutExpiry,
+		MinBMCResetInterval:         minBMCResetInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BIOSSettings controller")
 		os.Exit(1)
@@ -507,6 +513,7 @@ func main() {
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		RebootTimeoutExpiry:         rebootTimeoutExpiry,
+		MinBMCResetInterval:         minBMCResetInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BIOSVersion controller")
 		os.Exit(1)
@@ -523,6 +530,7 @@ func main() {
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		MaxRepositoryPasses:         int32(maxRepositoryPasses),
+		MinBMCResetInterval:         minBMCResetInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create FirmwareUpdate controller")
 		os.Exit(1)

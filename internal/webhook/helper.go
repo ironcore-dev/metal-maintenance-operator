@@ -4,6 +4,8 @@
 package webhook
 
 import (
+	"reflect"
+
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -24,4 +26,9 @@ func ShouldAllowForceDeleteInProgress(obj client.Object) bool {
 		return false
 	}
 	return val == constants.OperationAnnotationForceUpdateOrDeleteInProgress
+}
+
+// IsSpecUnchanged reports whether oldSpec and newSpec are deeply equal.
+func IsSpecUnchanged(oldSpec, newSpec any) bool {
+	return reflect.DeepEqual(oldSpec, newSpec)
 }

@@ -77,6 +77,19 @@ const (
 	ConditionReady                       = "Ready"
 	ConditionRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
 	ConditionProgressDeadlineExceeded    = "ProgressDeadlineExceeded"
+
+	// ConditionRetryResetIssued tracks a BMC reset issued specifically to clear a hung/stuck BMC
+	// before retrying a Failed resource. It is intentionally distinct from ConditionResetIssued
+	// (used for the BMC-stabilization reset performed as part of the normal apply flow) so a stale
+	// True value left over from an earlier, unrelated reset does not short-circuit the retry reset.
+	ConditionRetryResetIssued = "RetryResetIssued"
+	// ConditionServerResetIssued tracks a server reboot/power-on issued before retrying a Failed
+	// resource, to clear a server that may be stuck in a bad state.
+	ConditionServerResetIssued = "ServerResetIssued"
+	// ConditionServerResetPowerOffIssued tracks the power-off stage of ConditionServerResetIssued's
+	// explicit power-off-then-power-on sequence (skipped, and marked done immediately, if the
+	// server was already off when the retry reset was requested).
+	ConditionServerResetPowerOffIssued = "ServerResetPowerOffIssued"
 )
 
 // Shared reason strings used across baseboard and system controllers.
