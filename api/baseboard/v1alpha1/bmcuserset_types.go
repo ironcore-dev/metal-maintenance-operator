@@ -26,6 +26,47 @@ const (
 	RotationStrategySingleAccount RotationStrategy = "SingleAccount"
 )
 
+// FactoryAccountAction specifies what to do with the factory/default BMC account after bootstrap.
+// +kubebuilder:validation:Enum=Rotate
+type FactoryAccountAction string
+
+const (
+	// FactoryAccountActionRotate changes the factory account's password to a new random one.
+	// Disable and Delete require a SetAccountPassword/DisableAccount extension to the bmc.BMC
+	// interface in metal-operator and are planned for a future release.
+	FactoryAccountActionRotate FactoryAccountAction = "Rotate"
+)
+
+// FactoryAccount configures how the factory/default BMC account is handled once both
+// operator admin accounts (DualAccount) are proven and BMC.Spec.BMCSecretRef points at
+// an operator-owned credential.
+type FactoryAccount struct {
+	// Action specifies what to do with the factory account.
+	// Only Rotate is supported at this time.
+	// +kubebuilder:default=Rotate
+	// +optional
+	Action FactoryAccountAction `json:"action,omitempty"`
+
+	// UserNames is an explicit list of factory account usernames to act on.
+	// When empty, the username is read from the BMCSecret referenced by
+	// BMCUser.Status.BootstrapSecretRef (the credential the BMC shipped with).
+	// +optional
+	UserNames []string `json:"userNames,omitempty"`
+
+	// RetainCredential keeps the rotated password as an immutable BMCSecret
+	// labelled baseboard.metal.ironcore.dev/credential-role=break-glass.
+	// The secret is owned by the active OperatorAdmin BMCUser.
+	// Defaults to true.
+	// +kubebuilder:default=true
+	// +optional
+	RetainCredential *bool `json:"retainCredential,omitempty"`
+
+	// IgnoreVendors lists manufacturers (case-insensitive, matched against
+	// BMC.Status.Manufacturer) for which factory account handling is skipped.
+	// +optional
+	IgnoreVendors []string `json:"ignoreVendors,omitempty"`
+}
+
 // BMCUserTemplate defines the fields templated onto each BMCUser created by a BMCUserSet.
 type BMCUserTemplate struct {
 	// UserName is the base username for the BMC account.
@@ -87,6 +128,12 @@ type BMCUserSetSpec struct {
 	// Template defines the common fields for BMCUser objects created by this set.
 	// +required
 	Template BMCUserTemplate `json:"template"`
+
+	// FactoryAccount configures how the factory/default BMC account is handled once
+	// both operator admin accounts are proven. When omitted, the factory account is
+	// left untouched.
+	// +optional
+	FactoryAccount *FactoryAccount `json:"factoryAccount,omitempty"`
 }
 
 // BMCUserSetStatus defines the observed state of BMCUserSet.

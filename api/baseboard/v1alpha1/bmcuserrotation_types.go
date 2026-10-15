@@ -24,9 +24,10 @@ const (
 type BMCUserRotationTrigger string
 
 const (
-	BMCUserRotationTriggerPeriod     BMCUserRotationTrigger = "RotationPeriod"
-	BMCUserRotationTriggerAnnotation BMCUserRotationTrigger = "Annotation"
-	BMCUserRotationTriggerExpiry     BMCUserRotationTrigger = "PasswordExpiry"
+	BMCUserRotationTriggerPeriod          BMCUserRotationTrigger = "RotationPeriod"
+	BMCUserRotationTriggerAnnotation      BMCUserRotationTrigger = "Annotation"
+	BMCUserRotationTriggerExpiry          BMCUserRotationTrigger = "PasswordExpiry"
+	BMCUserRotationTriggerFactoryBootstrap BMCUserRotationTrigger = "FactoryBootstrap"
 )
 
 // BMCUserRotationSpec defines the desired state of BMCUserRotation.
@@ -47,7 +48,7 @@ type BMCUserRotationSpec struct {
 	TriggeredAt metav1.Time `json:"triggeredAt"`
 
 	// TriggerReason describes what caused this rotation.
-	// +kubebuilder:validation:Enum=RotationPeriod;Annotation;PasswordExpiry
+	// +kubebuilder:validation:Enum=RotationPeriod;Annotation;PasswordExpiry;FactoryBootstrap
 	// +required
 	TriggerReason BMCUserRotationTrigger `json:"triggerReason"`
 }

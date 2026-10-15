@@ -91,6 +91,12 @@ type BMCUserStatus struct {
 	// ManagedBy references the BMCUserSet that created and manages this BMCUser, if any.
 	// +optional
 	ManagedBy *v1.LocalObjectReference `json:"managedBy,omitempty"`
+
+	// FactoryAccountHandled records whether the factory account on this user's BMC has been
+	// successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller
+	// once the FactoryBootstrap rotation succeeds.
+	// +optional
+	FactoryAccountHandled bool `json:"factoryAccountHandled,omitempty"`
 }
 
 // +kubebuilder:object:root=true
