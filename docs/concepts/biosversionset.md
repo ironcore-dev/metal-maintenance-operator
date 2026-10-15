@@ -12,6 +12,10 @@ by creating and managing one child [`BIOSVersion`](biosversion.md) per selected 
   children whose server no longer matches the selector (once the child is no longer `InProgress`).
 - `status` aggregates rollout progress across all children: `fullyLabeledServers`, `availableBIOSVersion`,
   `pendingBIOSVersion`, `inProgressBIOSVersion`, `completedBIOSVersion`, and `failedBIOSVersion`.
+- `spec.biosVersionTemplate.readinessGates`/`completionConditionType` (optional) are propagated as-is to every
+  child, so the whole fleet can participate in a manual [Readiness Gates](readiness-gates.md) chain; since each
+  child targets a distinct `Server`, using the same `completionConditionType` across all children is safe (no
+  collision, as each is patched onto that child's own server).
 
 ## Workflow
 

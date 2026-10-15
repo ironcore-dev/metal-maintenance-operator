@@ -55,7 +55,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 
 	Context("When creating or updating BMCSettings under Validating Webhook", func() {
 
-		It("should deny creation if a BMC referred is already referred by another", func(ctx SpecContext) {
+		It("should deny creation if an existing sibling referring to the same BMC has no ReadinessGates", func(ctx SpecContext) {
 			By("Creating another BMCSettings with reference to existing referred BMC")
 			BMCSettingsV2 := &baseboardv1alpha1.BMCSettings{
 				ObjectMeta: metav1.ObjectMeta{
@@ -71,6 +71,29 @@ var _ = Describe("BMCSettings Webhook", func() {
 					}},
 			}
 			Expect(validator.ValidateCreate(ctx, BMCSettingsV2)).Error().To(HaveOccurred())
+		})
+
+		It("should allow creation if every existing sibling referring to the same BMC already has ReadinessGates", func(ctx SpecContext) {
+			By("Giving BMCSettingsV1 non-empty ReadinessGates")
+			Eventually(Update(BMCSettingsV1, func() {
+				BMCSettingsV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+			})).Should(Succeed())
+
+			By("Creating another BMCSettings with reference to existing referred BMC")
+			BMCSettingsV2 := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-bmc-",
+				},
+				Spec: baseboardv1alpha1.BMCSettingsSpec{
+					BMCRef: &v1.LocalObjectReference{Name: "foo"},
+					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "1.45.455b66-rev4",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
+					}},
+			}
+			Expect(validator.ValidateCreate(ctx, BMCSettingsV2)).Error().ToNot(HaveOccurred())
 		})
 
 		It("should create if a referenced BMC is NOT duplicate", func() {
@@ -91,7 +114,7 @@ var _ = Describe("BMCSettings Webhook", func() {
 			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
 		})
 
-		It("should deny update if a BMC referred is already referred by another", func() {
+		It("should deny update if an existing sibling referring to the same BMC has no ReadinessGates", func() {
 			By("Creating another BMCSetting with different BMCRef")
 			BMCSettingsV2 := &baseboardv1alpha1.BMCSettings{
 				ObjectMeta: metav1.ObjectMeta{
@@ -112,6 +135,34 @@ var _ = Describe("BMCSettings Webhook", func() {
 			BMCSettingsV2Updated := BMCSettingsV2.DeepCopy()
 			BMCSettingsV2Updated.Spec.BMCRef = BMCSettingsV1.Spec.BMCRef
 			Expect(validator.ValidateUpdate(ctx, BMCSettingsV2, BMCSettingsV2Updated)).Error().To(HaveOccurred())
+		})
+
+		It("should allow update if every existing sibling referring to the same BMC already has ReadinessGates", func() {
+			By("Giving BMCSettingsV1 non-empty ReadinessGates")
+			Eventually(Update(BMCSettingsV1, func() {
+				BMCSettingsV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+			})).Should(Succeed())
+
+			By("Creating another BMCSetting with different BMCRef")
+			BMCSettingsV2 := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-",
+				},
+				Spec: baseboardv1alpha1.BMCSettingsSpec{
+					BMCRef: &v1.LocalObjectReference{Name: "bar"},
+					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "P70 v1.45 (12/06/2017)",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
+					}},
+			}
+			Expect(k8sClient.Create(ctx, BMCSettingsV2)).To(Succeed())
+
+			By("Updating an BMCSettingsV2 to refer to existing BMC")
+			BMCSettingsV2Updated := BMCSettingsV2.DeepCopy()
+			BMCSettingsV2Updated.Spec.BMCRef = BMCSettingsV1.Spec.BMCRef
+			Expect(validator.ValidateUpdate(ctx, BMCSettingsV2, BMCSettingsV2Updated)).Error().ToNot(HaveOccurred())
 		})
 
 		It("should update if a BMC referred is not referred by another", func() {

@@ -18,18 +18,21 @@ checks, maintenance, and post-apply verification.
 - `status.state` reflects the overall lifecycle: `Pending`, `InProgress`, `Applied`, or `Failed`. Each entry in
   `status.flowState[]` mirrors this per settings-flow step, so a stuck rollout can be pinpointed to the exact step.
 - `spec.retryPolicy.maxAttempts` bounds automatic retries after a transient failure.
+- `spec.readinessGates`/`spec.completionConditionType` (optional) let this object participate in a manual
+  cross-resource sequencing chain — see [Readiness Gates](readiness-gates.md).
 
 ## Workflow
 
 1. The controller validates `spec.settingsFlow` for duplicate step names and duplicate setting keys across steps.
-2. It waits until the server's BIOS version matches `spec.version`, then requests (or reuses) `ServerMaintenance`
-   for the server per `spec.serverMaintenancePolicy`.
+2. It waits until the server's BIOS version matches `spec.version`, and until `spec.readinessGates` (if set) are
+   satisfied on the server (see [Readiness Gates](readiness-gates.md)), then requests (or reuses)
+   `ServerMaintenance` for the server per `spec.serverMaintenancePolicy`.
 3. Once the server is in maintenance, the controller applies each `settingsFlow` step in priority order, powering
    the server off/on when a reboot is required to make settings take effect.
 4. After each step is applied, the controller verifies it against the live BIOS settings before advancing to the
    next step, recording progress in `status.flowState[]`.
-5. Once all steps are verified, `status.state` becomes `Applied`; on unrecoverable failure, `Failed` (subject to
-   `spec.retryPolicy`).
+5. Once all steps are verified, `status.state` becomes `Applied` (patching `spec.completionConditionType` `True`
+   on the server, if set); on unrecoverable failure, `Failed` (subject to `spec.retryPolicy`).
 6. On deletion, the controller cleans up the `ServerMaintenance` it requested and removes its finalizer once no
    maintenance for this object is still in progress.
 

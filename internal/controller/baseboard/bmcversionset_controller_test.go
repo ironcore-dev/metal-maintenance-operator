@@ -205,9 +205,11 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			},
 			Spec: baseboardv1alpha1.BMCVersionSetSpec{
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -303,9 +305,11 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			},
 			Spec: baseboardv1alpha1.BMCVersionSetSpec{
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -507,10 +511,12 @@ var _ = Describe("BMCVersionSet Controller", func() {
 			},
 			Spec: baseboardv1alpha1.BMCVersionSetSpec{
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion + " fail",
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion + " fail",
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					},
 				},
 				BMCSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{

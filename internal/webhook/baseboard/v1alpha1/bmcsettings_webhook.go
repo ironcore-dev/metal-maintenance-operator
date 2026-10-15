@@ -115,8 +115,11 @@ func checkForDuplicateBMCSettingsRefToBMC(settingsList *baseboardv1alpha1.BMCSet
 		if bs.Spec.BMCRef == nil {
 			continue
 		}
-		if bs.Spec.BMCRef.Name == settings.Spec.BMCRef.Name {
-			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s",
+		if bs.Spec.BMCRef.Name != settings.Spec.BMCRef.Name {
+			continue
+		}
+		if len(settings.Spec.ReadinessGates) == 0 && len(bs.Spec.ReadinessGates) == 0 {
+			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s without readinessGates",
 				settings.Spec.BMCRef.Name, settings.Name, bs.Spec.BMCRef.Name, bs.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: settings.GroupVersionKind().Group, Kind: settings.Kind},

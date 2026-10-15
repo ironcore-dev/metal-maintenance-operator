@@ -102,8 +102,11 @@ func checkForDuplicateBMCVersionsRefToBMC(versionList *baseboardv1alpha1.BMCVers
 		if v.Spec.BMCRef == nil {
 			continue
 		}
-		if v.Spec.BMCRef.Name == version.Spec.BMCRef.Name {
-			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s",
+		if v.Spec.BMCRef.Name != version.Spec.BMCRef.Name {
+			continue
+		}
+		if len(version.Spec.ReadinessGates) == 0 && len(v.Spec.ReadinessGates) == 0 {
+			err := fmt.Errorf("BMC (%s) referred in %s is duplicate of BMC (%s) referred in %s without readinessGates",
 				version.Spec.BMCRef.Name, version.Name, v.Spec.BMCRef.Name, v.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: version.GroupVersionKind().Group, Kind: version.Kind},

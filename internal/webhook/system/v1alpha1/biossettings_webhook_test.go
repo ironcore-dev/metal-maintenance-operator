@@ -60,7 +60,7 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &maintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
 	})
 
-	It("should deny creation if a Server already has a BIOSSettings", func(ctx SpecContext) {
+	It("should deny creation if an existing sibling targeting the same Server has no ReadinessGates", func(ctx SpecContext) {
 		By("Creating another BIOSSettings targeting the same Server")
 		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
@@ -82,6 +82,35 @@ var _ = Describe("BIOSSettings Webhook", func() {
 			},
 		}
 		Expect(validator.ValidateCreate(ctx, biosSettingsV2)).Error().To(HaveOccurred())
+	})
+
+	It("should allow creation if every existing sibling targeting the same Server already has ReadinessGates", func(ctx SpecContext) {
+		By("Giving biosSettingsV1 non-empty ReadinessGates")
+		Eventually(Update(biosSettingsV1, func() {
+			biosSettingsV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+		})).Should(Succeed())
+
+		By("Creating another BIOSSettings targeting the same Server")
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				ServerRef: &v1.LocalObjectReference{Name: "foo"},
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version: defaultMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+			},
+		}
+		Expect(validator.ValidateCreate(ctx, biosSettingsV2)).Error().ToNot(HaveOccurred())
 	})
 
 	It("should allow creating a BIOSSettings for a Server without one", func() {
@@ -108,7 +137,7 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		Expect(k8sClient.Create(ctx, biosSettingsV2)).To(Succeed())
 	})
 
-	It("should deny update if spec.serverRef is duplicate", func() {
+	It("should deny update if an existing sibling targeting the same Server has no ReadinessGates", func() {
 		By("Creating a BIOSSettings with different ServerRef")
 		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
 			ObjectMeta: metav1.ObjectMeta{
@@ -135,6 +164,40 @@ var _ = Describe("BIOSSettings Webhook", func() {
 		biosSettingsV2Updated := biosSettingsV2.DeepCopy()
 		biosSettingsV2Updated.Spec.ServerRef = &v1.LocalObjectReference{Name: "foo"}
 		Expect(validator.ValidateUpdate(ctx, biosSettingsV2, biosSettingsV2Updated)).Error().To(HaveOccurred())
+	})
+
+	It("should allow update if every existing sibling targeting the same Server already has ReadinessGates", func() {
+		By("Giving biosSettingsV1 non-empty ReadinessGates")
+		Eventually(Update(biosSettingsV1, func() {
+			biosSettingsV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+		})).Should(Succeed())
+
+		By("Creating a BIOSSettings with different ServerRef")
+		biosSettingsV2 := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				ServerRef: &v1.LocalObjectReference{Name: "bar"},
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version: anotherMockUpServerBiosVersion,
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettingsV2)).To(Succeed())
+
+		By("Updating an biosSettingsV2 with a conflicting ServerRef")
+		biosSettingsV2Updated := biosSettingsV2.DeepCopy()
+		biosSettingsV2Updated.Spec.ServerRef = &v1.LocalObjectReference{Name: "foo"}
+		Expect(validator.ValidateUpdate(ctx, biosSettingsV2, biosSettingsV2Updated)).Error().ToNot(HaveOccurred())
 	})
 
 	It("should allow update if a different field is duplicate", func() {
