@@ -102,6 +102,7 @@ func (e wireEvent) toEvent() sink.Event {
 
 // wireMetricReport is the wire shape of a Redfish MetricReport push notification.
 type wireMetricReport struct {
+	ODataType    string            `json:"@odata.type,omitempty"`
 	ODataID      string            `json:"@odata.id,omitempty"`
 	ID           string            `json:"Id,omitempty"`
 	Name         string            `json:"Name,omitempty"`

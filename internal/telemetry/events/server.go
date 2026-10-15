@@ -297,6 +297,17 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 	}
 
 	samples := data.toSamples(r.log)
+	if strings.HasPrefix(data.ODataType, "#Event.") {
+		// Payload is a Redfish Event (sensor-change alert), not a MetricReport.
+		// This indicates the MetricReport subscription was created without explicit
+		// EventTypes: ["MetricReport"], causing the BMC to fall back to sensor event
+		// streaming. The reconciler will detect and recreate the subscription on its
+		// next pass. No metric data can be extracted from this payload.
+		r.log.Info("MetricReport endpoint received sensor Event payload — subscription has wrong EventTypes, will self-heal",
+			"bmc", bmcName, "odataType", data.ODataType)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	if len(samples) == 0 && data.ODataID != "" && r.cfg.MetricFetcher != nil {
 		w.WriteHeader(http.StatusOK)
 		select {
