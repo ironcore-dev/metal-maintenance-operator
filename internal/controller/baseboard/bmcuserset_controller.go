@@ -249,6 +249,15 @@ func (r *BMCUserSetReconciler) ensureBMCUsers(
 				user.Spec.RotationHistoryLimit = set.Spec.Template.RotationHistoryLimit
 				user.Spec.Type = userType
 				user.Spec.BMCRef = &corev1.LocalObjectReference{Name: bmcObj.Name}
+				// Stamp DeletionPolicy from the template. When the template is
+				// empty, default to Retain for OperatorAdmin, Delete otherwise.
+				if set.Spec.Template.DeletionPolicy != "" {
+					user.Spec.DeletionPolicy = set.Spec.Template.DeletionPolicy
+				} else if userType == baseboardv1alpha1.BMCUserTypeOperatorAdmin {
+					user.Spec.DeletionPolicy = "Retain"
+				} else {
+					user.Spec.DeletionPolicy = "Delete"
+				}
 				return controllerutil.SetControllerReference(set, user, r.Scheme)
 			})
 			if err != nil {
@@ -437,9 +446,15 @@ func (r *BMCUserSetReconciler) deleteOrphanedBMCUsers(
 	bmcs []metalv1alpha1.BMC,
 	ownedUsers []baseboardv1alpha1.BMCUser,
 ) error {
+	log := ctrl.LoggerFrom(ctx)
 	bmcNames := make(map[string]struct{}, len(bmcs))
 	for _, b := range bmcs {
 		bmcNames[b.Name] = struct{}{}
+	}
+	// Build a map of BMC name → BMC for live-credential check.
+	bmcByName := make(map[string]*metalv1alpha1.BMC, len(bmcs))
+	for i := range bmcs {
+		bmcByName[bmcs[i].Name] = &bmcs[i]
 	}
 	var errs []error
 	for i := range ownedUsers {
@@ -448,9 +463,23 @@ func (r *BMCUserSetReconciler) deleteOrphanedBMCUsers(
 			continue
 		}
 		if _, ok := bmcNames[u.Spec.BMCRef.Name]; !ok {
+			// Guard: do not delete if this user's credential is still live.
+			if bmcObj, exists := bmcByName[u.Spec.BMCRef.Name]; exists {
+				secretList := &metalv1alpha1.BMCSecretList{}
+				if err := r.List(ctx, secretList); err == nil {
+					for _, secret := range secretList.Items {
+						if metav1.IsControlledBy(&secret, u) && secret.Name == bmcObj.Spec.BMCSecretRef.Name {
+							log.Info("Skipping deletion of orphaned BMCUser: its credential is still referenced by BMC.Spec.BMCSecretRef",
+								"BMCUser", u.Name, "BMC", u.Spec.BMCRef.Name)
+							goto skipDelete
+						}
+					}
+				}
+			}
 			if err := r.Delete(ctx, u); client.IgnoreNotFound(err) != nil {
 				errs = append(errs, fmt.Errorf("failed to delete orphaned BMCUser %s: %w", u.Name, err))
 			}
+		skipDelete:
 		}
 	}
 	return errors.Join(errs...)

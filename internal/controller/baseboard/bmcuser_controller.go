@@ -637,6 +637,25 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 	return false, nil
 }
 
+// isLiveCredential returns true if any BMCSecret owned by the given user is
+// currently referenced by BMC.Spec.BMCSecretRef. Used to prevent lockout when
+// deleting an OperatorAdmin BMCUser.
+func (r *BMCUserReconciler) isLiveCredential(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) (bool, error) {
+	secretList := &metalv1alpha1.BMCSecretList{}
+	if err := r.List(ctx, secretList); err != nil {
+		return false, fmt.Errorf("failed to list BMCSecrets: %w", err)
+	}
+	for _, secret := range secretList.Items {
+		if !metav1.IsControlledBy(&secret, user) {
+			continue
+		}
+		if secret.Name == bmcObj.Spec.BMCSecretRef.Name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // delete removes the BMC account for the BMCUser from its referenced BMC (if
 // still present) and clears the finalizer so the object can be garbage
 // collected.
@@ -660,6 +679,34 @@ func (r *BMCUserReconciler) delete(ctx context.Context, user *baseboardv1alpha1.
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	// Determine effective deletion policy: explicit spec value, or default by type.
+	deletionPolicy := user.Spec.DeletionPolicy
+	if deletionPolicy == "" {
+		if user.Spec.Type == baseboardv1alpha1.BMCUserTypeOperatorAdmin {
+			deletionPolicy = "Retain"
+		} else {
+			deletionPolicy = "Delete"
+		}
+	}
+
+	if deletionPolicy == "Retain" {
+		// Never delete an account whose credential is still live in BMC.Spec.BMCSecretRef.
+		live, err := r.isLiveCredential(ctx, user, bmcObj)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to check live credential: %w", err)
+		}
+		if live {
+			log.Info("Refusing to delete BMC account: its credential is referenced by BMC.Spec.BMCSecretRef; waiting for credential rotation before removing")
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		// Retain policy: keep the BMC account, just remove the finalizer.
+		log.V(1).Info("DeletionPolicy=Retain: removing finalizer without deleting BMC account")
+		if modified, err := clientutils.PatchEnsureNoFinalizer(ctx, r.Client, user, bmcUserFinalizer); err != nil || modified {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	bmcClient, err := r.getBMCClient(ctx, bmcObj)

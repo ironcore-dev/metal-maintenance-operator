@@ -60,6 +60,13 @@ type BMCUserSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	RotationHistoryLimit *int32 `json:"rotationHistoryLimit,omitempty"`
+
+	// DeletionPolicy controls whether the BMC account is deleted when this BMCUser is removed.
+	// Retain preserves the account on the BMC hardware; Delete removes it.
+	// When empty, OperatorAdmin users default to Retain and ServiceAccount users to Delete.
+	// +kubebuilder:validation:Enum=Retain;Delete
+	// +optional
+	DeletionPolicy string `json:"deletionPolicy,omitempty"`
 }
 
 // BMCUserStatus defines the observed state of BMCUser.
