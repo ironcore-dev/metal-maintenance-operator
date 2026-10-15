@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
@@ -69,6 +70,11 @@ type FirmwareUpdateReconciler struct {
 	// find further packages pending (and thus re-enter InProgress) before the
 	// FirmwareUpdate is marked Failed instead.
 	MaxRepositoryPasses int32
+	// ScheduledJobPowerOnTimeout bounds how long a job may remain in the "Scheduled" state (queued, awaiting a reboot/power
+	// cycle to execute) with the server powered off and no observed progress,
+	// before the controller powers the server back on to let the job proceed.
+	// A value <= 0 disables this check.
+	ScheduledJobPowerOnTimeout time.Duration
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates,verbs=get;list;watch;create;update;patch;delete
@@ -587,6 +593,10 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 // the conditions slice (preserving all other conditions), and applies mutate
 // to update vendor-specific job-tracking fields (e.g. DellStatus.CheckJob/
 // UpdateJob/ComponentJobs/BaselineJobIDs) - all in a single status patch.
+//
+// LastProgressTime is only bumped to now when something observable actually
+// changed (a condition transition, a State change, or any vendor-specific
+// job-tracking field mutate touched - see jobTrackingFields).
 func (r *FirmwareUpdateReconciler) patchProgress(
 	ctx context.Context,
 	fw *systemv1alpha1.FirmwareUpdate,
@@ -595,8 +605,13 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 	mutate func(*systemv1alpha1.FirmwareUpdateStatus),
 ) error {
 	fwBase := fw.DeepCopy()
+	prevState := fw.Status.State
+	prevJobTracking := jobTrackingFields(&fw.Status)
+
 	fw.Status.State = state
 	fw.Status.ObservedGeneration = fw.Generation
+
+	progressed := condition != nil || state != prevState
 
 	if condition != nil {
 		if err := r.Conditions.UpdateSlice(
@@ -614,14 +629,36 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 		mutate(&fw.Status)
 	}
 
-	now := metav1.Now()
-	fw.Status.LastProgressTime = &now
+	if !progressed {
+		progressed = !reflect.DeepEqual(prevJobTracking, jobTrackingFields(&fw.Status))
+	}
+
+	if progressed || fw.Status.LastProgressTime == nil {
+		now := metav1.Now()
+		fw.Status.LastProgressTime = &now
+	}
 
 	if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
 		return fmt.Errorf("failed to patch FirmwareUpdate status: %w", err)
 	}
 
 	return nil
+}
+
+// jobTrackingFields returns a copy of status with the fields patchProgress
+// already accounts for separately (State, ObservedGeneration, Conditions,
+// LastProgressTime) cleared, leaving only vendor-specific job-tracking fields
+// (DellStatus today) for comparison. Diffing the whole status - rather than
+// hardcoding a single vendor's status field - keeps progress detection
+// correct as other vendor handlers (e.g. HPE, Lenovo) gain their own status
+// fields alongside DellStatus.
+func jobTrackingFields(status *systemv1alpha1.FirmwareUpdateStatus) systemv1alpha1.FirmwareUpdateStatus {
+	cp := *status.DeepCopy()
+	cp.State = ""
+	cp.ObservedGeneration = 0
+	cp.Conditions = nil
+	cp.LastProgressTime = nil
+	return cp
 }
 
 func (r *FirmwareUpdateReconciler) patchServerMaintenanceRef(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, serverMaintenance *maintenancev1alpha1.ServerMaintenance) error {
