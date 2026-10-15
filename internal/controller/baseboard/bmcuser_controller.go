@@ -168,6 +168,9 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 			return ctrl.Result{}, fmt.Errorf("failed to handle updated BMCSecret reference: %w", err)
 		}
 	}
+	if err := r.pruneOldSecrets(ctx, user, bmcObj); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to prune old BMCSecrets: %w", err)
+	}
 	return r.ensureBMCUserRotation(ctx, user)
 }
 
@@ -763,6 +766,71 @@ func (r *BMCUserReconciler) pruneRotationHistory(ctx context.Context, user *base
 		}
 	}
 	return nil
+}
+
+// pruneOldSecrets deletes owned BMCSecret objects that are no longer needed.
+// The following secrets are always retained:
+//   - Spec.BMCSecretRef (desired credential)
+//   - Status.EffectiveBMCSecretRef (current working credential)
+//   - Status.BootstrapSecretRef (factory credential for peer bootstrap)
+//   - BMC.Spec.BMCSecretRef (live credential used by all operator controllers)
+//   - Any in-flight BMCUserRotation's Status.NewSecretRef
+//   - Secrets labelled baseboard.metal.ironcore.dev/credential-role=break-glass
+func (r *BMCUserReconciler) pruneOldSecrets(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
+	// Build the protected set.
+	protected := make(map[string]bool)
+	if user.Spec.BMCSecretRef != nil {
+		protected[user.Spec.BMCSecretRef.Name] = true
+	}
+	if user.Status.EffectiveBMCSecretRef != nil {
+		protected[user.Status.EffectiveBMCSecretRef.Name] = true
+	}
+	if user.Status.BootstrapSecretRef != nil {
+		protected[user.Status.BootstrapSecretRef.Name] = true
+	}
+	if bmcObj != nil {
+		protected[bmcObj.Spec.BMCSecretRef.Name] = true
+	}
+
+	// Add any in-flight rotation's NewSecretRef.
+	rotationList := &baseboardv1alpha1.BMCUserRotationList{}
+	if err := r.List(ctx, rotationList); err != nil {
+		return fmt.Errorf("failed to list BMCUserRotations for secret pruning: %w", err)
+	}
+	for _, rot := range rotationList.Items {
+		if rot.Spec.BMCUserRef.Name != user.Name {
+			continue
+		}
+		if rot.Status.Phase == baseboardv1alpha1.BMCUserRotationPhaseSucceeded ||
+			rot.Status.Phase == baseboardv1alpha1.BMCUserRotationPhaseFailed {
+			continue
+		}
+		if rot.Status.NewSecretRef != nil {
+			protected[rot.Status.NewSecretRef.Name] = true
+		}
+	}
+
+	secretList := &metalv1alpha1.BMCSecretList{}
+	if err := r.List(ctx, secretList); err != nil {
+		return fmt.Errorf("failed to list BMCSecrets for pruning: %w", err)
+	}
+	var errs []error
+	for i := range secretList.Items {
+		secret := &secretList.Items[i]
+		if !metav1.IsControlledBy(secret, user) {
+			continue
+		}
+		if protected[secret.Name] {
+			continue
+		}
+		if secret.Labels[credentialRoleLabel] == credentialRoleBreakGlass {
+			continue
+		}
+		if err := r.Delete(ctx, secret); client.IgnoreNotFound(err) != nil {
+			errs = append(errs, fmt.Errorf("failed to delete old BMCSecret %s: %w", secret.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // SetupWithManager sets up the controller with the Manager.
