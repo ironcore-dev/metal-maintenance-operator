@@ -40,7 +40,6 @@ type BMCUserRotationReconciler struct {
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=endpoints,verbs=get;list;watch
 
 func (r *BMCUserRotationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	rotation := &baseboardv1alpha1.BMCUserRotation{}

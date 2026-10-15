@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,6 +37,13 @@ const (
 	// rotationFailureRetryDelay is the minimum time to wait before retrying a
 	// failed BMCUserRotation, to avoid tight retry loops on persistent failures.
 	rotationFailureRetryDelay = 5 * time.Minute
+
+	// conditionTypeCredentialsBootstrapped is True once the operator admin account has a
+	// proven EffectiveBMCSecretRef and (when applicable) the factory account is handled.
+	// Other controllers and ServerReadinessRules can gate on this condition.
+	conditionTypeCredentialsBootstrapped = "CredentialsBootstrapped"
+	reasonCredentialsBootstrapped        = "CredentialsBootstrapped"
+	reasonCredentialsPending             = "CredentialsPending"
 )
 
 // passwordLength returns maxLen as int, falling back to defaultPasswordLength
@@ -62,7 +70,6 @@ type BMCUserReconciler struct {
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/finalizers,verbs=update
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusersets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=endpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
@@ -170,6 +177,9 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	}
 	if err := r.pruneOldSecrets(ctx, user, bmcObj); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to prune old BMCSecrets: %w", err)
+	}
+	if err := r.updateCredentialsBootstrappedCondition(ctx, user); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update CredentialsBootstrapped condition: %w", err)
 	}
 	return r.ensureBMCUserRotation(ctx, user)
 }
@@ -831,6 +841,52 @@ func (r *BMCUserReconciler) pruneOldSecrets(ctx context.Context, user *baseboard
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// updateCredentialsBootstrappedCondition sets the CredentialsBootstrapped condition
+// on the BMCUser. True when the user has a proven EffectiveBMCSecretRef and (for
+// OperatorAdmin users) the factory account has been handled (or no factory handling
+// was configured for the owning set).
+func (r *BMCUserReconciler) updateCredentialsBootstrappedCondition(ctx context.Context, user *baseboardv1alpha1.BMCUser) error {
+	bootstrapped := user.Status.EffectiveBMCSecretRef != nil
+	if bootstrapped && user.Spec.Type == baseboardv1alpha1.BMCUserTypeOperatorAdmin {
+		// Check whether the owning set has FactoryAccount configured.
+		owner := metav1.GetControllerOf(user)
+		if owner != nil && owner.Kind == "BMCUserSet" {
+			set := &baseboardv1alpha1.BMCUserSet{}
+			if err := r.Get(ctx, client.ObjectKey{Name: owner.Name}, set); err == nil {
+				if set.Spec.FactoryAccount != nil && !user.Status.FactoryAccountHandled {
+					bootstrapped = false
+				}
+			}
+		}
+	}
+
+	var cond metav1.Condition
+	if bootstrapped {
+		cond = metav1.Condition{
+			Type:               conditionTypeCredentialsBootstrapped,
+			Status:             metav1.ConditionTrue,
+			Reason:             reasonCredentialsBootstrapped,
+			Message:            "Operator credentials bootstrapped and factory account handled",
+			ObservedGeneration: user.Generation,
+		}
+	} else {
+		cond = metav1.Condition{
+			Type:               conditionTypeCredentialsBootstrapped,
+			Status:             metav1.ConditionFalse,
+			Reason:             reasonCredentialsPending,
+			Message:            "Waiting for credential bootstrap to complete",
+			ObservedGeneration: user.Generation,
+		}
+	}
+
+	userBase := user.DeepCopy()
+	apimeta.SetStatusCondition(&user.Status.Conditions, cond)
+	if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
+		return fmt.Errorf("failed to patch CredentialsBootstrapped condition: %w", err)
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
