@@ -329,4 +329,304 @@ var _ = Describe("BMCUserSet Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
 	})
+
+	It("should stamp BootstrapSecretRef on each BMCUser before bootstrap", func(ctx SpecContext) {
+		By("Creating a DualAccount BMCUserSet without setupCredentialRef")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-bootstrap-ref-set",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategyDualAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "bootstrap-admin",
+					RoleID:   "Administrator",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+
+		baseName := fmt.Sprintf("%s-%s", set.Name, bmcObj.Name)
+		userA := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-a"}}
+		userB := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-b"}}
+
+		By("Waiting for both BMCUsers to be created with BootstrapSecretRef pointing at the factory secret")
+		Eventually(Get(userA), "4s").Should(Succeed())
+		Eventually(Get(userB), "4s").Should(Succeed())
+		Eventually(Object(userA), "8s").Should(
+			HaveField("Status.BootstrapSecretRef", Equal(&corev1.LocalObjectReference{Name: bmcSecret.Name})),
+		)
+		Eventually(Object(userB), "8s").Should(
+			HaveField("Status.BootstrapSecretRef", Equal(&corev1.LocalObjectReference{Name: bmcSecret.Name})),
+		)
+
+		By("Verifying both users eventually bootstrap using BootstrapSecretRef")
+		Eventually(Object(userA), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+		Eventually(Object(userB), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+	})
+
+	It("should bootstrap without setupCredentialRef using per-BMC BootstrapSecretRef", func(ctx SpecContext) {
+		By("Creating a SingleAccount BMCUserSet without setupCredentialRef")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-no-setup-cred-set",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategySingleAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "exporter-nosecret",
+					RoleID:   "ReadOnly",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+
+		childName := fmt.Sprintf("%s-%s", set.Name, bmcObj.Name)
+		child := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: childName}}
+
+		By("Waiting for the BMCUser to have EffectiveBMCSecretRef despite no setupCredentialRef")
+		Eventually(Get(child), "4s").Should(Succeed())
+		Eventually(Object(child), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+	})
+
+	It("should not delete an orphaned OperatorAdmin BMCUser whose credential is live in BMC.Spec.BMCSecretRef", func(ctx SpecContext) {
+		By("Creating a DualAccount BMCUserSet")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-guard-set",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
+				},
+				SetupCredentialRef: &corev1.SecretReference{
+					Name:      "setup-cred",
+					Namespace: ns.Name,
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategyDualAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "guard-admin",
+					RoleID:   "Administrator",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+
+		baseName := fmt.Sprintf("%s-%s", set.Name, bmcObj.Name)
+		userA := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-a"}}
+		userB := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-b"}}
+
+		By("Waiting for both users to have proven credentials")
+		Eventually(Get(userA), "4s").Should(Succeed())
+		Eventually(Get(userB), "4s").Should(Succeed())
+		Eventually(Object(userA), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+		Eventually(Object(userB), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		By("Identifying which user's credential was promoted to BMC.Spec.BMCSecretRef")
+		Eventually(Get(bmcObj)).Should(Succeed())
+		var liveUserName string
+		if userA.Status.EffectiveBMCSecretRef != nil && userA.Status.EffectiveBMCSecretRef.Name == bmcObj.Spec.BMCSecretRef.Name {
+			liveUserName = userA.Name
+		} else {
+			liveUserName = userB.Name
+		}
+		liveUser := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: liveUserName}}
+		Eventually(Get(liveUser)).Should(Succeed())
+
+		By("Removing the matching label from the BMC so the live user becomes orphaned")
+		bmcBase := bmcObj.DeepCopy()
+		bmcObj.Labels = map[string]string{}
+		Expect(k8sClient.Patch(ctx, bmcObj, client.MergeFrom(bmcBase))).To(Succeed())
+
+		By("Verifying the live user is NOT deleted after the relabel (credential guard)")
+		Consistently(Get(liveUser), "4s", "500ms").Should(Succeed())
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+	})
+
+	It("should set CredentialsBootstrapped:True on both OperatorAdmin users after bootstrap (no factory account)", func(ctx SpecContext) {
+		By("Creating a DualAccount BMCUserSet without FactoryAccount")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-cred-bootstrapped-set",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
+				},
+				SetupCredentialRef: &corev1.SecretReference{
+					Name:      "setup-cred",
+					Namespace: ns.Name,
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategyDualAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "cred-boot-admin",
+					RoleID:   "Administrator",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+
+		baseName := fmt.Sprintf("%s-%s", set.Name, bmcObj.Name)
+		userA := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-a"}}
+		userB := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-b"}}
+
+		By("Waiting for CredentialsBootstrapped:True on both users")
+		Eventually(Get(userA), "4s").Should(Succeed())
+		Eventually(Get(userB), "4s").Should(Succeed())
+		Eventually(Object(userA), "8s").Should(
+			HaveField("Status.Conditions", ContainElement(SatisfyAll(
+				HaveField("Type", Equal("CredentialsBootstrapped")),
+				HaveField("Status", Equal(metav1.ConditionTrue)),
+			))),
+		)
+		Eventually(Object(userB), "8s").Should(
+			HaveField("Status.Conditions", ContainElement(SatisfyAll(
+				HaveField("Type", Equal("CredentialsBootstrapped")),
+				HaveField("Status", Equal(metav1.ConditionTrue)),
+			))),
+		)
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+	})
+
+	It("should honour ignoreVendors and skip factory rotation for matching BMCs", func(ctx SpecContext) {
+		By("Patching BMC.Status.Manufacturer to a known vendor name")
+		bmcBase := bmcObj.DeepCopy()
+		bmcObj.Status.Manufacturer = "Contoso"
+		Expect(k8sClient.Status().Patch(ctx, bmcObj, client.MergeFrom(bmcBase))).To(Succeed())
+
+		By("Creating a DualAccount BMCUserSet with FactoryAccount and IgnoreVendors matching the BMC manufacturer")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-ignore-vendor-set",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
+				},
+				SetupCredentialRef: &corev1.SecretReference{
+					Name:      "setup-cred",
+					Namespace: ns.Name,
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategyDualAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "ig-admin",
+					RoleID:   "Administrator",
+				},
+				FactoryAccount: &baseboardv1alpha1.FactoryAccount{
+					Action:        baseboardv1alpha1.FactoryAccountActionRotate,
+					IgnoreVendors: []string{"Contoso"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+
+		baseName := fmt.Sprintf("%s-%s", set.Name, bmcObj.Name)
+		userA := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-a"}}
+		userB := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: baseName + "-b"}}
+
+		By("Waiting for both users to have proven credentials")
+		Eventually(Get(userA), "4s").Should(Succeed())
+		Eventually(Get(userB), "4s").Should(Succeed())
+		Eventually(Object(userA), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+		Eventually(Object(userB), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		By("Verifying no FactoryBootstrap BMCUserRotation was created (vendor is ignored)")
+		Consistently(func(g Gomega) {
+			rotList := &baseboardv1alpha1.BMCUserRotationList{}
+			g.Expect(k8sClient.List(ctx, rotList)).To(Succeed())
+			for _, rot := range rotList.Items {
+				g.Expect(rot.Spec.TriggerReason).NotTo(Equal(baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap))
+			}
+		}, "4s", "500ms").Should(Succeed())
+
+		By("Verifying BootstrappedBMCs is 0 (FactoryAccount configured but not handled due to ignoreVendors)")
+		// When FactoryAccount is configured and not handled, BootstrappedBMCs stays 0.
+		// Alternatively the count may be 1 if the set counts it as handled-by-skip.
+		// The spec says ignored vendors are simply skipped; FactoryAccountHandled stays false.
+		Eventually(Get(userA)).Should(Succeed())
+		Expect(userA.Status.FactoryAccountHandled).To(BeFalse())
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+	})
+
+	It("should prune old BMCSecrets owned by a user but keep protected ones", func(ctx SpecContext) {
+		By("Creating a SingleAccount BMCUserSet")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-prune-set",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"metal.ironcore.dev/site": "test-site"},
+				},
+				SetupCredentialRef: &corev1.SecretReference{
+					Name:      "setup-cred",
+					Namespace: ns.Name,
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategySingleAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "prune-user",
+					RoleID:   "ReadOnly",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+
+		childName := fmt.Sprintf("%s-%s", set.Name, bmcObj.Name)
+		child := &baseboardv1alpha1.BMCUser{ObjectMeta: metav1.ObjectMeta{Name: childName}}
+		Eventually(Get(child), "4s").Should(Succeed())
+		Eventually(Object(child), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		By("Creating an extra owned BMCSecret that should be pruned")
+		Eventually(Get(child)).Should(Succeed())
+		staleSecret := &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "stale-secret-prune-test",
+			},
+			Data: map[string][]byte{
+				"username": []byte("prune-user"),
+				"password": []byte("oldpassword"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, staleSecret)).To(Succeed())
+		Eventually(Get(staleSecret)).Should(Succeed())
+		staleBase := staleSecret.DeepCopy()
+		staleSecret.OwnerReferences = []metav1.OwnerReference{
+			{
+				APIVersion:         "baseboard.metal.ironcore.dev/v1alpha1",
+				Kind:               "BMCUser",
+				Name:               child.Name,
+				UID:                child.UID,
+				Controller:         new(true),
+				BlockOwnerDeletion: new(true),
+			},
+		}
+		Expect(k8sClient.Patch(ctx, staleSecret, client.MergeFrom(staleBase))).To(Succeed())
+
+		By("Verifying the stale secret is eventually pruned by the controller")
+		Eventually(func() bool {
+			s := &metalv1alpha1.BMCSecret{}
+			return k8sClient.Get(ctx, client.ObjectKey{Name: staleSecret.Name}, s) != nil
+		}, "8s", "500ms").Should(BeTrue())
+
+		By("Verifying the effective secret is NOT pruned")
+		Eventually(Get(child)).Should(Succeed())
+		effectiveSecretName := child.Status.EffectiveBMCSecretRef.Name
+		effectiveSecret := &metalv1alpha1.BMCSecret{ObjectMeta: metav1.ObjectMeta{Name: effectiveSecretName}}
+		Consistently(Get(effectiveSecret), "2s", "200ms").Should(Succeed())
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+	})
 })

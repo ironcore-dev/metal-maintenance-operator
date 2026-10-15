@@ -103,6 +103,44 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              factoryAccount:
+                description: |-
+                  FactoryAccount configures how the factory/default BMC account is handled once
+                  both operator admin accounts are proven. When omitted, the factory account is
+                  left untouched.
+                properties:
+                  action:
+                    default: Rotate
+                    description: |-
+                      Action specifies what to do with the factory account.
+                      Only Rotate is supported at this time.
+                    enum:
+                    - Rotate
+                    type: string
+                  ignoreVendors:
+                    description: |-
+                      IgnoreVendors lists manufacturers (case-insensitive, matched against
+                      BMC.Status.Manufacturer) for which factory account handling is skipped.
+                    items:
+                      type: string
+                    type: array
+                  retainCredential:
+                    default: true
+                    description: |-
+                      RetainCredential keeps the rotated password as an immutable BMCSecret
+                      labelled baseboard.metal.ironcore.dev/credential-role=break-glass.
+                      The secret is owned by the active OperatorAdmin BMCUser.
+                      Defaults to true.
+                    type: boolean
+                  userNames:
+                    description: |-
+                      UserNames is an explicit list of factory account usernames to act on.
+                      When empty, the username is read from the BMCSecret referenced by
+                      BMCUser.Status.BootstrapSecretRef (the credential the BMC shipped with).
+                    items:
+                      type: string
+                    type: array
+                type: object
               rotationStrategy:
                 default: DualAccount
                 description: |-
@@ -118,6 +156,9 @@ spec:
                   operator namespace used for first contact with a new BMC before operator accounts exist.
                   This credential is used only during the bootstrap phase; once operator accounts
                   are proven it is never used again for that BMC.
+                  When omitted, the controller falls back to the BMCSecret recorded in
+                  BMCUser.Status.BootstrapSecretRef (the factory credential in BMC.Spec.BMCSecretRef
+                  at the time the BMCUser was first created).
                 properties:
                   name:
                     description: name is unique within a namespace to reference a
@@ -144,6 +185,16 @@ spec:
                     description: |-
                       CredentialSecretNamespace is the namespace in which stable credential Secrets
                       are created. Defaults to the operator namespace if empty.
+                    type: string
+                  deletionPolicy:
+                    description: |-
+                      DeletionPolicy controls whether the BMC account is deleted when the BMCUser is removed.
+                      Retain (default for OperatorAdmin) preserves the account on the BMC hardware; Delete
+                      removes it. Omitting this field uses Retain for OperatorAdmin users and Delete for
+                      ServiceAccount users.
+                    enum:
+                    - Retain
+                    - Delete
                     type: string
                   roleID:
                     description: RoleID is the Redfish role to assign (e.g. "Administrator",
@@ -173,7 +224,6 @@ spec:
                 type: object
             required:
             - bmcSelector
-            - setupCredentialRef
             - template
             type: object
           status:

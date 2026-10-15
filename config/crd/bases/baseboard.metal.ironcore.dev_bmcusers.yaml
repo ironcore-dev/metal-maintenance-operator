@@ -94,6 +94,15 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              deletionPolicy:
+                description: |-
+                  DeletionPolicy controls whether the BMC account is deleted when this BMCUser is removed.
+                  Retain preserves the account on the BMC hardware; Delete removes it.
+                  When empty, OperatorAdmin users default to Retain and ServiceAccount users to Delete.
+                enum:
+                - Retain
+                - Delete
+                type: string
               description:
                 description: Description is a description for the BMC user.
                 type: string
@@ -134,6 +143,25 @@ spec:
           status:
             description: BMCUserStatus defines the observed state of BMCUser.
             properties:
+              bootstrapSecretRef:
+                description: |-
+                  BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.
+                  Written once by the BMCUserSet controller before the user is first reconciled, so the
+                  peer (-b) can still bootstrap using the original factory credential even after -a has
+                  promoted a new credential into BMC.Spec.BMCSecretRef.
+                  Never changed after being set.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               conditions:
                 description: Conditions reflects the current state of the BMCUser.
                 items:
@@ -207,6 +235,12 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              factoryAccountHandled:
+                description: |-
+                  FactoryAccountHandled records whether the factory account on this user's BMC has been
+                  successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller
+                  once the FactoryBootstrap rotation succeeds.
+                type: boolean
               id:
                 description: ID is the identifier of the user in the BMC system.
                 type: string
@@ -214,21 +248,6 @@ spec:
                 description: LastRotation is the timestamp of the last password rotation.
                 format: date-time
                 type: string
-              managedBy:
-                description: ManagedBy references the BMCUserSet that created and
-                  manages this BMCUser, if any.
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
               passwordExpiration:
                 description: PasswordExpiration is the timestamp when the password
                   will expire.

@@ -383,11 +383,11 @@ var _ = Describe("BMCUser Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, user)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, newSecret)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, &metalv1alpha1.BMCSecret{
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, &metalv1alpha1.BMCSecret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: initialSecretName,
 			},
-		})).To(Succeed())
+		}))).To(Succeed())
 	})
 
 	It("should create a Failed BMCUserRotation when only one OperatorAdmin BMCUser exists for a BMC", func(ctx SpecContext) {
@@ -513,6 +513,47 @@ var _ = Describe("BMCUser Controller", func() {
 				}
 			}
 		}
+	})
+
+	It("should not delete BMC account on deletion when DeletionPolicy=Retain and credential is live", func(ctx SpecContext) {
+		mockServers[0].ResetAccounts()
+		By("Creating an OperatorAdmin BMCUser with DeletionPolicy=Retain")
+		retain := "Retain"
+		adminUser := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "retain-admin-user",
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName:       "retain-admin",
+				RoleID:         "Administrator",
+				Type:           baseboardv1alpha1.BMCUserTypeOperatorAdmin,
+				DeletionPolicy: retain,
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, adminUser)).To(Succeed())
+		Eventually(Get(adminUser)).Should(Succeed())
+
+		By("Waiting for the OperatorAdmin user to be bootstrapped (EffectiveBMCSecretRef set)")
+		Eventually(Object(adminUser), "8s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		By("Promoting the user's credential to BMC.Spec.BMCSecretRef to make it 'live'")
+		Eventually(Get(adminUser)).Should(Succeed())
+		bmcBase := bmcObj.DeepCopy()
+		bmcObj.Spec.BMCSecretRef = v1.LocalObjectReference{Name: adminUser.Status.EffectiveBMCSecretRef.Name}
+		Expect(k8sClient.Patch(ctx, bmcObj, client.MergeFrom(bmcBase))).To(Succeed())
+		Eventually(Object(bmcObj)).Should(HaveField("Spec.BMCSecretRef.Name", Equal(adminUser.Status.EffectiveBMCSecretRef.Name)))
+
+		By("Deleting the BMCUser — it should stall because the credential is live")
+		Expect(k8sClient.Delete(ctx, adminUser)).To(Succeed())
+
+		By("Verifying the BMCUser is NOT immediately deleted (controller requeues)")
+		Consistently(Get(adminUser), "2s", "500ms").Should(Succeed())
+
+		By("Verifying the BMC account still exists on the mock server")
+		Expect(mockServers[0].GetAccountNames()).To(HaveKey("retain-admin"))
 	})
 
 })

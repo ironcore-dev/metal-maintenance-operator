@@ -31,12 +31,6 @@ import (
 
 const (
 	bmcUserFinalizer = "baseboard.metal.ironcore.dev/bmcuser"
-	// defaultPasswordLength is used when the BMC's AccountService does not report
-	// a MaxPasswordLength (i.e. the field is zero).
-	defaultPasswordLength = 20
-	// rotationFailureRetryDelay is the minimum time to wait before retrying a
-	// failed BMCUserRotation, to avoid tight retry loops on persistent failures.
-	rotationFailureRetryDelay = 5 * time.Minute
 
 	// conditionTypeCredentialsBootstrapped is True once the operator admin account has a
 	// proven EffectiveBMCSecretRef and (when applicable) the factory account is handled.
@@ -46,13 +40,24 @@ const (
 	reasonCredentialsPending             = "CredentialsPending"
 )
 
-// passwordLength returns maxLen as int, falling back to defaultPasswordLength
-// when the BMC firmware omits the field (value is zero).
-func passwordLength(maxLen uint) int {
-	if maxLen == 0 {
-		return defaultPasswordLength
+// passwordLength returns maxLen as int, falling back to r.DefaultPasswordLength
+// (or 20 if not configured) when the BMC firmware omits the field (value is zero).
+func (r *BMCUserReconciler) passwordLength(maxLen uint) int {
+	if maxLen != 0 {
+		return int(maxLen)
 	}
-	return int(maxLen)
+	if r.DefaultPasswordLength > 0 {
+		return r.DefaultPasswordLength
+	}
+	return 20
+}
+
+// rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
+func (r *BMCUserReconciler) rotationFailureDelay() time.Duration {
+	if r.RotationFailureRetryDelay > 0 {
+		return r.RotationFailureRetryDelay
+	}
+	return 5 * time.Minute
 }
 
 // BMCUserReconciler reconciles a BMCUser object
@@ -63,6 +68,12 @@ type BMCUserReconciler struct {
 	DefaultProtocol    metalv1alpha1.ProtocolScheme
 	SkipCertValidation bool
 	BMCOptions         bmc.Options
+	// DefaultPasswordLength is the minimum password length used when the BMC
+	// AccountService does not report a MaxPasswordLength. Defaults to 20.
+	DefaultPasswordLength int
+	// RotationFailureRetryDelay is the minimum back-off before retrying after a
+	// failed rotation. Defaults to 5 minutes.
+	RotationFailureRetryDelay time.Duration
 }
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers,verbs=get;list;watch;create;update;patch;delete
@@ -341,7 +352,7 @@ func (r *BMCUserReconciler) checkRotationFailureBackoff(ctx context.Context, use
 	if latestFailed == nil {
 		return ctrl.Result{}, false
 	}
-	retryAt := latestFailed.Status.CompletedAt.Add(rotationFailureRetryDelay)
+	retryAt := latestFailed.Status.CompletedAt.Add(r.rotationFailureDelay())
 	if time.Now().Before(retryAt) {
 		remaining := time.Until(retryAt)
 		log.V(1).Info("Last rotation failed recently, backing off", "BMCUserRotation", latestFailed.Name, "retryAfter", remaining)
@@ -391,7 +402,7 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	if err != nil {
 		return fmt.Errorf("failed to get account service: %w", err)
 	}
-	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), passwordLength(accountService.MaxPasswordLength))
+	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), r.passwordLength(accountService.MaxPasswordLength))
 	if err != nil {
 		return fmt.Errorf("failed to generate new password for BMC account %s: %w", user.Name, err)
 	}
@@ -928,7 +939,8 @@ func (r *BMCUserReconciler) findBMCUsersForBMCUserSet(ctx context.Context, obj c
 	}
 	var requests []reconcile.Request
 	for _, u := range userList.Items {
-		if u.Status.ManagedBy != nil && u.Status.ManagedBy.Name == obj.GetName() {
+		ownerRef := metav1.GetControllerOf(&u)
+		if ownerRef != nil && ownerRef.Kind == "BMCUserSet" && ownerRef.Name == obj.GetName() {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: u.Name},
 			})

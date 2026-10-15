@@ -88,6 +88,7 @@ spec:
                 - RotationPeriod
                 - Annotation
                 - PasswordExpiry
+                - FactoryBootstrap
                 type: string
               triggeredAt:
                 description: TriggeredAt is the timestamp when the rotation was initiated.
@@ -174,6 +175,13 @@ spec:
                   - type
                   type: object
                 type: array
+              connectionTestRetries:
+                description: |-
+                  ConnectionTestRetries counts how many times the post-password-change
+                  connection test has been retried. When this exceeds the configured
+                  MaxConnectionTestRetries the rotation is moved to Failed.
+                format: int32
+                type: integer
               message:
                 description: |-
                   Message provides a human-readable description of the current state,

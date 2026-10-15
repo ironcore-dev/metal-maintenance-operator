@@ -266,14 +266,6 @@ func (r *BMCUserSetReconciler) ensureBMCUsers(
 			if opResult != controllerutil.OperationResultNone {
 				log.Info("Reconciled BMCUser", "BMCUser", d.name, "Operation", opResult)
 			}
-			if user.Status.ManagedBy == nil {
-				userBase := user.DeepCopy()
-				user.Status.ManagedBy = &corev1.LocalObjectReference{Name: set.Name}
-				if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
-					errs = append(errs, fmt.Errorf("failed to set ManagedBy on BMCUser %s: %w", d.name, err))
-					continue
-				}
-			}
 			// Record the factory secret once, before -a can promote a new credential
 			// into BMC.Spec.BMCSecretRef. The peer (-b) needs this to bootstrap.
 			if user.Status.BootstrapSecretRef == nil && bmcObj.Spec.BMCSecretRef.Name != "" {
@@ -562,17 +554,6 @@ func (r *BMCUserSetReconciler) enqueueByBMC(ctx context.Context, obj client.Obje
 	return reqs
 }
 
-func (r *BMCUserSetReconciler) enqueueByBMCUser(ctx context.Context, obj client.Object) []reconcile.Request {
-	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == "BMCUserSet" {
-			return []reconcile.Request{
-				{NamespacedName: types.NamespacedName{Name: ref.Name}},
-			}
-		}
-	}
-	return nil
-}
-
 // enqueueByBMCUserRotation re-enqueues the owning BMCUserSet when a
 // FactoryBootstrap BMCUserRotation changes phase (so the set controller can
 // label/delete the resulting BMCSecret and mark FactoryAccountHandled).
@@ -590,9 +571,10 @@ func (r *BMCUserSetReconciler) enqueueByBMCUserRotation(ctx context.Context, obj
 		if err := r.Get(ctx, client.ObjectKey{Name: ref.Name}, user); err != nil {
 			return nil
 		}
-		if user.Status.ManagedBy != nil {
+		ownerRef := metav1.GetControllerOf(user)
+		if ownerRef != nil && ownerRef.Kind == "BMCUserSet" {
 			return []reconcile.Request{
-				{NamespacedName: types.NamespacedName{Name: user.Status.ManagedBy.Name}},
+				{NamespacedName: types.NamespacedName{Name: ownerRef.Name}},
 			}
 		}
 	}
@@ -612,7 +594,6 @@ func (r *BMCUserSetReconciler) handleFactoryAccount(
 	if set.Spec.FactoryAccount == nil {
 		return nil
 	}
-	log := ctrl.LoggerFrom(ctx)
 
 	usersByBMC := make(map[string][]baseboardv1alpha1.BMCUser)
 	for _, u := range ownedUsers {
@@ -622,194 +603,232 @@ func (r *BMCUserSetReconciler) handleFactoryAccount(
 	}
 
 	var errs []error
-	for _, bmcObj := range bmcs {
-		// Skip vendors in the ignore list.
-		ignored := false
-		for _, v := range set.Spec.FactoryAccount.IgnoreVendors {
-			if strings.EqualFold(v, bmcObj.Status.Manufacturer) {
-				ignored = true
-				break
-			}
-		}
-		if ignored {
+	for i := range bmcs {
+		bmcObj := &bmcs[i]
+		if r.isVendorIgnored(set.Spec.FactoryAccount.IgnoreVendors, bmcObj.Status.Manufacturer) {
 			continue
 		}
 
 		users := usersByBMC[bmcObj.Name]
-
-		// Find the active OperatorAdmin user: EffectiveBMCSecretRef == BMC.Spec.BMCSecretRef.
-		var activeAdmin *baseboardv1alpha1.BMCUser
-		for i := range users {
-			u := &users[i]
-			if u.Spec.Type != baseboardv1alpha1.BMCUserTypeOperatorAdmin {
-				continue
-			}
-			if u.Status.EffectiveBMCSecretRef == nil {
-				continue
-			}
-			if u.Status.EffectiveBMCSecretRef.Name == bmcObj.Spec.BMCSecretRef.Name {
-				activeAdmin = u
-				break
-			}
-		}
+		activeAdmin := r.findActiveAdmin(users, bmcObj.Spec.BMCSecretRef.Name)
 		if activeAdmin == nil {
-			// Not all admins proven or BMC not yet promoted — wait.
 			continue
 		}
-
-		// Gate: all OperatorAdmin users for this BMC must have EffectiveBMCSecretRef.
-		allProven := true
-		for _, u := range users {
-			if u.Spec.Type == baseboardv1alpha1.BMCUserTypeOperatorAdmin && u.Status.EffectiveBMCSecretRef == nil {
-				allProven = false
-				break
-			}
-		}
-		if !allProven {
+		if !r.allOperatorAdminsProven(users) {
 			continue
 		}
-
-		// Already handled.
 		if activeAdmin.Status.FactoryAccountHandled {
 			continue
 		}
 
-		// Check for an existing in-flight or completed FactoryBootstrap rotation.
 		rotationList := &baseboardv1alpha1.BMCUserRotationList{}
 		if err := r.List(ctx, rotationList); err != nil {
 			errs = append(errs, fmt.Errorf("BMC %s: failed to list BMCUserRotations: %w", bmcObj.Name, err))
 			continue
 		}
-		var factoryRotation *baseboardv1alpha1.BMCUserRotation
-		for i := range rotationList.Items {
-			rot := &rotationList.Items[i]
-			if rot.Spec.BMCUserRef.Name == activeAdmin.Name &&
-				rot.Spec.TriggerReason == baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap {
-				factoryRotation = rot
-				break
-			}
-		}
 
+		factoryRotation := r.findFactoryRotation(rotationList, activeAdmin.Name)
 		if factoryRotation == nil {
-			// Determine factory username(s).
-			factoryUserNames := set.Spec.FactoryAccount.UserNames
-			if len(factoryUserNames) == 0 && activeAdmin.Status.BootstrapSecretRef != nil {
-				bootstrapSecret := &metalv1alpha1.BMCSecret{}
-				if err := r.Get(ctx, client.ObjectKey{Name: activeAdmin.Status.BootstrapSecretRef.Name}, bootstrapSecret); err != nil {
-					errs = append(errs, fmt.Errorf("BMC %s: failed to get bootstrap BMCSecret: %w", bmcObj.Name, err))
-					continue
-				}
-				username, _, err := bmcutils.GetBMCCredentialsFromSecret(bootstrapSecret)
-				if err != nil {
-					errs = append(errs, fmt.Errorf("BMC %s: failed to read bootstrap credentials: %w", bmcObj.Name, err))
-					continue
-				}
-				factoryUserNames = []string{username}
+			if err := r.createFactoryRotation(ctx, set, bmcObj, users, activeAdmin); err != nil {
+				errs = append(errs, err)
 			}
-			// Misconfiguration guard: skip if factory username matches any operator username.
-			operatorNames := make(map[string]bool, len(users))
-			for _, u := range users {
-				operatorNames[u.Spec.UserName] = true
-			}
-			overlap := false
-			for _, fu := range factoryUserNames {
-				if operatorNames[fu] {
-					log.Info("Factory username matches an operator username; skipping factory rotation",
-						"BMC", bmcObj.Name, "FactoryUser", fu)
-					overlap = true
-				}
-			}
-			if overlap {
-				continue
-			}
-			rotation := &baseboardv1alpha1.BMCUserRotation{
-				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: activeAdmin.Name + "-factory-",
-				},
-				Spec: baseboardv1alpha1.BMCUserRotationSpec{
-					BMCUserRef:    corev1.LocalObjectReference{Name: activeAdmin.Name},
-					Type:          baseboardv1alpha1.RotationStrategySingleAccount,
-					TriggeredAt:   metav1.Now(),
-					TriggerReason: baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap,
-				},
-			}
-			if err := controllerutil.SetControllerReference(activeAdmin, rotation, r.Scheme); err != nil {
-				errs = append(errs, fmt.Errorf("BMC %s: failed to set controller reference on factory rotation: %w", bmcObj.Name, err))
-				continue
-			}
-			if err := r.Create(ctx, rotation); err != nil {
-				errs = append(errs, fmt.Errorf("BMC %s: failed to create factory BMCUserRotation: %w", bmcObj.Name, err))
-				continue
-			}
-			log.Info("Created FactoryBootstrap BMCUserRotation", "BMC", bmcObj.Name, "Rotation", rotation.Name)
 			continue
 		}
 
-		// Rotation exists — check its phase.
 		if factoryRotation.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseSucceeded {
-			// Still in progress or failed — wait.
 			continue
 		}
 
-		// Rotation succeeded. Handle credential retention.
-		if factoryRotation.Status.NewSecretRef != nil {
-			newSecret := &metalv1alpha1.BMCSecret{}
-			if err := r.Get(ctx, client.ObjectKey{Name: factoryRotation.Status.NewSecretRef.Name}, newSecret); err == nil {
-				retainCredential := set.Spec.FactoryAccount.RetainCredential == nil || *set.Spec.FactoryAccount.RetainCredential
-				if retainCredential {
-					if newSecret.Labels == nil || newSecret.Labels[credentialRoleLabel] != credentialRoleBreakGlass {
-						secretBase := newSecret.DeepCopy()
-						if newSecret.Labels == nil {
-							newSecret.Labels = make(map[string]string)
-						}
-						newSecret.Labels[credentialRoleLabel] = credentialRoleBreakGlass
-						if err := r.Patch(ctx, newSecret, client.MergeFrom(secretBase)); err != nil {
-							errs = append(errs, fmt.Errorf("BMC %s: failed to label break-glass BMCSecret: %w", bmcObj.Name, err))
-							continue
-						}
-					}
-				} else {
-					if err := r.Delete(ctx, newSecret); client.IgnoreNotFound(err) != nil {
-						errs = append(errs, fmt.Errorf("BMC %s: failed to delete factory rotation BMCSecret: %w", bmcObj.Name, err))
-						continue
-					}
-				}
-			}
-		}
-
-		// Delete the original factory BMCSecret if it is no longer referenced.
-		if activeAdmin.Status.BootstrapSecretRef != nil {
-			bootstrapSecretName := activeAdmin.Status.BootstrapSecretRef.Name
-			inUse := bmcObj.Spec.BMCSecretRef.Name == bootstrapSecretName
-			if !inUse {
-				for i := range rotationList.Items {
-					rot := &rotationList.Items[i]
-					if rot.Status.NewSecretRef != nil && rot.Status.NewSecretRef.Name == bootstrapSecretName {
-						inUse = true
-						break
-					}
-				}
-			}
-			if !inUse {
-				origSecret := &metalv1alpha1.BMCSecret{}
-				if err := r.Get(ctx, client.ObjectKey{Name: bootstrapSecretName}, origSecret); err == nil {
-					if err := r.Delete(ctx, origSecret); client.IgnoreNotFound(err) != nil {
-						errs = append(errs, fmt.Errorf("BMC %s: failed to delete original factory BMCSecret: %w", bmcObj.Name, err))
-						continue
-					}
-					log.Info("Deleted original factory BMCSecret", "BMC", bmcObj.Name, "Secret", bootstrapSecretName)
-				}
-			}
-		}
-
-		// Mark factory account as handled on the active admin user.
-		userBase := activeAdmin.DeepCopy()
-		activeAdmin.Status.FactoryAccountHandled = true
-		if err := r.Status().Patch(ctx, activeAdmin, client.MergeFrom(userBase)); err != nil {
-			errs = append(errs, fmt.Errorf("BMC %s: failed to set FactoryAccountHandled on BMCUser: %w", bmcObj.Name, err))
+		if err := r.completeFactoryRotation(ctx, set, bmcObj, activeAdmin, factoryRotation, rotationList); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (r *BMCUserSetReconciler) isVendorIgnored(ignoreVendors []string, manufacturer string) bool {
+	for _, v := range ignoreVendors {
+		if strings.EqualFold(v, manufacturer) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *BMCUserSetReconciler) findActiveAdmin(users []baseboardv1alpha1.BMCUser, bmcSecretRef string) *baseboardv1alpha1.BMCUser {
+	for i := range users {
+		u := &users[i]
+		if u.Spec.Type != baseboardv1alpha1.BMCUserTypeOperatorAdmin {
+			continue
+		}
+		if u.Status.EffectiveBMCSecretRef != nil && u.Status.EffectiveBMCSecretRef.Name == bmcSecretRef {
+			return u
+		}
+	}
+	return nil
+}
+
+func (r *BMCUserSetReconciler) allOperatorAdminsProven(users []baseboardv1alpha1.BMCUser) bool {
+	for _, u := range users {
+		if u.Spec.Type == baseboardv1alpha1.BMCUserTypeOperatorAdmin && u.Status.EffectiveBMCSecretRef == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *BMCUserSetReconciler) findFactoryRotation(list *baseboardv1alpha1.BMCUserRotationList, adminName string) *baseboardv1alpha1.BMCUserRotation {
+	for i := range list.Items {
+		rot := &list.Items[i]
+		if rot.Spec.BMCUserRef.Name == adminName &&
+			rot.Spec.TriggerReason == baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap {
+			return rot
+		}
+	}
+	return nil
+}
+
+func (r *BMCUserSetReconciler) createFactoryRotation(
+	ctx context.Context,
+	set *baseboardv1alpha1.BMCUserSet,
+	bmcObj *metalv1alpha1.BMC,
+	users []baseboardv1alpha1.BMCUser,
+	activeAdmin *baseboardv1alpha1.BMCUser,
+) error {
+	log := ctrl.LoggerFrom(ctx)
+	factoryUserNames := set.Spec.FactoryAccount.UserNames
+	if len(factoryUserNames) == 0 && activeAdmin.Status.BootstrapSecretRef != nil {
+		bootstrapSecret := &metalv1alpha1.BMCSecret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: activeAdmin.Status.BootstrapSecretRef.Name}, bootstrapSecret); err != nil {
+			return fmt.Errorf("BMC %s: failed to get bootstrap BMCSecret: %w", bmcObj.Name, err)
+		}
+		username, _, err := bmcutils.GetBMCCredentialsFromSecret(bootstrapSecret)
+		if err != nil {
+			return fmt.Errorf("BMC %s: failed to read bootstrap credentials: %w", bmcObj.Name, err)
+		}
+		factoryUserNames = []string{username}
+	}
+
+	operatorNames := make(map[string]bool, len(users))
+	for _, u := range users {
+		operatorNames[u.Spec.UserName] = true
+	}
+	for _, fu := range factoryUserNames {
+		if operatorNames[fu] {
+			log.Info("Factory username matches an operator username; skipping factory rotation",
+				"BMC", bmcObj.Name, "FactoryUser", fu)
+			return nil
+		}
+	}
+
+	rotation := &baseboardv1alpha1.BMCUserRotation{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: activeAdmin.Name + "-factory-",
+		},
+		Spec: baseboardv1alpha1.BMCUserRotationSpec{
+			BMCUserRef:    corev1.LocalObjectReference{Name: activeAdmin.Name},
+			Type:          baseboardv1alpha1.RotationStrategySingleAccount,
+			TriggeredAt:   metav1.Now(),
+			TriggerReason: baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap,
+		},
+	}
+	if err := controllerutil.SetControllerReference(activeAdmin, rotation, r.Scheme); err != nil {
+		return fmt.Errorf("BMC %s: failed to set controller reference on factory rotation: %w", bmcObj.Name, err)
+	}
+	if err := r.Create(ctx, rotation); err != nil {
+		return fmt.Errorf("BMC %s: failed to create factory BMCUserRotation: %w", bmcObj.Name, err)
+	}
+	log.Info("Created FactoryBootstrap BMCUserRotation", "BMC", bmcObj.Name, "Rotation", rotation.Name)
+	return nil
+}
+
+func (r *BMCUserSetReconciler) completeFactoryRotation(
+	ctx context.Context,
+	set *baseboardv1alpha1.BMCUserSet,
+	bmcObj *metalv1alpha1.BMC,
+	activeAdmin *baseboardv1alpha1.BMCUser,
+	rotation *baseboardv1alpha1.BMCUserRotation,
+	rotationList *baseboardv1alpha1.BMCUserRotationList,
+) error {
+	if rotation.Status.NewSecretRef != nil {
+		if err := r.handleFactoryRotationCredential(ctx, set, bmcObj, rotation.Status.NewSecretRef.Name); err != nil {
+			return err
+		}
+	}
+
+	if activeAdmin.Status.BootstrapSecretRef != nil {
+		if err := r.maybeDeleteBootstrapSecret(ctx, bmcObj, activeAdmin.Status.BootstrapSecretRef.Name, rotationList); err != nil {
+			return err
+		}
+	}
+
+	userBase := activeAdmin.DeepCopy()
+	activeAdmin.Status.FactoryAccountHandled = true
+	if err := r.Status().Patch(ctx, activeAdmin, client.MergeFrom(userBase)); err != nil {
+		return fmt.Errorf("BMC %s: failed to set FactoryAccountHandled on BMCUser: %w", bmcObj.Name, err)
+	}
+	return nil
+}
+
+func (r *BMCUserSetReconciler) handleFactoryRotationCredential(
+	ctx context.Context,
+	set *baseboardv1alpha1.BMCUserSet,
+	bmcObj *metalv1alpha1.BMC,
+	secretName string,
+) error {
+	newSecret := &metalv1alpha1.BMCSecret{}
+	if err := r.Get(ctx, client.ObjectKey{Name: secretName}, newSecret); err != nil {
+		return nil // already gone — nothing to do
+	}
+	retainCredential := set.Spec.FactoryAccount.RetainCredential == nil || *set.Spec.FactoryAccount.RetainCredential
+	if retainCredential {
+		if newSecret.Labels == nil || newSecret.Labels[credentialRoleLabel] != credentialRoleBreakGlass {
+			secretBase := newSecret.DeepCopy()
+			if newSecret.Labels == nil {
+				newSecret.Labels = make(map[string]string)
+			}
+			newSecret.Labels[credentialRoleLabel] = credentialRoleBreakGlass
+			if err := r.Patch(ctx, newSecret, client.MergeFrom(secretBase)); err != nil {
+				return fmt.Errorf("BMC %s: failed to label break-glass BMCSecret: %w", bmcObj.Name, err)
+			}
+		}
+	} else {
+		if err := r.Delete(ctx, newSecret); client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("BMC %s: failed to delete factory rotation BMCSecret: %w", bmcObj.Name, err)
+		}
+	}
+	return nil
+}
+
+func (r *BMCUserSetReconciler) maybeDeleteBootstrapSecret(
+	ctx context.Context,
+	bmcObj *metalv1alpha1.BMC,
+	bootstrapSecretName string,
+	rotationList *baseboardv1alpha1.BMCUserRotationList,
+) error {
+	log := ctrl.LoggerFrom(ctx)
+	inUse := bmcObj.Spec.BMCSecretRef.Name == bootstrapSecretName
+	if !inUse {
+		for i := range rotationList.Items {
+			rot := &rotationList.Items[i]
+			if rot.Status.NewSecretRef != nil && rot.Status.NewSecretRef.Name == bootstrapSecretName {
+				inUse = true
+				break
+			}
+		}
+	}
+	if inUse {
+		return nil
+	}
+	origSecret := &metalv1alpha1.BMCSecret{}
+	if err := r.Get(ctx, client.ObjectKey{Name: bootstrapSecretName}, origSecret); err != nil {
+		return nil // already gone
+	}
+	if err := r.Delete(ctx, origSecret); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("BMC %s: failed to delete original factory BMCSecret: %w", bmcObj.Name, err)
+	}
+	log.Info("Deleted original factory BMCSecret", "BMC", bmcObj.Name, "Secret", bootstrapSecretName)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -828,10 +847,6 @@ func (r *BMCUserSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					)
 				},
 			}),
-		).
-		Watches(
-			&baseboardv1alpha1.BMCUser{},
-			handler.EnqueueRequestsFromMapFunc(r.enqueueByBMCUser),
 		).
 		Watches(
 			&baseboardv1alpha1.BMCUserRotation{},

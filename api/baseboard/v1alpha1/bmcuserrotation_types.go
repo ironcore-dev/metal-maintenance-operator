@@ -24,9 +24,9 @@ const (
 type BMCUserRotationTrigger string
 
 const (
-	BMCUserRotationTriggerPeriod          BMCUserRotationTrigger = "RotationPeriod"
-	BMCUserRotationTriggerAnnotation      BMCUserRotationTrigger = "Annotation"
-	BMCUserRotationTriggerExpiry          BMCUserRotationTrigger = "PasswordExpiry"
+	BMCUserRotationTriggerPeriod           BMCUserRotationTrigger = "RotationPeriod"
+	BMCUserRotationTriggerAnnotation       BMCUserRotationTrigger = "Annotation"
+	BMCUserRotationTriggerExpiry           BMCUserRotationTrigger = "PasswordExpiry"
 	BMCUserRotationTriggerFactoryBootstrap BMCUserRotationTrigger = "FactoryBootstrap"
 )
 
@@ -72,6 +72,12 @@ type BMCUserRotationStatus struct {
 	// especially useful when Phase is Failed.
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// ConnectionTestRetries counts how many times the post-password-change
+	// connection test has been retried. When this exceeds the configured
+	// MaxConnectionTestRetries the rotation is moved to Failed.
+	// +optional
+	ConnectionTestRetries int32 `json:"connectionTestRetries,omitempty"`
 
 	// Conditions reflects the progress of this rotation.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

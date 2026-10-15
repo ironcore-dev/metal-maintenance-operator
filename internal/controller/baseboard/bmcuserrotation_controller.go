@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
@@ -32,6 +33,12 @@ type BMCUserRotationReconciler struct {
 	SkipCertValidation bool
 	BMCOptions         bmc.Options
 	ResyncInterval     time.Duration
+	// DefaultPasswordLength is the minimum password length used when the BMC
+	// AccountService does not report a MaxPasswordLength. Defaults to 20.
+	DefaultPasswordLength int
+	// MaxConnectionTestRetries is the maximum number of times the connection
+	// test is retried before the rotation is moved to Failed. Defaults to 10.
+	MaxConnectionTestRetries int
 }
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcuserrotations,verbs=get;list;watch;create;update;patch;delete
@@ -41,19 +48,46 @@ type BMCUserRotationReconciler struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
 
+// passwordLength returns maxLen as int, falling back to r.DefaultPasswordLength
+// (or 20 if not configured) when the BMC firmware omits the field (value is zero).
+func (r *BMCUserRotationReconciler) passwordLength(maxLen uint) int {
+	if maxLen != 0 {
+		return int(maxLen)
+	}
+	if r.DefaultPasswordLength > 0 {
+		return r.DefaultPasswordLength
+	}
+	return 20
+}
+
+// maxRetries returns the configured connection-test retry limit, defaulting to 10.
+func (r *BMCUserRotationReconciler) maxRetries() int {
+	if r.MaxConnectionTestRetries > 0 {
+		return r.MaxConnectionTestRetries
+	}
+	return 10
+}
+
 func (r *BMCUserRotationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	rotation := &baseboardv1alpha1.BMCUserRotation{}
 	if err := r.Get(ctx, req.NamespacedName, rotation); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if utils.ShouldIgnoreReconciliation(rotation) {
+		return ctrl.Result{}, nil
+	}
+	return r.reconcileExists(ctx, rotation)
+}
+
+func (r *BMCUserRotationReconciler) reconcileExists(ctx context.Context, rotation *baseboardv1alpha1.BMCUserRotation) (ctrl.Result, error) {
 	if rotation.Status.Phase == baseboardv1alpha1.BMCUserRotationPhaseSucceeded ||
 		rotation.Status.Phase == baseboardv1alpha1.BMCUserRotationPhaseFailed {
 		return ctrl.Result{}, nil
 	}
-	return r.execute(ctx, rotation)
+	return r.reconcile(ctx, rotation)
 }
 
-func (r *BMCUserRotationReconciler) execute(ctx context.Context, rotation *baseboardv1alpha1.BMCUserRotation) (ctrl.Result, error) {
+func (r *BMCUserRotationReconciler) reconcile(ctx context.Context, rotation *baseboardv1alpha1.BMCUserRotation) (ctrl.Result, error) {
 	user := &baseboardv1alpha1.BMCUser{}
 	if err := r.Get(ctx, client.ObjectKey{Name: rotation.Spec.BMCUserRef.Name}, user); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -144,7 +178,7 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
 		}
-		newPassword, err = bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), passwordLength(accountService.MaxPasswordLength))
+		newPassword, err = bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), r.passwordLength(accountService.MaxPasswordLength))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to generate new password: %w", err)
 		}
@@ -186,10 +220,22 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 	}
 	if invalidCredentials {
 		// The BMC password was already changed and NewSecretRef is persisted.
-		// Leave the rotation non-terminal so the next reconcile retries the
-		// connection test with the stored credential rather than giving up.
+		// Increment the retry counter and fail once the maximum is reached to
+		// avoid an unbounded retry loop (e.g. due to a bad-character password).
+		rotBase := rotation.DeepCopy()
+		rotation.Status.ConnectionTestRetries++
+		if err := r.Status().Patch(ctx, rotation, client.MergeFrom(rotBase)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to increment ConnectionTestRetries: %w", err)
+		}
+		if int(rotation.Status.ConnectionTestRetries) >= r.maxRetries() {
+			log := ctrl.LoggerFrom(ctx)
+			log.Info("Connection test failed too many times; marking rotation as Failed",
+				"retries", rotation.Status.ConnectionTestRetries)
+			return ctrl.Result{}, r.setFailed(ctx, rotation, fmt.Sprintf("connection test failed after %d retries", rotation.Status.ConnectionTestRetries))
+		}
 		log := ctrl.LoggerFrom(ctx)
-		log.Info("New credential rejected by BMC during connection test; will retry")
+		log.Info("New credential rejected by BMC during connection test; will retry",
+			"retries", rotation.Status.ConnectionTestRetries, "maxRetries", r.maxRetries())
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 
