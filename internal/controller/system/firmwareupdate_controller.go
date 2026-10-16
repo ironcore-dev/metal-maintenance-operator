@@ -429,7 +429,7 @@ func (r *FirmwareUpdateReconciler) checkProgressDeadline(ctx context.Context, fw
 		condition,
 		conditionutils.UpdateStatus(corev1.ConditionTrue),
 		conditionutils.UpdateReason(constants.ReasonProgressDeadlineExceeded),
-		conditionutils.UpdateMessage(fmt.Sprintf("No progress observed within %ds", *fw.Spec.ProgressDeadlineSeconds)),
+		conditionutils.UpdateMessage(fmt.Sprintf("No progress observed within %ds", int(deadline.Seconds()))),
 	); err != nil {
 		return false, fmt.Errorf("failed to update ProgressDeadlineExceeded condition: %w", err)
 	}

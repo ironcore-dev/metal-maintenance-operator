@@ -397,27 +397,6 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		return resolve("No component firmware jobs currently stuck in Scheduled state")
 	}
 
-	// if scheduledJobIDs has new entry than fw.Status.DellStatus.ComponentJobs
-	// wait until the new job is confirmed to be scheduled to avoid race conditions
-	notYetConfirmedScheduled := make(map[string]struct{}, len(scheduledJobIDs))
-	for _, id := range scheduledJobIDs {
-		notYetConfirmedScheduled[id] = struct{}{}
-	}
-	if fw.Status.DellStatus != nil {
-		for _, job := range fw.Status.DellStatus.ComponentJobs {
-			if (&bmc.DellJob{State: job.State}).IsScheduled() {
-				delete(notYetConfirmedScheduled, job.JobID)
-				if len(notYetConfirmedScheduled) == 0 {
-					// All currently-scheduled jobs were already known from the previous reconcile.
-					break
-				}
-			}
-		}
-	}
-	if len(notYetConfirmedScheduled) > 0 {
-		return nil, nil
-	}
-
 	powerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check server power state: %w", err)
@@ -436,6 +415,30 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		// PowerOn was already issued for this still-ongoing incident and the
 		// server is still off (e.g. it's still booting) - wait for it to
 		// resolve instead of issuing PowerOn again.
+		return nil, nil
+	}
+
+	// if scheduledJobIDs has an entry not yet reflected in
+	// fw.Status.DellStatus.ComponentJobs as Scheduled, wait until it's
+	// confirmed scheduled on a later reconcile before evaluating staleness -
+	// LastProgressTime may be old for reasons unrelated to this newly
+	// discovered job.
+	notYetConfirmedScheduled := make(map[string]struct{}, len(scheduledJobIDs))
+	for _, id := range scheduledJobIDs {
+		notYetConfirmedScheduled[id] = struct{}{}
+	}
+	if fw.Status.DellStatus != nil {
+		for _, job := range fw.Status.DellStatus.ComponentJobs {
+			if (&bmc.DellJob{State: job.State}).IsScheduled() {
+				delete(notYetConfirmedScheduled, job.JobID)
+				if len(notYetConfirmedScheduled) == 0 {
+					// All currently-scheduled jobs were already known from the previous reconcile.
+					break
+				}
+			}
+		}
+	}
+	if len(notYetConfirmedScheduled) > 0 {
 		return nil, nil
 	}
 

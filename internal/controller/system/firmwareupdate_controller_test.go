@@ -320,6 +320,9 @@ var _ = Describe("handleStuckScheduledJob", func() {
 	It("turns the server on when a job is stuck Scheduled, the server is off, and the timeout has elapsed", func() {
 		stuckSince := metav1.NewTime(time.Now().Add(-2 * powerOnTimeout))
 		fw.Status.LastProgressTime = &stuckSince
+		fw.Status.DellStatus = &systemv1alpha1.DellFirmwareUpdateStatus{
+			ComponentJobs: []systemv1alpha1.RepositoryJob{{JobID: "JID_1", State: "Scheduled"}},
+		}
 
 		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
 		Expect(err).NotTo(HaveOccurred())
@@ -328,6 +331,19 @@ var _ = Describe("handleStuckScheduledJob", func() {
 		Expect(condition).NotTo(BeNil())
 		Expect(condition.Type).To(Equal(ConditionScheduledJobStuckPowerOnIssued))
 		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("defers issuing PowerOn when the Scheduled job was not yet observed as Scheduled in status", func() {
+		stuckSince := metav1.NewTime(time.Now().Add(-2 * powerOnTimeout))
+		fw.Status.LastProgressTime = &stuckSince
+		// JID_1 is newly discovered this reconcile - ComponentJobs doesn't
+		// reflect it as Scheduled yet, so it must not be treated as stuck
+		// even though LastProgressTime looks stale for unrelated reasons.
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(condition).To(BeNil())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0), "PowerOn must not be issued before the job is confirmed Scheduled in status")
 	})
 
 	It("does not issue a repeat PowerOn call while the server is still booting", func() {
