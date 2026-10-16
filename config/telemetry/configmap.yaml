@@ -36,8 +36,8 @@ data:
     # End-to-end pipeline health check: how often the operator fires a
     # Redfish SubmitTestEvent on each subscribed BMC and waits for the
     # event to arrive at the receiver. A Prometheus gauge
-    # (redfish_event_pipeline_test_timestamp{result="success|failure"})
-    # records the Unix timestamp of each outcome.
+    # (redfish_event_pipeline_test_last_result{hostname="..."})
+    # records the outcome: 1 = success, 0 = failure.
     #
     # Bounds: 1m – 7d. Unset or 0 → health check disabled (default).
     # testEventInterval: 1h
