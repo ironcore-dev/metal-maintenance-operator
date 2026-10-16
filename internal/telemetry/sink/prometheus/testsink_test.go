@@ -12,9 +12,18 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
-const pipelineTestMetricName = "redfish_event_pipeline_test_timestamp"
+func labelVal(s *dto.Metric, name string) string {
+	for _, l := range s.GetLabel() {
+		if l.GetName() == name {
+			return l.GetValue()
+		}
+	}
+	return ""
+}
 
-func gatherTestValue(t *testing.T, reg prometheus.Gatherer, bmcName, result string) (float64, bool) {
+const pipelineTestMetricName = "redfish_event_pipeline_test_last_result"
+
+func gatherTestValue(t *testing.T, reg prometheus.Gatherer, bmcName string) (float64, bool) {
 	t.Helper()
 	families, err := reg.Gather()
 	if err != nil {
@@ -25,7 +34,7 @@ func gatherTestValue(t *testing.T, reg prometheus.Gatherer, bmcName, result stri
 			continue
 		}
 		for _, s := range f.GetMetric() {
-			if labelVal(s, "hostname") == bmcName && labelVal(s, "result") == result {
+			if labelVal(s, "hostname") == bmcName {
 				return s.GetGauge().GetValue(), true
 			}
 		}
@@ -47,15 +56,6 @@ func gatherTestCount(t *testing.T, reg prometheus.Gatherer) int {
 	return 0
 }
 
-func labelVal(s *dto.Metric, name string) string {
-	for _, l := range s.GetLabel() {
-		if l.GetName() == name {
-			return l.GetValue()
-		}
-	}
-	return ""
-}
-
 func TestTestEventSink_RecordSuccess(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	s, err := psink.NewTestEventSink(reg)
@@ -63,48 +63,70 @@ func TestTestEventSink_RecordSuccess(t *testing.T) {
 		t.Fatalf("NewTestEventSink: %v", err)
 	}
 	s.RecordTestResult(bmc1, "success")
-	v, ok := gatherTestValue(t, reg, bmc1, "success")
+	v, ok := gatherTestValue(t, reg, bmc1)
 	if !ok {
-		t.Fatal("success series not found")
+		t.Fatal("series not found")
 	}
-	if v <= 0 {
-		t.Errorf("timestamp should be positive, got %v", v)
+	if v != 1 {
+		t.Errorf("value: got %v, want 1 (success)", v)
 	}
 }
 
-func TestTestEventSink_BothResultsCoexist(t *testing.T) {
+func TestTestEventSink_RecordFailure(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, _ := psink.NewTestEventSink(reg)
+	s.RecordTestResult(bmc1, "failure")
+	v, ok := gatherTestValue(t, reg, bmc1)
+	if !ok {
+		t.Fatal("series not found")
+	}
+	if v != 0 {
+		t.Errorf("value: got %v, want 0 (failure)", v)
+	}
+}
+
+func TestTestEventSink_OnlyOneSeriesPerBMC(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	s, _ := psink.NewTestEventSink(reg)
 	s.RecordTestResult(bmc1, "success")
 	s.RecordTestResult(bmc1, "failure")
-	if n := gatherTestCount(t, reg); n != 2 {
-		t.Errorf("series count: got %d, want 2 (success + failure)", n)
+	if n := gatherTestCount(t, reg); n != 1 {
+		t.Errorf("series count: got %d, want 1", n)
 	}
-	if _, ok := gatherTestValue(t, reg, bmc1, "success"); !ok {
-		t.Error("success series missing")
-	}
-	if _, ok := gatherTestValue(t, reg, bmc1, "failure"); !ok {
-		t.Error("failure series missing")
+	v, _ := gatherTestValue(t, reg, bmc1)
+	if v != 0 {
+		t.Errorf("value after failure: got %v, want 0", v)
 	}
 }
 
-func TestTestEventSink_ForgetDeletesAllSeriesForBMC(t *testing.T) {
+func TestTestEventSink_FlipSuccessFailureSuccess(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	s, _ := psink.NewTestEventSink(reg)
 	s.RecordTestResult(bmc1, "success")
 	s.RecordTestResult(bmc1, "failure")
-	s.RecordTestResult("bmc-2", "success")
+	s.RecordTestResult(bmc1, "success")
+	if n := gatherTestCount(t, reg); n != 1 {
+		t.Errorf("series count: got %d, want 1", n)
+	}
+	v, _ := gatherTestValue(t, reg, bmc1)
+	if v != 1 {
+		t.Errorf("value after flip back to success: got %v, want 1", v)
+	}
+}
+
+func TestTestEventSink_ForgetDeletesSeriesForBMC(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, _ := psink.NewTestEventSink(reg)
+	s.RecordTestResult(bmc1, "success")
+	s.RecordTestResult("bmc-2", "failure")
 
 	s.Forget(bmc1)
 
-	if _, ok := gatherTestValue(t, reg, bmc1, "success"); ok {
-		t.Error("bmc-1 success series should be deleted")
+	if _, ok := gatherTestValue(t, reg, bmc1); ok {
+		t.Error("bmc-1 series should be deleted")
 	}
-	if _, ok := gatherTestValue(t, reg, bmc1, "failure"); ok {
-		t.Error("bmc-1 failure series should be deleted")
-	}
-	if _, ok := gatherTestValue(t, reg, "bmc-2", "success"); !ok {
-		t.Error("bmc-2 success series should remain")
+	if _, ok := gatherTestValue(t, reg, "bmc-2"); !ok {
+		t.Error("bmc-2 series should remain")
 	}
 }
 
@@ -113,8 +135,8 @@ func TestTestEventSink_ForgetUnknownIsNoop(t *testing.T) {
 	s, _ := psink.NewTestEventSink(reg)
 	s.RecordTestResult(bmc1, "success")
 	s.Forget("never-seen")
-	if _, ok := gatherTestValue(t, reg, bmc1, "success"); !ok {
-		t.Error("bmc-1 success series should be untouched")
+	if _, ok := gatherTestValue(t, reg, bmc1); !ok {
+		t.Error("bmc-1 series should be untouched")
 	}
 }
 
@@ -138,6 +160,7 @@ func TestTestEventSink_ConcurrentIsRaceFree(t *testing.T) {
 			bmcName := "bmc-" + string(rune('a'+i))
 			for range 50 {
 				s.RecordTestResult(bmcName, "success")
+				s.RecordTestResult(bmcName, "failure")
 			}
 		})
 	}
