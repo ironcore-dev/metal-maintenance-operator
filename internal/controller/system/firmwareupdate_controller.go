@@ -253,10 +253,16 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 	case systemv1alpha1.FirmwareUpdateStateCompleted:
 		return h.handleCompleted(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateInProgress:
-		if exceeded, err := r.checkProgressDeadline(ctx, fw); err != nil || exceeded {
-			return false, err
+		// handleInProgress runs first so that any recovery action it takes
+		// (e.g. the Dell handler's stuck-scheduled-job PowerOn) has a chance
+		// to bump fw.Status.LastProgressTime via patchProgress before checking deadline
+		requeue, handleErr := h.handleInProgress(ctx, fw, bmcClient, r, server)
+
+		if exceeded, deadlineErr := r.checkProgressDeadline(ctx, fw); deadlineErr != nil || exceeded {
+			return false, errors.Join(handleErr, deadlineErr)
 		}
-		return h.handleInProgress(ctx, fw, bmcClient, r, server)
+
+		return requeue, handleErr
 	case systemv1alpha1.FirmwareUpdateStateFailed:
 		return r.processFailedState(ctx, fw)
 	}
@@ -408,6 +414,10 @@ func (r *FirmwareUpdateReconciler) checkProgressDeadline(ctx context.Context, fw
 		return false, nil
 	}
 	deadline := time.Duration(*fw.Spec.ProgressDeadlineSeconds) * time.Second
+	// take the max of the two deadlines, so that the power-on recovery always gets a chance to run first.
+	if r.ScheduledJobPowerOnTimeout > 0 && r.ScheduledJobPowerOnTimeout > deadline {
+		deadline = r.ScheduledJobPowerOnTimeout
+	}
 	if time.Since(fw.Status.LastProgressTime.Time) <= deadline {
 		return false, nil
 	}

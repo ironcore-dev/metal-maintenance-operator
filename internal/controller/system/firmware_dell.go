@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
@@ -396,12 +397,39 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		return resolve("No component firmware jobs currently stuck in Scheduled state")
 	}
 
-	inPowerOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
+	// if scheduledJobIDs has new entry than fw.Status.DellStatus.ComponentJobs
+	// wait until the new job is confirmed to be scheduled to avoid race conditions
+	notYetConfirmedScheduled := make(map[string]struct{}, len(scheduledJobIDs))
+	for _, id := range scheduledJobIDs {
+		notYetConfirmedScheduled[id] = struct{}{}
+	}
+	if fw.Status.DellStatus != nil {
+		for _, job := range fw.Status.DellStatus.ComponentJobs {
+			if (&bmc.DellJob{State: job.State}).IsScheduled() {
+				delete(notYetConfirmedScheduled, job.JobID)
+				if len(notYetConfirmedScheduled) == 0 {
+					// All currently-scheduled jobs were already known from the previous reconcile.
+					break
+				}
+			}
+		}
+	}
+	if len(notYetConfirmedScheduled) > 0 {
+		return nil, nil
+	}
+
+	powerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check server power state: %w", err)
 	}
-	if inPowerOnState {
+	if powerState == metalv1alpha1.ServerOnPowerState {
 		return resolve("Server is powered on; no PowerOn action currently needed")
+	}
+	if powerState != metalv1alpha1.ServerOffPowerState {
+		// Server is mid-transition (PoweringOn/PoweringOff) or Paused - not
+		// actionable yet. Wait for it to settle into a stable On/Off state
+		// before deciding whether a PowerOn is needed.
+		return nil, nil
 	}
 
 	if alreadyIssued {
@@ -464,7 +492,7 @@ func (dh *dellHandler) ensureServerPoweredOn(ctx context.Context, bmcClient bmc.
 		); err != nil {
 			return false, fmt.Errorf("failed to update issued power on condition: %w", err)
 		}
-		return false, r.updateStatus(ctx, fw, fw.Status.State, powerOnIssued)
+		return false, r.patchProgress(ctx, fw, fw.Status.State, powerOnIssued, nil)
 	}
 	// no watch event to notice the power-on completing in real BMC - poll periodically instead.
 	log.V(1).Info("Server in powered off state, retrying", "Server", server.Name)
@@ -598,6 +626,10 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, bmcClient bmc.BMC
 		log.V(1).Info("Failed to list jobs for component tracking, retrying", "error", err)
 		return true, nil
 	}
+	//
+	// Sort jobs so that an unchanged set of outstanding jobs always produces ComponentJobs
+	// in the same order
+	slices.Sort(jobIDs)
 	log.V(1).Info("Listed BMC jobs for component tracking", "TotalJobsOnBMC", len(jobIDs))
 
 	var baselineJobIDs []string
