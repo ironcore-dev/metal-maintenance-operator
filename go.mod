@@ -8,7 +8,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/google/uuid v1.6.0
 	github.com/ironcore-dev/controller-utils v0.14.0
-	github.com/ironcore-dev/metal-operator v0.8.1-0.20261015072017-79854aaf2f66
+	github.com/ironcore-dev/metal-operator v0.8.1-0.20261015135212-2df4c96368b0
 	github.com/onsi/ginkgo/v2 v2.33.0
 	github.com/onsi/gomega v1.44.0
 	github.com/prometheus/client_golang v1.24.1
