@@ -1,0 +1,220 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: bmcuserrotations.baseboard.metal.ironcore.dev
+spec:
+  group: baseboard.metal.ironcore.dev
+  names:
+    kind: BMCUserRotation
+    listKind: BMCUserRotationList
+    plural: bmcuserrotations
+    shortNames:
+    - bmcur
+    singular: bmcuserrotation
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.bmcUserRef.name
+      name: BMCUser
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .spec.triggerReason
+      name: Trigger
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.triggeredAt
+      name: TriggeredAt
+      type: date
+    - jsonPath: .status.completedAt
+      name: CompletedAt
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BMCUserRotation is the Schema for the bmcuserrotations API.
+          Each object represents one rotation event for a BMCUser. Spec is immutable after creation.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              BMCUserRotationSpec defines the desired state of BMCUserRotation.
+              Spec is immutable after creation.
+            properties:
+              bmcUserRef:
+                description: BMCUserRef references the BMCUser this rotation was triggered
+                  for.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              triggerReason:
+                description: TriggerReason describes what caused this rotation.
+                enum:
+                - RotationPeriod
+                - Annotation
+                - PasswordExpiry
+                - FactoryBootstrap
+                type: string
+              triggeredAt:
+                description: TriggeredAt is the timestamp when the rotation was initiated.
+                format: date-time
+                type: string
+              type:
+                description: Type is the rotation strategy used for this rotation
+                  event.
+                enum:
+                - DualAccount
+                - SingleAccount
+                type: string
+            required:
+            - bmcUserRef
+            - triggerReason
+            - triggeredAt
+            - type
+            type: object
+            x-kubernetes-validations:
+            - message: BMCUserRotationSpec is immutable
+              rule: self == oldSelf
+          status:
+            description: BMCUserRotationStatus defines the observed state of BMCUserRotation.
+            properties:
+              completedAt:
+                description: CompletedAt is the timestamp when the rotation finished
+                  (succeeded or failed).
+                format: date-time
+                type: string
+              conditions:
+                description: Conditions reflects the progress of this rotation.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              connectionTestRetries:
+                description: |-
+                  ConnectionTestRetries counts how many times the post-password-change
+                  connection test has been retried. When this exceeds the configured
+                  MaxConnectionTestRetries the rotation is moved to Failed.
+                format: int32
+                type: integer
+              message:
+                description: |-
+                  Message provides a human-readable description of the current state,
+                  especially useful when Phase is Failed.
+                type: string
+              newSecretRef:
+                description: |-
+                  NewSecretRef references the BMCSecret created by this rotation.
+                  Set on success.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              phase:
+                default: Pending
+                description: Phase is the current lifecycle phase of this rotation.
+                enum:
+                - Pending
+                - InProgress
+                - Succeeded
+                - Failed
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
