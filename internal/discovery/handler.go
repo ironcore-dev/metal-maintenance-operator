@@ -36,9 +36,16 @@ type Target struct {
 // Handler serves the SD endpoint. Reads the live BMC list from the
 // controller-runtime cache on each request — no in-memory cache of
 // rendered output.
+//
+// SubscribedBMCs is optional. When set, it is called on each request to
+// obtain the set of BMC names that currently have active Redfish event-push
+// subscriptions. Those BMCs are omitted from the response so the external
+// redfish-exporter does not scrape them — the operator's push pipeline
+// covers them already.
 type Handler struct {
-	Client client.Client
-	Log    logr.Logger
+	Client         client.Client
+	Log            logr.Logger
+	SubscribedBMCs func() map[string]struct{}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -55,7 +62,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	targets := Render(list.Items)
+	var subscribed map[string]struct{}
+	if h.SubscribedBMCs != nil {
+		subscribed = h.SubscribedBMCs()
+	}
+
+	targets := Render(list.Items, subscribed)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(targets); err != nil {
@@ -64,9 +76,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // Render projects the BMC list onto Prometheus SD targets.
+// subscribed is the optional set of BMC names to exclude (those with active
+// push subscriptions that the external exporter should not scrape).
 // Extracted from ServeHTTP so the contract is unit-testable without an
 // HTTP server.
-func Render(bmcs []metalv1alpha1.BMC) []Target {
+func Render(bmcs []metalv1alpha1.BMC, subscribed map[string]struct{}) []Target {
 	out := make([]Target, 0, len(bmcs))
 	for i := range bmcs {
 		b := &bmcs[i]
@@ -74,6 +88,9 @@ func Render(bmcs []metalv1alpha1.BMC) []Target {
 			continue
 		}
 		if !b.Status.IP.IsValid() {
+			continue
+		}
+		if _, ok := subscribed[b.Name]; ok {
 			continue
 		}
 		out = append(out, Target{

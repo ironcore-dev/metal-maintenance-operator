@@ -586,7 +586,7 @@ func main() {
 	// +kubebuilder:scaffold:builder
 
 	if enableTelemetry {
-		if err := telemetryruntime.AddTo(mgr, telemetryruntime.Options{
+		telemetryOpts := telemetryruntime.Options{
 			ConfigName:                 telemetryConfigName,
 			ConfigNamespace:            telemetryConfigNamespace,
 			ReceiverURL:                telemetryReceiverURL,
@@ -594,23 +594,38 @@ func main() {
 			InsecureTLS:                telemetryInsecureTLS,
 			SubscriberID:               telemetrySubscriberID,
 			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
-		}); err != nil {
+		}
+		if err := telemetryruntime.AddTo(mgr, telemetryOpts); err != nil {
 			setupLog.Error(err, "Failed to add telemetry pipeline")
 			os.Exit(1)
 		}
 		setupLog.Info("Enabled telemetry pipeline",
 			"configMap", telemetryConfigNamespace+"/"+telemetryConfigName,
 			"receiverURL", telemetryReceiverURL)
-	}
 
-	// BMC service-discovery endpoint.
-	sdHandler := &discovery.Handler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("discovery"),
-	}
-	if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
-		setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
-		os.Exit(1)
+		// BMC service-discovery endpoint: omit BMCs with active push
+		// subscriptions so the exporter only scrapes what the push pipeline
+		// hasn't claimed.
+		sdHandler := &discovery.Handler{
+			Client:         mgr.GetClient(),
+			Log:            ctrl.Log.WithName("discovery"),
+			SubscribedBMCs: telemetryOpts.ActiveSubscriptions,
+		}
+		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
+			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
+			os.Exit(1)
+		}
+	} else {
+		// Telemetry disabled: register the SD endpoint without subscription
+		// filtering — the exporter scrapes all BMCs.
+		sdHandler := &discovery.Handler{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("discovery"),
+		}
+		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
+			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
+			os.Exit(1)
+		}
 	}
 	if metricsAddr == "0" || metricsAddr == "" {
 		setupLog.Info("BMC service discovery registered but metrics server is disabled",

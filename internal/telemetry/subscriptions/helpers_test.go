@@ -64,6 +64,12 @@ type fakeClient struct {
 	subs        []subscriptions.Subscription
 	listErr     error
 	logouts     atomic.Int32
+
+	// ProbeEventService controls
+	probeErr        error
+	probeEnabled    bool
+	probeHasSubmit  bool
+	probeDiscovered string
 }
 
 type createCall struct {
@@ -113,6 +119,19 @@ func (c *fakeClient) SubmitTestEvent(_ context.Context, params subscriptions.Tes
 	}
 	c.submitCalls = append(c.submitCalls, params.MessageId)
 	return nil
+}
+
+func (c *fakeClient) ProbeEventService(_ context.Context, _ bool) (*subscriptions.EventServiceCapabilities, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.probeErr != nil {
+		return nil, c.probeErr
+	}
+	return &subscriptions.EventServiceCapabilities{
+		ServiceEnabled:     c.probeEnabled,
+		HasSubmitTestEvent: c.probeHasSubmit,
+		DiscoveredTestMessageId: c.probeDiscovered,
+	}, nil
 }
 
 func (c *fakeClient) snapshotSubmits() []string {
@@ -342,12 +361,25 @@ func newRecWithTestRecorder(t *testing.T, c client.Client, cfg *subscriptions.Co
 	return r
 }
 
-// dellVendorMatch is the canonical EventBased policy used by most
-// retargeted tests: any Dell BMC is event-eligible.
+// dellVendorMatch is the canonical TestEventOverrides policy used by most
+// retargeted tests: any Dell BMC uses a known testMessageId.
 func dellVendorMatch() *subscriptions.Config {
-	return &subscriptions.Config{EventBasedHardware: []subscriptions.HardwareMatch{
-		{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: testMessageId},
-	}}
+	return &subscriptions.Config{
+		TestEventOverrides: []subscriptions.TestOverride{
+			{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: testMessageId},
+		},
+	}
+}
+
+// capableFakeClient returns a fakeClient whose ProbeEventService signals that
+// the EventService is enabled and SubmitTestEvent is supported. Use this in
+// tests that assert subscription creation; a bare &fakeClient{} has
+// probeEnabled=false and will therefore not trigger subscription creation.
+func capableFakeClient() *fakeClient {
+	return &fakeClient{
+		probeEnabled:   true,
+		probeHasSubmit: true,
+	}
 }
 
 // newRec builds a fully-initialised BMCReconciler for unit tests.

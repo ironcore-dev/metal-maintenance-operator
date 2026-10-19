@@ -50,7 +50,9 @@ dashboards/redfish-telemetry/redfish-telemetry
 # percli intermediate output directories (dashboards/built/*.json are the canonical outputs)
 dashboards/built/*/
 
-# Local server lists for hack/verify-test-events contain real BMC credentials.
+# Local server lists and configs for hack/verify-test-events may contain real BMC credentials.
+hack/verify-test-events/servers.yaml
 hack/verify-test-events/servers.local.yaml
 hack/verify-test-events/*.local.yaml
+hack/verify-test-events/config.yaml
 plugins
