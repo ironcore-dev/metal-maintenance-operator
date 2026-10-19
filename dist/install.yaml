@@ -2408,16 +2408,44 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              deletionPolicy:
+                description: |-
+                  DeletionPolicy controls whether the BMC account is deleted when this BMCUser is removed.
+                  Retain preserves the account on the BMC hardware; Delete removes it.
+                  When empty, OperatorAdmin users default to Retain and ServiceAccount users to Delete.
+                enum:
+                - Retain
+                - Delete
+                type: string
               description:
                 description: Description is a description for the BMC user.
                 type: string
               roleID:
                 description: RoleID is the ID of the role to assign to the user.
                 type: string
+              rotationHistoryLimit:
+                default: 10
+                description: |-
+                  RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)
+                  BMCUserRotation objects to retain. Older objects beyond this limit are pruned.
+                  Defaults to 10.
+                format: int32
+                minimum: 1
+                type: integer
               rotationPeriod:
                 description: |-
                   RotationPeriod defines how often the password should be rotated.
                   If not set, the password will not be rotated.
+                type: string
+              type:
+                default: ServiceAccount
+                description: |-
+                  Type identifies the role of this BMCUser within the operator.
+                  OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef
+                  and use dual-account rotation. Defaults to ServiceAccount.
+                enum:
+                - OperatorAdmin
+                - ServiceAccount
                 type: string
               userName:
                 description: UserName is the username of the BMC user.
@@ -2429,6 +2457,25 @@ spec:
           status:
             description: BMCUserStatus defines the observed state of BMCUser.
             properties:
+              bootstrapSecretRef:
+                description: |-
+                  BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.
+                  Written once by the BMCUserSet controller before the user is first reconciled, so the
+                  peer (-b) can still bootstrap using the original factory credential even after -a has
+                  promoted a new credential into BMC.Spec.BMCSecretRef.
+                  Never changed after being set.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               conditions:
                 description: Conditions reflects the current state of the BMCUser.
                 items:
@@ -2502,6 +2549,12 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              factoryAccountHandled:
+                description: |-
+                  FactoryAccountHandled records whether the factory account on this user's BMC has been
+                  successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller
+                  once the FactoryBootstrap rotation succeeds.
+                type: boolean
               id:
                 description: ID is the identifier of the user in the BMC system.
                 type: string
@@ -4430,7 +4483,9 @@ rules:
   resources:
   - bmcsettings
   - bmcsettingssets
+  - bmcuserrotations
   - bmcusers
+  - bmcusersets
   - bmcversions
   - bmcversionsets
   verbs:
@@ -4447,6 +4502,7 @@ rules:
   - bmcsettings/finalizers
   - bmcsettingssets/finalizers
   - bmcusers/finalizers
+  - bmcusersets/finalizers
   - bmcversions/finalizers
   - bmcversionsets/finalizers
   verbs:
@@ -4456,7 +4512,9 @@ rules:
   resources:
   - bmcsettings/status
   - bmcsettingssets/status
+  - bmcuserrotations/status
   - bmcusers/status
+  - bmcusersets/status
   - bmcversions/status
   - bmcversionsets/status
   verbs:
@@ -4531,14 +4589,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
-  - endpoints
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - metal.ironcore.dev
