@@ -105,8 +105,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/ironcore-dev/controller-utils v0.14.0 h1:ZRKcTKHxj8xNJDX1t225YoCTykw7rOR1wingeMm424k=
 github.com/ironcore-dev/controller-utils v0.14.0/go.mod h1:r0ANgOsXV7Xo+V8z93frNJMnZdE1ZWc9j2djOKWEigA=
-github.com/ironcore-dev/metal-operator v0.8.1-0.20261015135212-2df4c96368b0 h1:cLJLoeL1a364QL47JlHKQz8lC4zvw6E66H9syugAsiI=
-github.com/ironcore-dev/metal-operator v0.8.1-0.20261015135212-2df4c96368b0/go.mod h1:T3fAyg1jFLmpSJzlPzeBaUgexfApm1EKTdD3M9Mc9Ok=
+github.com/ironcore-dev/metal-operator v0.8.1-0.20261016140341-c0b87c0bb354 h1:FY9vNzguWMASMFeMshH9M6XMeHtEAWVHBmISJsrqbF8=
+github.com/ironcore-dev/metal-operator v0.8.1-0.20261016140341-c0b87c0bb354/go.mod h1:T3fAyg1jFLmpSJzlPzeBaUgexfApm1EKTdD3M9Mc9Ok=
 github.com/joshdk/go-junit v1.0.0 h1:S86cUKIdwBHWwA6xCmFlf3RTLfVXYQfvanM5Uh+K6GE=
 github.com/joshdk/go-junit v1.0.0/go.mod h1:TiiV0PqkaNfFXjEiyjWM3XXrhVyCa1K4Zfga6W52ung=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=
