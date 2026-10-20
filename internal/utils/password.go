@@ -42,6 +42,25 @@ func EscapedLen(pw string) int {
 	return len(b) - 2
 }
 
+// ValidatePasswordLength checks a password against a BMC's reported length limits.
+// It compares the HTML-escaped length (see EscapedLen) against maxLen — matching how
+// Dell iDRAC counts the PATCH payload — and the raw rune length against minLen. A zero
+// maxLen or minLen means the firmware did not report that bound and the check is skipped.
+// It returns a non-nil error describing the violation when the password is out of range.
+func ValidatePasswordLength(pw string, maxLen, minLen uint) error {
+	if maxLen > 0 {
+		if escaped := EscapedLen(pw); escaped > int(maxLen) {
+			return fmt.Errorf("password escaped length %d exceeds BMC MaxPasswordLength %d", escaped, maxLen)
+		}
+	}
+	if minLen > 0 {
+		if runes := len([]rune(pw)); runes < int(minLen) {
+			return fmt.Errorf("password length %d is below BMC MinPasswordLength %d", runes, minLen)
+		}
+	}
+	return nil
+}
+
 // GenerateHTMLSafePassword generates a password for the given manufacturer that
 // honours the BMC's reported password-length requirements: its HTML-escaped length
 // never exceeds maxLen (when maxLen > 0) and its length is never below the firmware's
