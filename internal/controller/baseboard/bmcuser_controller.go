@@ -23,6 +23,7 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
@@ -39,18 +40,6 @@ const (
 	reasonCredentialsBootstrapped        = "CredentialsBootstrapped"
 	reasonCredentialsPending             = "CredentialsPending"
 )
-
-// passwordLength returns maxLen as int, falling back to r.DefaultPasswordLength
-// (or 20 if not configured) when the BMC firmware omits the field (value is zero).
-func (r *BMCUserReconciler) passwordLength(maxLen uint) int {
-	if maxLen != 0 {
-		return int(maxLen)
-	}
-	if r.DefaultPasswordLength > 0 {
-		return r.DefaultPasswordLength
-	}
-	return 20
-}
 
 // rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
 func (r *BMCUserReconciler) rotationFailureDelay() time.Duration {
@@ -408,7 +397,11 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	if err != nil {
 		return fmt.Errorf("failed to get account service: %w", err)
 	}
-	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), r.passwordLength(accountService.MaxPasswordLength))
+	fallback := r.DefaultPasswordLength
+	if fallback <= 0 {
+		fallback = 20
+	}
+	newPassword, err := utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
 	if err != nil {
 		return fmt.Errorf("failed to generate new password for BMC account %s: %w", user.Name, err)
 	}

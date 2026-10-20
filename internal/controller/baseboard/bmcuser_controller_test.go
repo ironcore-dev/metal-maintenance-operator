@@ -7,6 +7,7 @@ import (
 	"time"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -110,8 +111,13 @@ var _ = Describe("BMCUser Controller", func() {
 		By("Ensuring the effective bmcSecret has the correct data")
 		Expect(effectiveSecret.Data).To(HaveKeyWithValue("username", []byte("user")))
 		password := string(effectiveSecret.Data["password"])
-		// make sure that the password has a length of 30 (default max length for redfish mock server)
-		Expect(password).To(HaveLen(30))
+		// The redfish mock server reports MaxPasswordLength=30. The generator leaves a
+		// margin below the max and may shrink further so the HTML-escaped password stays
+		// within the limit (see utils.GenerateHTMLSafePassword), so assert the bound
+		// rather than an exact length.
+		Expect(utils.EscapedLen(password)).To(BeNumerically("<=", 30))
+		Expect(len(password)).To(BeNumerically(">=", 8))
+		Expect(len(password)).To(BeNumerically("<=", 30))
 
 		By("Deleting the User resource and ensuring the effective secret is deleted")
 

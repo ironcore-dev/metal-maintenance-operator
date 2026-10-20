@@ -48,18 +48,6 @@ type BMCUserRotationReconciler struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
 
-// passwordLength returns maxLen as int, falling back to r.DefaultPasswordLength
-// (or 20 if not configured) when the BMC firmware omits the field (value is zero).
-func (r *BMCUserRotationReconciler) passwordLength(maxLen uint) int {
-	if maxLen != 0 {
-		return int(maxLen)
-	}
-	if r.DefaultPasswordLength > 0 {
-		return r.DefaultPasswordLength
-	}
-	return 20
-}
-
 // maxRetries returns the configured connection-test retry limit, defaulting to 10.
 func (r *BMCUserRotationReconciler) maxRetries() int {
 	if r.MaxConnectionTestRetries > 0 {
@@ -178,7 +166,11 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
 		}
-		newPassword, err = bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), r.passwordLength(accountService.MaxPasswordLength))
+		fallback := r.DefaultPasswordLength
+		if fallback <= 0 {
+			fallback = 20
+		}
+		newPassword, err = utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to generate new password: %w", err)
 		}
