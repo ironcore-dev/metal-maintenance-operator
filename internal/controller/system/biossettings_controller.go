@@ -1180,6 +1180,11 @@ func (r *BIOSSettingsReconciler) handleAppliedState(ctx context.Context, bmcClie
 	// Re-check readiness gates
 	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
 		log.V(1).Info("Readiness gates no longer satisfied, staying Applied", "Reasons", reasons)
+		// Clean up ServerMaintenance; the settings are already applied, so holding
+		// maintenance serves no purpose regardless of downstream gate status.
+		if err := r.removeServerMaintenance(ctx, settings); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, r.patchBIOSSettingsReadinessGatesNotSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied, reasons)
 	}
 	if err := r.markBIOSSettingsReadinessGatesSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStateApplied); err != nil {

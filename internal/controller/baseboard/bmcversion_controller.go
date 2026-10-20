@@ -245,7 +245,11 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 		if err := r.ensureCompletionConditionInitialized(ctx, bmcClient, bmcVersion); err != nil {
 			return ctrl.Result{}, err
 		}
-		if satisfied, reasons := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion); !satisfied {
+		satisfied, reasons, err := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
 			return ctrl.Result{}, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, baseboardv1alpha1.BMCVersionStatePending, reasons)
 		}
@@ -289,7 +293,11 @@ func (r *BMCVersionReconciler) handleBMCVersionInProgressState(ctx context.Conte
 	}
 
 	if ok := r.checkIfMaintenanceGranted(ctx, bmcClient, bmcVersion); !ok {
-		if satisfied, reasons := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion); !satisfied {
+		satisfied, reasons, err := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !satisfied {
 			log.V(1).Info("Readiness gates no longer satisfied while waiting for maintenance approval, reverting to Pending", "Reasons", reasons)
 			if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
 				return ctrl.Result{}, err
@@ -346,8 +354,17 @@ func (r *BMCVersionReconciler) handleBMCVersionInProgressState(ctx context.Conte
 // handleBMCVersionCompletedState re-checks readiness gates, actual state on every resync while Completed
 func (r *BMCVersionReconciler) handleBMCVersionCompletedState(ctx context.Context, bmcVersion *baseboardv1alpha1.BMCVersion, bmcClient bmc.BMC, bmcObj *metalv1alpha1.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if satisfied, reasons := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion); !satisfied {
+	satisfied, reasons, err := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !satisfied {
 		log.V(1).Info("Readiness gates no longer satisfied, staying Completed", "Reasons", reasons)
+		// Clean up ServerMaintenance refs; the upgrade is already completed, so holding
+		// maintenance serves no purpose regardless of downstream gate status.
+		if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, baseboardv1alpha1.BMCVersionStateCompleted, reasons)
 	}
 	if err := r.markBMCVersionReadinessGatesSatisfied(ctx, bmcVersion, baseboardv1alpha1.BMCVersionStateCompleted); err != nil {
@@ -451,12 +468,16 @@ func (r *BMCVersionReconciler) ensureCompletionConditionInProgress(ctx context.C
 	return nil
 }
 
-func (r *BMCVersionReconciler) checkBMCVersionReadinessGates(ctx context.Context, bmcClient bmc.BMC, bmcVersion *baseboardv1alpha1.BMCVersion) (bool, []string) {
+func (r *BMCVersionReconciler) checkBMCVersionReadinessGates(ctx context.Context, bmcClient bmc.BMC, bmcVersion *baseboardv1alpha1.BMCVersion) (bool, []string, error) {
+	if len(bmcVersion.Spec.ReadinessGates) == 0 {
+		return true, nil, nil
+	}
 	servers, err := r.getServersForBMCVersion(ctx, bmcClient, bmcVersion)
 	if err != nil {
-		return false, []string{fmt.Sprintf("failed to get servers for readiness gate check: %v", err)}
+		return false, nil, fmt.Errorf("failed to get servers for readiness gate check: %w", err)
 	}
-	return utils.GatesSatisfiedForServers(servers, bmcVersion.Spec.ReadinessGates)
+	satisfied, reasons := utils.GatesSatisfiedForServers(servers, bmcVersion.Spec.ReadinessGates)
+	return satisfied, reasons, nil
 }
 
 func (r *BMCVersionReconciler) handleUpgradeInProgressState(

@@ -303,6 +303,11 @@ func (r *BIOSVersionReconciler) handleCompletedState(ctx context.Context, bmcCli
 		); err != nil {
 			return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
 		}
+		// Clean up ServerMaintenance refs; the upgrade is already completed, so holding
+		// maintenance serves no purpose regardless of downstream gate status.
+		if err := r.cleanupServerMaintenanceReferences(ctx, biosVersion); err != nil {
+			return false, err
+		}
 		if err := r.updateStatus(ctx, biosVersion, systemv1alpha1.BIOSVersionStateCompleted, biosVersion.Status.UpgradeTask, condition); err != nil {
 			return false, err
 		}
