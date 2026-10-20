@@ -439,6 +439,10 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 
 // handleUpdatedSecretRef applies the credentials from a newly referenced
 // BMCSecret to the BMC account and records the secret as the effective one.
+// It validates the new password against the BMC's reported length limits first;
+// on violation it records PasswordValid=False and returns without touching the
+// account, so an over-length password is surfaced instead of being silently
+// rejected by the BMC (see the create path in reconcile).
 func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcSecret *metalv1alpha1.BMCSecret, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("BMCSecret credentials have changed, updating BMC user")
@@ -446,10 +450,18 @@ func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *ba
 	if err != nil {
 		return fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
 	}
+	accountService, err := bmcClient.GetAccountService()
+	if err != nil {
+		return fmt.Errorf("failed to get account service: %w", err)
+	}
+	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength); err != nil {
+		log.Info("Updated password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
+		return r.setPasswordValidCondition(ctx, user, false, err.Error())
+	}
 	if err := bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
 		return fmt.Errorf("failed to create or update BMC account with new password: %w", err)
 	}
-	return nil
+	return r.setPasswordValidCondition(ctx, user, true, "")
 }
 
 // createBMCSecretForUser builds a BMCSecret (owned by the BMCUser) populated
