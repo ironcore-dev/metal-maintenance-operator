@@ -82,3 +82,33 @@ func TestGenerateHTMLSafePasswordMinExceedsMax(t *testing.T) {
 		t.Fatal("expected error when MinPasswordLength exceeds MaxPasswordLength, got nil")
 	}
 }
+
+func TestValidatePasswordLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		pw      string
+		maxLen  uint
+		minLen  uint
+		wantErr bool
+	}{
+		{"within bounds", "abcdefgh", 30, 8, false},
+		{"too short", "abc", 30, 8, true},
+		{"too long raw", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 20, 8, true}, // 32 chars > 20
+		{"escaped overflow", "aaaaaaaaaaaaaaaaaa&", 20, 8, true},          // 18 + "&"(6) = 24 > 20
+		{"escaped within", "aaaaaaaaaaaa&", 20, 8, false},                 // 12 + 6 = 18 <= 20
+		{"no max skips max check", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0, 8, false},
+		{"no min skips min check", "ab", 30, 0, false},
+		{"both zero", "anything", 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidatePasswordLength(tc.pw, tc.maxLen, tc.minLen)
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidatePasswordLength(%q, %d, %d) = nil, want error", tc.pw, tc.maxLen, tc.minLen)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidatePasswordLength(%q, %d, %d) = %v, want nil", tc.pw, tc.maxLen, tc.minLen, err)
+			}
+		})
+	}
+}
