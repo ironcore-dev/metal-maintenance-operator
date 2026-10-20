@@ -100,8 +100,10 @@ func (e wireEvent) toEvent() sink.Event {
 	return out
 }
 
-// wireMetricReport is the wire shape of a Redfish MetricReport push.
+// wireMetricReport is the wire shape of a Redfish MetricReport push notification.
 type wireMetricReport struct {
+	ODataType    string            `json:"@odata.type,omitempty"`
+	ODataID      string            `json:"@odata.id,omitempty"`
 	ID           string            `json:"Id,omitempty"`
 	Name         string            `json:"Name,omitempty"`
 	Timestamp    string            `json:"Timestamp,omitempty"`
@@ -115,6 +117,15 @@ type wireMetricValue struct {
 	Units           string `json:"Units,omitempty"`
 	MetricValueKind string `json:"MetricValueKind,omitempty"`
 	Timestamp       string `json:"Timestamp,omitempty"`
+}
+
+// ParseMetricReportSamples parses a Redfish MetricReport JSON body into samples.
+func ParseMetricReportSamples(body []byte, log logr.Logger) ([]sink.Sample, error) {
+	var r wireMetricReport
+	if err := json.Unmarshal(body, &r); err != nil {
+		return nil, err
+	}
+	return r.toSamples(log), nil
 }
 
 // toSamples parses MetricValue strings into floats.

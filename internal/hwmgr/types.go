@@ -20,6 +20,7 @@ type Device struct {
 	Name         string `json:"Name"`
 	Hostname     string `json:"Hostname"`
 	Model        string `json:"Model"`
+	Serial       string `json:"SerialNumber"`
 	HealthStatus int    `json:"HealthStatus"` // 4000 = OK, 4002 = Warning, etc.
 }
 
@@ -54,9 +55,22 @@ type ClientInterface interface {
 	IsJobSuccessful(jobInfo *JobInfo) bool
 }
 
+// noConsoleBackend is implemented by vendors that have no central management
+// console (e.g. Fujitsu). Used by HasConsole to skip import scheduling.
+type noConsoleBackend interface {
+	NoConsole()
+}
+
 type Client struct {
 	Manufacturer bmc.Manufacturer
 	ClientInterface
+}
+
+// HasConsole returns false for vendors that have no central management console,
+// meaning import/remove operations should not be scheduled.
+func (c *Client) HasConsole() bool {
+	_, noConsole := c.ClientInterface.(noConsoleBackend)
+	return !noConsole
 }
 
 func New(manufacturer bmc.Manufacturer, options ClientOptions) (client *Client, err error) {
@@ -71,6 +85,9 @@ func New(manufacturer bmc.Manufacturer, options ClientOptions) (client *Client, 
 		return
 	case bmc.ManufacturerHPE:
 		client.ClientInterface, err = NewHPEClient(options)
+		return
+	case bmc.ManufacturerFujitsu:
+		client.ClientInterface, err = NewFujitsuClient(options)
 		return
 	}
 	return

@@ -29,7 +29,11 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/events"
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/subscriptions"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/warningevent"
+	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	metalbmc "github.com/ironcore-dev/metal-operator/bmc"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Options configures the event-push pipeline. Required fields are noted
@@ -47,8 +51,13 @@ type Options struct {
 	SubscriberID string
 
 	// EnableCriticalEventHandler turns on the Critical-event → Server
-	// condition writer
+	// condition writer and Kubernetes Event emission.
 	EnableCriticalEventHandler bool
+
+	// EnableWarningEventHandler turns on Kubernetes Event emission for
+	// Warning-severity Redfish alerts. Can be enabled independently of
+	// EnableCriticalEventHandler.
+	EnableWarningEventHandler bool
 }
 
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;patch;watch
@@ -56,6 +65,7 @@ type Options struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // AddTo registers the event-push pipeline on the given manager.
 func AddTo(mgr manager.Manager, opts Options) error {
@@ -85,15 +95,45 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		return fmt.Errorf("init test-event sink: %w", err)
 	}
 
+	var criticalHandler *criticalevent.ConditionHandler
+
 	if opts.EnableCriticalEventHandler {
+		alertGauge := criticalevent.NewCriticalAlertGauge()
+		if err := ctrlmetrics.Registry.Register(alertGauge); err != nil {
+			return fmt.Errorf("register critical alert gauge: %w", err)
+		}
 		handler := &criticalevent.ConditionHandler{
-			Client: mgr.GetClient(),
-			Log:    ctrl.Log.WithName("telemetry").WithName("readiness"),
+			Client:        mgr.GetClient(),
+			Log:           ctrl.Log.WithName("telemetry").WithName("readiness"),
+			EventRecorder: mgr.GetEventRecorder("metal-maintenance-operator"),
+			AlertGauge:    alertGauge,
 		}
 		// Attach the readiness bridge directly to the Prometheus sink so
-		// every Critical event writes the CriticalEventReceived
-		// condition on the matching Server.
+		// every Critical event writes the CriticalEventReceived condition,
+		// emits a Kubernetes Event, and sets the alert gauge to 1.
 		eventSink.OnCritical = handler.HandleCritical
+		criticalHandler = handler
+
+		// Pre-warm the gauge after the cache syncs so the metric is correct
+		// immediately after a pod restart, before any new events arrive.
+		prewarmHandler := handler
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			if !mgr.GetCache().WaitForCacheSync(ctx) {
+				return nil
+			}
+			return prewarmAlertGauge(ctx, mgr.GetClient(), prewarmHandler)
+		})); err != nil {
+			return fmt.Errorf("add alert gauge prewarm: %w", err)
+		}
+	}
+
+	if opts.EnableWarningEventHandler {
+		handler := &warningevent.Handler{
+			Client:        mgr.GetClient(),
+			Log:           ctrl.Log.WithName("telemetry").WithName("warning"),
+			EventRecorder: mgr.GetEventRecorder("metal-maintenance-operator"),
+		}
+		eventSink.OnWarning = handler.HandleWarning
 	}
 
 	loader := &ConfigLoader{
@@ -107,10 +147,20 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		return fmt.Errorf("add config loader: %w", err)
 	}
 
+	// Resolver is shared by the subscription reconciler and the metric fetcher.
+	resolver := &subscriptions.CacheResolver{Reader: mgr.GetClient()}
+
+	fetcher := NewBMCMetricFetcher(
+		resolver,
+		opts.InsecureTLS,
+		ctrl.Log.WithName("telemetry").WithName("fetcher"),
+	)
+
 	receiver, err := events.New(events.Config{
 		Addr:             opts.EventsAddr,
 		EventSink:        eventSink,
 		MetricReportSink: metricSink,
+		MetricFetcher:    fetcher,
 		SubscriberID:     opts.SubscriberID,
 		Log:              ctrl.Log.WithName("telemetry").WithName("events"),
 	})
@@ -124,7 +174,6 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	// BMCReconciler watches metalv1alpha1.BMC objects through the
 	// controller-runtime cache and converges each BMC's Redfish event
 	// subscriptions. See internal/telemetry/subscriptions/reconciler.go.
-	resolver := &subscriptions.CacheResolver{Reader: mgr.GetClient()}
 	subReconciler := &subscriptions.BMCReconciler{
 		Client:           mgr.GetClient(),
 		Config:           loader.Config,
@@ -132,6 +181,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		Factory:          &subscriptionClientFactory{insecureTLS: opts.InsecureTLS},
 		Sink:             eventSink,
 		MetricReportSink: metricSink,
+		AlertHandler:     criticalHandler,
 		TestRecorder:     testSink,
 		ReceiverURL:      opts.ReceiverURL,
 		SubscriberID:     opts.SubscriberID,
@@ -149,6 +199,29 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	// confirmations update the health-check metric.
 	receiver.SetTestNotifier(subReconciler)
 
+	return nil
+}
+
+// prewarmAlertGauge lists all Servers and sets the alert gauge to 1 for any
+// that already have CriticalEventReceived=True. Called once at startup so the
+// metric is correct immediately after a pod restart, before any new events arrive.
+func prewarmAlertGauge(ctx context.Context, c client.Client, handler *criticalevent.ConditionHandler) error {
+	serverList := &metalv1alpha1.ServerList{}
+	if err := c.List(ctx, serverList); err != nil {
+		return fmt.Errorf("list Servers: %w", err)
+	}
+	for i := range serverList.Items {
+		srv := &serverList.Items[i]
+		if srv.Spec.BMCRef == nil {
+			continue
+		}
+		cond := apimeta.FindStatusCondition(srv.Status.Conditions, criticalevent.CriticalEventConditionType)
+		if cond != nil && cond.Status == "True" {
+			handler.SetAlertGauge(srv.Spec.BMCRef.Name, 1)
+		} else if cond != nil {
+			handler.SetAlertGauge(srv.Spec.BMCRef.Name, 0)
+		}
+	}
 	return nil
 }
 

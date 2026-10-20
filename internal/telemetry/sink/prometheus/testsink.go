@@ -5,30 +5,21 @@ package prometheus
 
 import (
 	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const (
-	pipelineTestTimestampName = "event_pipeline_test_timestamp"
-	labelResult               = "result"
-)
+const pipelineTestResultName = "event_pipeline_test_last_result"
 
-// testSeriesKey identifies one redfish_event_pipeline_test_timestamp series.
-type testSeriesKey struct{ result string }
-
-// TestEventSink records the timestamp of the most recent pipeline health-check
-// result per BMC as the redfish_event_pipeline_test_timestamp gauge.
+// TestEventSink records the most recent pipeline health-check result per BMC
+// as the redfish_event_pipeline_test_last_result gauge.
 //
-// Label set: {hostname, result}. result is "success" or "failure".
-// The gauge value is a Unix timestamp (seconds) so dashboards can compute
-// time-since-last-success with `time() - redfish_event_pipeline_test_timestamp{result="success"}`.
+// Label set: {hostname}. Value is 1 for success, 0 for failure.
 type TestEventSink struct {
 	gauge *prometheus.GaugeVec
 
-	mu     sync.Mutex
-	series map[string]map[testSeriesKey]struct{}
+	mu      sync.Mutex
+	tracked map[string]struct{}
 }
 
 // TestResultRecorder is the interface the subscription reconciler uses to
@@ -43,13 +34,13 @@ var _ TestResultRecorder = (*TestEventSink)(nil)
 
 func NewTestEventSink(reg prometheus.Registerer) (*TestEventSink, error) {
 	s := &TestEventSink{
-		series: make(map[string]map[testSeriesKey]struct{}),
+		tracked: make(map[string]struct{}),
 	}
 	s.gauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: metricNamespace,
-		Name:      pipelineTestTimestampName,
-		Help:      "Unix timestamp of the most recent end-to-end pipeline health check per BMC and result (success/failure).",
-	}, []string{labelHostname, labelResult})
+		Name:      pipelineTestResultName,
+		Help:      "Most recent end-to-end pipeline health-check result per BMC: 1 = success, 0 = failure.",
+	}, []string{labelHostname})
 	if err := reg.Register(s.gauge); err != nil {
 		return nil, err
 	}
@@ -57,33 +48,21 @@ func NewTestEventSink(reg prometheus.Registerer) (*TestEventSink, error) {
 }
 
 func (s *TestEventSink) RecordTestResult(bmcName, result string) {
+	var v float64
+	if result == "success" {
+		v = 1
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	keys, ok := s.series[bmcName]
-	if !ok {
-		keys = make(map[testSeriesKey]struct{})
-		s.series[bmcName] = keys
-	}
-	key := testSeriesKey{result: result}
-	keys[key] = struct{}{}
-	s.gauge.With(prometheus.Labels{
-		labelHostname: bmcName,
-		labelResult:   result,
-	}).Set(float64(time.Now().Unix()))
+	s.tracked[bmcName] = struct{}{}
+	s.gauge.With(prometheus.Labels{labelHostname: bmcName}).Set(v)
 }
 
-// Forget removes all series for the given BMC. Idempotent.
+// Forget removes the series for the given BMC. Idempotent.
 func (s *TestEventSink) Forget(bmcName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	keys := s.series[bmcName]
-	delete(s.series, bmcName)
-	for key := range keys {
-		s.gauge.Delete(prometheus.Labels{
-			labelHostname: bmcName,
-			labelResult:   key.result,
-		})
-	}
+	delete(s.tracked, bmcName)
+	s.gauge.Delete(prometheus.Labels{labelHostname: bmcName})
 }

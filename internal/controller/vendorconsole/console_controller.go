@@ -89,6 +89,11 @@ func (r *ConsoleReconciler) reconcileExists(ctx context.Context, console *vendor
 	}
 	logger.Info("Successfully created console client", "manufacturer", console.Spec.Manufacturer)
 
+	if !consoleClient.HasConsole() {
+		logger.Info("Skipping import scheduling: vendor has no central management console", "manufacturer", console.Spec.Manufacturer)
+		return ctrl.Result{}, nil
+	}
+
 	if err := r.updateSecretToken(ctx, secret, consoleClient); err != nil {
 		logger.Error(err, "unable to update console credential secret with token")
 		return ctrl.Result{}, err
