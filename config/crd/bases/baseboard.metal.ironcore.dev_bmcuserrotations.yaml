@@ -23,13 +23,13 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .spec.triggerReason
+    - jsonPath: .status.triggerReason
       name: Trigger
       type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .spec.triggeredAt
+    - jsonPath: .status.triggeredAt
       name: TriggeredAt
       type: date
     - jsonPath: .status.completedAt
@@ -82,18 +82,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              triggerReason:
-                description: TriggerReason describes what caused this rotation.
-                enum:
-                - RotationPeriod
-                - Annotation
-                - PasswordExpiry
-                - FactoryBootstrap
-                type: string
-              triggeredAt:
-                description: TriggeredAt is the timestamp when the rotation was initiated.
-                format: date-time
-                type: string
               type:
                 description: Type is the rotation strategy used for this rotation
                   event.
@@ -103,8 +91,6 @@ spec:
                 type: string
             required:
             - bmcUserRef
-            - triggerReason
-            - triggeredAt
             - type
             type: object
             x-kubernetes-validations:
@@ -211,6 +197,20 @@ spec:
                 - InProgress
                 - Succeeded
                 - Failed
+                type: string
+              triggerReason:
+                description: TriggerReason describes what caused this rotation.
+                enum:
+                - RotationPeriod
+                - Annotation
+                - PasswordExpiry
+                - FactoryBootstrap
+                type: string
+              triggeredAt:
+                description: |-
+                  TriggeredAt is the timestamp when the rotation was initiated. Recorded by the
+                  controller when it creates the rotation.
+                format: date-time
                 type: string
             type: object
         type: object

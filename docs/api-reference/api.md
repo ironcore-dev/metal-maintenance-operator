@@ -277,8 +277,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `bmcUserRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCUserRef references the BMCUser this rotation was triggered for. |  |  |
 | `type` _[RotationStrategy](#rotationstrategy)_ | Type is the rotation strategy used for this rotation event. |  | Enum: [DualAccount SingleAccount] <br /> |
-| `triggeredAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | TriggeredAt is the timestamp when the rotation was initiated. |  |  |
-| `triggerReason` _[BMCUserRotationTrigger](#bmcuserrotationtrigger)_ | TriggerReason describes what caused this rotation. |  | Enum: [RotationPeriod Annotation PasswordExpiry FactoryBootstrap] <br /> |
 
 
 #### BMCUserRotationStatus
@@ -295,6 +293,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `phase` _[BMCUserRotationPhase](#bmcuserrotationphase)_ | Phase is the current lifecycle phase of this rotation. | Pending | Enum: [Pending InProgress Succeeded Failed] <br /> |
+| `triggeredAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | TriggeredAt is the timestamp when the rotation was initiated. Recorded by the<br />controller when it creates the rotation. |  |  |
+| `triggerReason` _[BMCUserRotationTrigger](#bmcuserrotationtrigger)_ | TriggerReason describes what caused this rotation. |  | Enum: [RotationPeriod Annotation PasswordExpiry FactoryBootstrap] <br /> |
 | `completedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | CompletedAt is the timestamp when the rotation finished (succeeded or failed). |  |  |
 | `newSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | NewSecretRef references the BMCSecret created by this rotation.<br />Set on success. |  |  |
 | `message` _string_ | Message provides a human-readable description of the current state,<br />especially useful when Phase is Failed. |  |  |
@@ -311,7 +311,7 @@ BMCUserRotationTrigger describes what caused a rotation to be initiated.
 
 
 _Appears in:_
-- [BMCUserRotationSpec](#bmcuserrotationspec)
+- [BMCUserRotationStatus](#bmcuserrotationstatus)
 
 | Field | Description |
 | --- | --- |

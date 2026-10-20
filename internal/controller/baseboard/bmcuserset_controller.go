@@ -566,7 +566,7 @@ func (r *BMCUserSetReconciler) enqueueByBMC(ctx context.Context, obj client.Obje
 // label/delete the resulting BMCSecret and mark FactoryAccountHandled).
 func (r *BMCUserSetReconciler) enqueueByBMCUserRotation(ctx context.Context, obj client.Object) []reconcile.Request {
 	rot, ok := obj.(*baseboardv1alpha1.BMCUserRotation)
-	if !ok || rot.Spec.TriggerReason != baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap {
+	if !ok || rot.Status.TriggerReason != baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap {
 		return nil
 	}
 	// The rotation is owned by the active BMCUser; find the BMCUserSet above it.
@@ -688,7 +688,7 @@ func (r *BMCUserSetReconciler) findFactoryRotation(list *baseboardv1alpha1.BMCUs
 	for i := range list.Items {
 		rot := &list.Items[i]
 		if rot.Spec.BMCUserRef.Name == adminName &&
-			rot.Spec.TriggerReason == baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap {
+			rot.Status.TriggerReason == baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap {
 			return rot
 		}
 	}
@@ -733,10 +733,8 @@ func (r *BMCUserSetReconciler) createFactoryRotation(
 			GenerateName: activeAdmin.Name + "-factory-",
 		},
 		Spec: baseboardv1alpha1.BMCUserRotationSpec{
-			BMCUserRef:    corev1.LocalObjectReference{Name: activeAdmin.Name},
-			Type:          baseboardv1alpha1.RotationStrategySingleAccount,
-			TriggeredAt:   metav1.Now(),
-			TriggerReason: baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap,
+			BMCUserRef: corev1.LocalObjectReference{Name: activeAdmin.Name},
+			Type:       baseboardv1alpha1.RotationStrategySingleAccount,
 		},
 	}
 	if err := controllerutil.SetControllerReference(activeAdmin, rotation, r.Scheme); err != nil {
@@ -744,6 +742,13 @@ func (r *BMCUserSetReconciler) createFactoryRotation(
 	}
 	if err := r.Create(ctx, rotation); err != nil {
 		return fmt.Errorf("BMC %s: failed to create factory BMCUserRotation: %w", bmcObj.Name, err)
+	}
+	// TriggeredAt/TriggerReason are observed facts recorded in status after Create.
+	rotBase := rotation.DeepCopy()
+	rotation.Status.TriggeredAt = &metav1.Time{Time: time.Now()}
+	rotation.Status.TriggerReason = baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap
+	if err := r.Status().Patch(ctx, rotation, client.MergeFrom(rotBase)); err != nil {
+		return fmt.Errorf("BMC %s: failed to record factory rotation trigger in status: %w", bmcObj.Name, err)
 	}
 	log.Info("Created FactoryBootstrap BMCUserRotation", "BMC", bmcObj.Name, "Rotation", rotation.Name)
 	return nil

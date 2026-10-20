@@ -97,10 +97,8 @@ var _ = Describe("BMCUserRotation Controller", func() {
 				GenerateName: "rotation-dual-",
 			},
 			Spec: baseboardv1alpha1.BMCUserRotationSpec{
-				BMCUserRef:    v1.LocalObjectReference{Name: adminA.Name},
-				Type:          baseboardv1alpha1.RotationStrategyDualAccount,
-				TriggeredAt:   metav1.Now(),
-				TriggerReason: baseboardv1alpha1.BMCUserRotationTriggerAnnotation,
+				BMCUserRef: v1.LocalObjectReference{Name: adminA.Name},
+				Type:       baseboardv1alpha1.RotationStrategyDualAccount,
 			},
 		}
 		Expect(k8sClient.Create(ctx, rotation)).To(Succeed())
@@ -156,10 +154,8 @@ var _ = Describe("BMCUserRotation Controller", func() {
 				GenerateName: "rotation-nopeer-",
 			},
 			Spec: baseboardv1alpha1.BMCUserRotationSpec{
-				BMCUserRef:    v1.LocalObjectReference{Name: singleAdmin.Name},
-				Type:          baseboardv1alpha1.RotationStrategyDualAccount,
-				TriggeredAt:   metav1.Now(),
-				TriggerReason: baseboardv1alpha1.BMCUserRotationTriggerAnnotation,
+				BMCUserRef: v1.LocalObjectReference{Name: singleAdmin.Name},
+				Type:       baseboardv1alpha1.RotationStrategyDualAccount,
 			},
 		}
 		Expect(k8sClient.Create(ctx, rotation)).To(Succeed())
@@ -205,10 +201,8 @@ var _ = Describe("BMCUserRotation Controller", func() {
 				GenerateName: "rotation-single-",
 			},
 			Spec: baseboardv1alpha1.BMCUserRotationSpec{
-				BMCUserRef:    v1.LocalObjectReference{Name: readonlyUser.Name},
-				Type:          baseboardv1alpha1.RotationStrategySingleAccount,
-				TriggeredAt:   metav1.Now(),
-				TriggerReason: baseboardv1alpha1.BMCUserRotationTriggerAnnotation,
+				BMCUserRef: v1.LocalObjectReference{Name: readonlyUser.Name},
+				Type:       baseboardv1alpha1.RotationStrategySingleAccount,
 			},
 		}
 		Expect(k8sClient.Create(ctx, rotation)).To(Succeed())
