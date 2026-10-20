@@ -42,15 +42,6 @@ type BMCUserRotationSpec struct {
 	// +kubebuilder:validation:Enum=DualAccount;SingleAccount
 	// +required
 	Type RotationStrategy `json:"type"`
-
-	// TriggeredAt is the timestamp when the rotation was initiated.
-	// +required
-	TriggeredAt metav1.Time `json:"triggeredAt"`
-
-	// TriggerReason describes what caused this rotation.
-	// +kubebuilder:validation:Enum=RotationPeriod;Annotation;PasswordExpiry;FactoryBootstrap
-	// +required
-	TriggerReason BMCUserRotationTrigger `json:"triggerReason"`
 }
 
 // BMCUserRotationStatus defines the observed state of BMCUserRotation.
@@ -58,6 +49,16 @@ type BMCUserRotationStatus struct {
 	// Phase is the current lifecycle phase of this rotation.
 	// +kubebuilder:default=Pending
 	Phase BMCUserRotationPhase `json:"phase,omitempty"`
+
+	// TriggeredAt is the timestamp when the rotation was initiated. Recorded by the
+	// controller when it creates the rotation.
+	// +optional
+	TriggeredAt *metav1.Time `json:"triggeredAt,omitempty"`
+
+	// TriggerReason describes what caused this rotation.
+	// +kubebuilder:validation:Enum=RotationPeriod;Annotation;PasswordExpiry;FactoryBootstrap
+	// +optional
+	TriggerReason BMCUserRotationTrigger `json:"triggerReason,omitempty"`
 
 	// CompletedAt is the timestamp when the rotation finished (succeeded or failed).
 	// +optional
@@ -88,9 +89,9 @@ type BMCUserRotationStatus struct {
 // +kubebuilder:resource:scope=Cluster,shortName=bmcur
 // +kubebuilder:printcolumn:name="BMCUser",type=string,JSONPath=`.spec.bmcUserRef.name`
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
-// +kubebuilder:printcolumn:name="Trigger",type=string,JSONPath=`.spec.triggerReason`
+// +kubebuilder:printcolumn:name="Trigger",type=string,JSONPath=`.status.triggerReason`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="TriggeredAt",type=date,JSONPath=`.spec.triggeredAt`
+// +kubebuilder:printcolumn:name="TriggeredAt",type=date,JSONPath=`.status.triggeredAt`
 // +kubebuilder:printcolumn:name="CompletedAt",type=date,JSONPath=`.status.completedAt`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

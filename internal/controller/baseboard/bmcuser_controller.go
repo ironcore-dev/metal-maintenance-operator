@@ -313,10 +313,8 @@ func (r *BMCUserReconciler) ensureBMCUserRotation(ctx context.Context, user *bas
 			GenerateName: user.Name + "-",
 		},
 		Spec: baseboardv1alpha1.BMCUserRotationSpec{
-			BMCUserRef:    corev1.LocalObjectReference{Name: user.Name},
-			Type:          rotationType,
-			TriggeredAt:   metav1.Now(),
-			TriggerReason: triggerReason,
+			BMCUserRef: corev1.LocalObjectReference{Name: user.Name},
+			Type:       rotationType,
 		},
 	}
 	if err := controllerutil.SetControllerReference(user, rotation, r.Scheme); err != nil {
@@ -324,6 +322,14 @@ func (r *BMCUserReconciler) ensureBMCUserRotation(ctx context.Context, user *bas
 	}
 	if err := r.Create(ctx, rotation); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to create BMCUserRotation: %w", err)
+	}
+	// TriggeredAt/TriggerReason are observed facts recorded by the controller, so
+	// they live in status and must be written after Create (status is a subresource).
+	rotBase := rotation.DeepCopy()
+	rotation.Status.TriggeredAt = &metav1.Time{Time: time.Now()}
+	rotation.Status.TriggerReason = triggerReason
+	if err := r.Status().Patch(ctx, rotation, client.MergeFrom(rotBase)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to record rotation trigger in status: %w", err)
 	}
 	log.Info("Created BMCUserRotation", "BMCUserRotation", rotation.Name, "Type", rotationType, "Trigger", triggerReason)
 	if err := r.pruneRotationHistory(ctx, user, rotationList.Items); err != nil {

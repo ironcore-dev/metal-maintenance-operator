@@ -547,7 +547,7 @@ var _ = Describe("BMCUserSet Controller", func() {
 			rotList := &baseboardv1alpha1.BMCUserRotationList{}
 			g.Expect(k8sClient.List(ctx, rotList)).To(Succeed())
 			for _, rot := range rotList.Items {
-				g.Expect(rot.Spec.TriggerReason).NotTo(Equal(baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap))
+				g.Expect(rot.Status.TriggerReason).NotTo(Equal(baseboardv1alpha1.BMCUserRotationTriggerFactoryBootstrap))
 			}
 		}, "4s", "500ms").Should(Succeed())
 
