@@ -464,7 +464,15 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 	if maxAttempts > 0 {
 		if fw.Status.ObservedGeneration != fw.Generation {
 			// if the generation has changed, it means the spec has been updated after the failure, we can reset the retry count and retry.
+			// Persist this immediately: ensureResetBeforeRetry below may trigger nested status patches
+			// (e.g. via handleBMCReset) that unconditionally bump ObservedGeneration, which would
+			// otherwise consume the generation-change signal before FailedAttempts=0 is ever persisted.
+			fwBase := fw.DeepCopy()
 			fw.Status.FailedAttempts = 0
+			fw.Status.ObservedGeneration = fw.Generation
+			if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
+				return true, fmt.Errorf("failed to patch FirmwareUpdate status for retry count reset: %w", err)
+			}
 		}
 		if fw.Status.FailedAttempts < maxAttempts {
 			log.V(1).Info("Retrying FirmwareUpdate automatically", "FailedAttempts", fw.Status.FailedAttempts)
