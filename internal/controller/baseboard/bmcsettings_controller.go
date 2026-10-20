@@ -208,7 +208,19 @@ func (r *BMCSettingsReconciler) cleanupServerMaintenanceReferences(ctx context.C
 	return errors.Join(finalErr...)
 }
 
-func (r *BMCSettingsReconciler) cleanupReferences(_ context.Context, _ *baseboardv1alpha1.BMCSettings) error {
+func (r *BMCSettingsReconciler) cleanupReferences(ctx context.Context, settings *baseboardv1alpha1.BMCSettings) error {
+	if settings.Spec.CompletionConditionType == "" || settings.Spec.BMCRef == nil {
+		return nil
+	}
+	serverList := &metalv1alpha1.ServerList{}
+	if err := r.List(ctx, serverList, client.MatchingFields{constants.BMCRefField: settings.Spec.BMCRef.Name}); err != nil {
+		return fmt.Errorf("failed to list servers for completion condition cleanup: %w", err)
+	}
+	for i := range serverList.Items {
+		if err := utils.RemoveServerCondition(ctx, r.Client, &serverList.Items[i], settings.Spec.CompletionConditionType); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

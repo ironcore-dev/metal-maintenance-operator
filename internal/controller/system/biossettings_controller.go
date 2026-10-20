@@ -211,8 +211,15 @@ func (r *BIOSSettingsReconciler) removeServerMaintenance(ctx context.Context, se
 	return nil
 }
 
-func (r *BIOSSettingsReconciler) cleanupReferences(_ context.Context, _ *systemv1alpha1.BIOSSettings) error {
-	return nil
+func (r *BIOSSettingsReconciler) cleanupReferences(ctx context.Context, settings *systemv1alpha1.BIOSSettings) error {
+	if settings.Spec.CompletionConditionType == "" || settings.Spec.ServerRef == nil {
+		return nil
+	}
+	server, err := utils.GetServerByName(ctx, r.Client, settings.Spec.ServerRef.Name)
+	if err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return utils.RemoveServerCondition(ctx, r.Client, server, settings.Spec.CompletionConditionType)
 }
 
 func (r *BIOSSettingsReconciler) reconcile(ctx context.Context, settings *systemv1alpha1.BIOSSettings) (ctrl.Result, error) {

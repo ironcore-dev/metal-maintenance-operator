@@ -730,6 +730,10 @@ func GatesSatisfiedForServers(servers []*metalv1alpha1.Server, gates []metalv1al
 		return true, nil
 	}
 
+	if len(servers) == 0 {
+		return false, []string{"no related servers found to evaluate readiness gates against"}
+	}
+
 	var reasons []string
 	for _, server := range servers {
 		if satisfied, serverReasons := GatesSatisfied(server.Status.Conditions, gates); !satisfied {
@@ -739,7 +743,7 @@ func GatesSatisfiedForServers(servers []*metalv1alpha1.Server, gates []metalv1al
 		}
 	}
 
-	return len(reasons) == 0 && len(servers) > 0, reasons
+	return len(reasons) == 0, reasons
 }
 
 // PatchServerCondition sets the given condition on the Server's status and patches it. It is a
@@ -775,6 +779,37 @@ func PatchServerCondition(ctx context.Context, c client.Client, server *metalv1a
 	})
 	if err != nil {
 		return fmt.Errorf("patching server %s condition %q: %w", server.Name, conditionType, err)
+	}
+	return nil
+}
+
+// RemoveServerCondition removes the given condition type from the Server's status and patches
+// it, if present. It is a no-op returning nil if conditionType is empty, the server no longer
+// exists, or the condition is already absent.
+func RemoveServerCondition(ctx context.Context, c client.Client, server *metalv1alpha1.Server, conditionType string) error {
+	if conditionType == "" {
+		return nil
+	}
+
+	key := client.ObjectKeyFromObject(server)
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		current := &metalv1alpha1.Server{}
+		if err := c.Get(ctx, key, current); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if apimeta.FindStatusCondition(current.Status.Conditions, conditionType) == nil {
+			return nil
+		}
+		base := current.DeepCopy()
+		apimeta.RemoveStatusCondition(&current.Status.Conditions, conditionType)
+		if err := c.Status().Patch(ctx, current, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+			return err
+		}
+		current.DeepCopyInto(server)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("removing server %s condition %q: %w", server.Name, conditionType, err)
 	}
 	return nil
 }

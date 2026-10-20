@@ -128,12 +128,30 @@ func (r *BIOSVersionReconciler) delete(ctx context.Context, biosVersion *systemv
 		return ctrl.Result{}, nil
 	}
 
+	if err := r.cleanupCompletionCondition(ctx, biosVersion); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	log.V(1).Info("Ensuring that the finalizer is removed")
 	if modified, err := clientutils.PatchEnsureNoFinalizer(ctx, r.Client, biosVersion, BIOSVersionFinalizer); err != nil || modified {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// cleanupCompletionCondition removes Spec.CompletionConditionType, if set, from the related
+// Server so a future BIOSVersion reusing the same condition type doesn't skip initialization
+// because of a stale condition left behind by this deleted object.
+func (r *BIOSVersionReconciler) cleanupCompletionCondition(ctx context.Context, biosVersion *systemv1alpha1.BIOSVersion) error {
+	if biosVersion.Spec.CompletionConditionType == "" || biosVersion.Spec.ServerRef == nil {
+		return nil
+	}
+	server, err := utils.GetServerByName(ctx, r.Client, biosVersion.Spec.ServerRef.Name)
+	if err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return utils.RemoveServerCondition(ctx, r.Client, server, biosVersion.Spec.CompletionConditionType)
 }
 
 func (r *BIOSVersionReconciler) cleanupServerMaintenanceReferences(ctx context.Context, biosVersion *systemv1alpha1.BIOSVersion) error {

@@ -122,6 +122,10 @@ func (r *BMCVersionReconciler) delete(ctx context.Context, bmcVersion *baseboard
 		}
 	}
 
+	if err := r.cleanupCompletionCondition(ctx, bmcVersion); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	log.V(1).Info("Ensuring that the finalizer is removed")
 	if modified, err := clientutils.PatchEnsureNoFinalizer(ctx, r.Client, bmcVersion, bmcVersionFinalizer); err != nil || modified {
 		return ctrl.Result{}, err
@@ -129,6 +133,25 @@ func (r *BMCVersionReconciler) delete(ctx context.Context, bmcVersion *baseboard
 
 	log.V(1).Info("Deleted BMCVersion")
 	return ctrl.Result{}, nil
+}
+
+// cleanupCompletionCondition removes Spec.CompletionConditionType, if set, from every Server
+// related to this BMCVersion's BMC, so a future BMCVersion reusing the same condition type
+// doesn't skip initialization because of a stale condition left behind by this deleted object.
+func (r *BMCVersionReconciler) cleanupCompletionCondition(ctx context.Context, bmcVersion *baseboardv1alpha1.BMCVersion) error {
+	if bmcVersion.Spec.CompletionConditionType == "" || bmcVersion.Spec.BMCRef == nil {
+		return nil
+	}
+	serverList := &metalv1alpha1.ServerList{}
+	if err := r.List(ctx, serverList, client.MatchingFields{constants.BMCRefField: bmcVersion.Spec.BMCRef.Name}); err != nil {
+		return fmt.Errorf("failed to list servers for completion condition cleanup: %w", err)
+	}
+	for i := range serverList.Items {
+		if err := utils.RemoveServerCondition(ctx, r.Client, &serverList.Items[i], bmcVersion.Spec.CompletionConditionType); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *BMCVersionReconciler) removeServerMaintenances(ctx context.Context, bmcVersion *baseboardv1alpha1.BMCVersion) error {
