@@ -727,82 +727,110 @@ func HandleServerPowerCycle(ctx context.Context, args ServerRetryResetArgs) (boo
 	}
 
 	if powerOffCondition.Status != metav1.ConditionTrue {
-		if powerOffCondition.Reason != constants.ReasonResetIssued {
-			currentPowerState, err := GetServerPowerState(ctx, args.BMCClient, args.Server)
-			if err != nil {
-				return false, fmt.Errorf("failed to check server power state: %w", err)
-			}
-			if currentPowerState == metalv1alpha1.ServerOffPowerState {
-				// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
-				if err := args.Conditions.Update(
-					powerOffCondition,
-					conditionutils.UpdateStatus(corev1.ConditionTrue),
-					conditionutils.UpdateReason(constants.ReasonResetIssued),
-					conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
-				); err != nil {
-					return false, fmt.Errorf("failed to update server power-off condition: %w", err)
-				}
-				return false, args.Persist(ctx, powerOffCondition)
-			}
-			if err := args.BMCClient.PowerOff(ctx, args.Server.Spec.SystemURI); err != nil {
-				return false, fmt.Errorf("failed to power off server before retry: %w", err)
-			}
+		return handleServerPowerOffStage(ctx, args, powerOffCondition, giveUpIfStuck)
+	}
+
+	return handleServerPowerOnStage(ctx, args, resetCondition, powerOnCondition, giveUpIfStuck)
+}
+
+// handleServerPowerOffStage drives the power-off half of HandleServerPowerCycle's state machine:
+// issuing the graceful power-off, escalating to a forced power-off after args.PowerOffTimeout,
+// giving up via giveUpIfStuck, and marking powerOffCondition complete once confirmed off.
+func handleServerPowerOffStage(
+	ctx context.Context,
+	args ServerRetryResetArgs,
+	powerOffCondition *metav1.Condition,
+	giveUpIfStuck func(*metav1.Condition) error,
+) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	if powerOffCondition.Reason != constants.ReasonResetIssued {
+		currentPowerState, err := GetServerPowerState(ctx, args.BMCClient, args.Server)
+		if err != nil {
+			return false, fmt.Errorf("failed to check server power state: %w", err)
+		}
+		if currentPowerState == metalv1alpha1.ServerOffPowerState {
+			// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
 			if err := args.Conditions.Update(
 				powerOffCondition,
-				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateStatus(corev1.ConditionTrue),
 				conditionutils.UpdateReason(constants.ReasonResetIssued),
-				conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
+				conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
 			); err != nil {
 				return false, fmt.Errorf("failed to update server power-off condition: %w", err)
 			}
 			return false, args.Persist(ctx, powerOffCondition)
 		}
-
-		inOffState, err := IsServerInPowerState(ctx, args.BMCClient, args.Server, metalv1alpha1.ServerOffPowerState)
-		if err != nil {
-			return false, fmt.Errorf("failed to check server power state: %w", err)
-		}
-		if !inOffState {
-			// Still stuck - escalate to a forced power-off, then give up, in order of severity.
-			if args.PowerOffTimeout > 0 && time.Since(powerOffCondition.LastTransitionTime.Time) > args.PowerOffTimeout {
-				forceOffCondition, err := GetCondition(args.Conditions, args.StatusConditions, constants.ConditionServerResetForcePowerOffIssued)
-				if err != nil {
-					return false, fmt.Errorf("failed to get condition for forced server power-off before retry: %w", err)
-				}
-				if forceOffCondition.Status != metav1.ConditionTrue {
-					log.V(1).Info("Graceful power-off did not complete in time, escalating to forced power-off",
-						"Server", args.Server.Name, "PowerOffTimeout", args.PowerOffTimeout)
-					if err := args.BMCClient.ForcePowerOff(ctx, args.Server.Spec.SystemURI); err != nil {
-						return false, fmt.Errorf("failed to force power off server before retry: %w", err)
-					}
-					if err := args.Conditions.Update(
-						forceOffCondition,
-						conditionutils.UpdateStatus(corev1.ConditionTrue),
-						conditionutils.UpdateReason(constants.ReasonForcePowerOffIssued),
-						conditionutils.UpdateMessage(fmt.Sprintf(
-							"Graceful power-off did not complete within %v, escalated to a forced power-off", args.PowerOffTimeout)),
-					); err != nil {
-						return false, fmt.Errorf("failed to update forced server power-off condition: %w", err)
-					}
-					return false, args.Persist(ctx, forceOffCondition)
-				}
-			}
-			if err := giveUpIfStuck(powerOffCondition); err != nil {
-				return false, err
-			}
-			log.V(1).Info("Waiting for server to power off before retrying", "Server", args.Server.Name)
-			return false, nil
+		if err := args.BMCClient.PowerOff(ctx, args.Server.Spec.SystemURI); err != nil {
+			return false, fmt.Errorf("failed to power off server before retry: %w", err)
 		}
 		if err := args.Conditions.Update(
 			powerOffCondition,
-			conditionutils.UpdateStatus(corev1.ConditionTrue),
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
 			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("Server confirmed powered off before retry"),
+			conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
 		); err != nil {
 			return false, fmt.Errorf("failed to update server power-off condition: %w", err)
 		}
 		return false, args.Persist(ctx, powerOffCondition)
 	}
+
+	inOffState, err := IsServerInPowerState(ctx, args.BMCClient, args.Server, metalv1alpha1.ServerOffPowerState)
+	if err != nil {
+		return false, fmt.Errorf("failed to check server power state: %w", err)
+	}
+	if !inOffState {
+		// Still stuck - escalate to a forced power-off, then give up, in order of severity.
+		if args.PowerOffTimeout > 0 && time.Since(powerOffCondition.LastTransitionTime.Time) > args.PowerOffTimeout {
+			forceOffCondition, err := GetCondition(args.Conditions, args.StatusConditions, constants.ConditionServerResetForcePowerOffIssued)
+			if err != nil {
+				return false, fmt.Errorf("failed to get condition for forced server power-off before retry: %w", err)
+			}
+			if forceOffCondition.Status != metav1.ConditionTrue {
+				log.V(1).Info("Graceful power-off did not complete in time, escalating to forced power-off",
+					"Server", args.Server.Name, "PowerOffTimeout", args.PowerOffTimeout)
+				if err := args.BMCClient.ForcePowerOff(ctx, args.Server.Spec.SystemURI); err != nil {
+					return false, fmt.Errorf("failed to force power off server before retry: %w", err)
+				}
+				if err := args.Conditions.Update(
+					forceOffCondition,
+					conditionutils.UpdateStatus(corev1.ConditionTrue),
+					conditionutils.UpdateReason(constants.ReasonForcePowerOffIssued),
+					conditionutils.UpdateMessage(fmt.Sprintf(
+						"Graceful power-off did not complete within %v, escalated to a forced power-off", args.PowerOffTimeout)),
+				); err != nil {
+					return false, fmt.Errorf("failed to update forced server power-off condition: %w", err)
+				}
+				return false, args.Persist(ctx, forceOffCondition)
+			}
+		}
+		if err := giveUpIfStuck(powerOffCondition); err != nil {
+			return false, err
+		}
+		log.V(1).Info("Waiting for server to power off before retrying", "Server", args.Server.Name)
+		return false, nil
+	}
+	if err := args.Conditions.Update(
+		powerOffCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonResetIssued),
+		conditionutils.UpdateMessage("Server confirmed powered off before retry"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+	}
+	return false, args.Persist(ctx, powerOffCondition)
+}
+
+// handleServerPowerOnStage drives the power-on half of HandleServerPowerCycle's state machine:
+// issuing the power-on, giving up via giveUpIfStuck, and marking powerOnCondition/resetCondition
+// complete once confirmed on.
+func handleServerPowerOnStage(
+	ctx context.Context,
+	args ServerRetryResetArgs,
+	resetCondition, powerOnCondition *metav1.Condition,
+	giveUpIfStuck func(*metav1.Condition) error,
+) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
 
 	if powerOnCondition.Reason != constants.ReasonResetIssued {
 		if err := args.BMCClient.PowerOn(ctx, args.Server.Spec.SystemURI); err != nil {
