@@ -542,30 +542,43 @@ type BMCResetArgs struct {
 	ResetPending func(ctx context.Context) (bool, error)
 	// Persist patches the owning CR's status so the updated Condition is saved.
 	Persist func(ctx context.Context) error
+	// SkipRecentlyResetCheck skips the RecentlyReset check to force a reset
+	SkipRecentlyResetCheck bool
 }
 
 // HandleBMCReset implements the shared "reset the BMC once, then wait for it to settle" state
-// machine
+// machine. It returns (ready, err):
+//   - ready is true if args.Condition was already ConditionTrue when this call started (i.e. a
+//     previous call already completed the reset and this is a later reconcile catching up), or
+//     if the RecentlyReset check found a reset was already done recently and none is needed now -
+//     in both cases the caller may proceed immediately within the same reconcile.
+//   - ready is false on every other call, including the exact call that marks args.Condition
+//     ConditionTrue upon confirming the reset has settled: the caller must wait for the next
+//     reconcile (triggered by the status patch) before treating the reset as complete, instead of
+//     bundling the "complete" condition update with any of its own subsequent steps.
+//   - err is non-nil only on unexpected failures, never to signal "still waiting".
 func HandleBMCReset(ctx context.Context, conditions *conditionutils.Accessor, args BMCResetArgs) (bool, error) {
 	if args.Condition.Status == metav1.ConditionTrue {
 		return true, nil
 	}
 
 	if args.Condition.Reason != args.Reason {
-		recentlyReset, err := args.RecentlyReset(ctx)
-		if err != nil {
-			return false, fmt.Errorf("failed to check last BMC reset time: %w", err)
-		}
-		if recentlyReset {
-			if err := conditions.Update(
-				args.Condition,
-				conditionutils.UpdateStatus(corev1.ConditionTrue),
-				conditionutils.UpdateReason(args.Reason),
-				conditionutils.UpdateMessage("Skipped BMC reset: BMC was already reset recently"),
-			); err != nil {
-				return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
+		if !args.SkipRecentlyResetCheck {
+			recentlyReset, err := args.RecentlyReset(ctx)
+			if err != nil {
+				return false, fmt.Errorf("failed to check last BMC reset time: %w", err)
 			}
-			return true, args.Persist(ctx)
+			if recentlyReset {
+				if err := conditions.Update(
+					args.Condition,
+					conditionutils.UpdateStatus(corev1.ConditionTrue),
+					conditionutils.UpdateReason(args.Reason),
+					conditionutils.UpdateMessage("Skipped BMC reset: BMC was already reset recently"),
+				); err != nil {
+					return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
+				}
+				return true, args.Persist(ctx)
+			}
 		}
 		if err := args.IssueReset(ctx); err != nil {
 			return false, err
@@ -595,7 +608,7 @@ func HandleBMCReset(ctx context.Context, conditions *conditionutils.Accessor, ar
 		conditionutils.UpdateReason(args.Reason),
 		conditionutils.UpdateMessage("BMC reset to stabilize BMC of the server is completed"),
 	); err != nil {
-		return false, fmt.Errorf("failed to update power on server condition: %w", err)
+		return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
 	}
 	return false, args.Persist(ctx)
 }
@@ -623,6 +636,221 @@ func ResetBMCOfServer(ctx context.Context, kClient client.Client, server *metalv
 		return nil
 	}
 	return fmt.Errorf("no BMC reference or inline BMC details found in server spec to reset BMC")
+}
+
+// ServerRetryResetArgs bundles the callbacks ResetServerForRetry needs from each caller to drive
+// the shared "power off, confirm, power on, confirm" server stabilization state machine used
+// before retrying a Failed resource, abstracting over how each controller stores its own
+// status/conditions.
+type ServerRetryResetArgs struct {
+	// Conditions is used to fetch/update the CR's own tracked conditions.
+	Conditions *conditionutils.Accessor
+	// StatusConditions is the CR's own tracked conditions slice.
+	StatusConditions []metav1.Condition
+	// BMCClient is used to query/change the power state of Server.
+	BMCClient bmc.BMC
+	// Server is the server being power-cycled before the retry.
+	Server *metalv1alpha1.Server
+	// Persist patches the owning CR's status so the given, just-updated condition is saved.
+	Persist func(ctx context.Context, condition *metav1.Condition) error
+
+	// PowerOffTimeout bounds how long to wait for a graceful power-off to complete before
+	// escalating to a forced power-off, measured since the graceful power-off was issued.
+	// A value <= 0 disables escalation (wait indefinitely for the graceful power-off, subject
+	// only to GiveUpTimeout below).
+	PowerOffTimeout time.Duration
+	// GiveUpTimeout bounds how long each stage of the power-cycle (waiting for the power-off to
+	// complete, and separately, waiting for the power-on to complete) may individually take,
+	// measured since that stage was first issued (or recorded as already-off, for the power-off
+	// stage), before giving up and calling GiveUp instead of continuing to wait/retry. Each stage
+	// gets its own independent budget, so time spent stuck in one does not eat into the other's.
+	// A value <= 0 disables the give-up check (wait indefinitely).
+	GiveUpTimeout time.Duration
+	// GiveUp is called (repeatedly, idempotently) once GiveUpTimeout is exceeded. Required if GiveUpTimeout > 0.
+	GiveUp func(ctx context.Context) error
+}
+
+// HandleServerPowerCycle power-cycles args.Server (power off, confirm off, power on, confirm on)
+// before a Failed resource is retried, tracking progress via the shared
+// ConditionServerResetPowerOffIssued/ConditionServerResetPowerOnIssued/ConditionServerResetIssued
+// conditions.
+func HandleServerPowerCycle(ctx context.Context, args ServerRetryResetArgs) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	resetCondition, err := GetCondition(args.Conditions, args.StatusConditions, constants.ConditionServerResetIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server reset before retry: %w", err)
+	}
+	if resetCondition.Status == metav1.ConditionTrue {
+		return true, nil
+	}
+
+	powerOffCondition, err := GetCondition(args.Conditions, args.StatusConditions, constants.ConditionServerResetPowerOffIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server power-off before retry: %w", err)
+	}
+	powerOnCondition, err := GetCondition(args.Conditions, args.StatusConditions, constants.ConditionServerResetPowerOnIssued)
+	if err != nil {
+		return false, fmt.Errorf("failed to get condition for server power-on before retry: %w", err)
+	}
+
+	// giveUpIfStuck reports whether the current stage (identified by stageCondition, one of
+	// powerOffCondition/powerOnCondition) has been stuck for longer than args.GiveUpTimeout since
+	// that stage was first issued, and if so, invokes args.GiveUp and returns an error so the
+	// caller backs off exponentially.
+	giveUpIfStuck := func(stageCondition *metav1.Condition) error {
+		if args.GiveUpTimeout <= 0 || stageCondition.Reason != constants.ReasonResetIssued {
+			return nil
+		}
+		if time.Since(stageCondition.LastTransitionTime.Time) < args.GiveUpTimeout {
+			return nil
+		}
+		log.V(1).Info("Server did not recover within the give-up timeout, giving up on retry",
+			"Server", args.Server.Name, "GiveUpTimeout", args.GiveUpTimeout)
+		if err := args.GiveUp(ctx); err != nil {
+			return fmt.Errorf("failed to give up on server power-cycle before retry: %w", err)
+		}
+		if err := args.Conditions.Update(
+			resetCondition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(constants.ReasonServerResetGaveUp),
+			conditionutils.UpdateMessage(fmt.Sprintf(
+				"Server did not recover within %v, gave up retrying automatically", args.GiveUpTimeout)),
+		); err != nil {
+			return fmt.Errorf("failed to update server reset condition after giving up: %w", err)
+		}
+		if err := args.Persist(ctx, resetCondition); err != nil {
+			return err
+		}
+		return fmt.Errorf("server did not recover within %v, gave up retrying", args.GiveUpTimeout)
+	}
+
+	if powerOffCondition.Status != metav1.ConditionTrue {
+		if powerOffCondition.Reason != constants.ReasonResetIssued {
+			currentPowerState, err := GetServerPowerState(ctx, args.BMCClient, args.Server)
+			if err != nil {
+				return false, fmt.Errorf("failed to check server power state: %w", err)
+			}
+			if currentPowerState == metalv1alpha1.ServerOffPowerState {
+				// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
+				if err := args.Conditions.Update(
+					powerOffCondition,
+					conditionutils.UpdateStatus(corev1.ConditionTrue),
+					conditionutils.UpdateReason(constants.ReasonResetIssued),
+					conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
+				); err != nil {
+					return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+				}
+				return false, args.Persist(ctx, powerOffCondition)
+			}
+			if err := args.BMCClient.PowerOff(ctx, args.Server.Spec.SystemURI); err != nil {
+				return false, fmt.Errorf("failed to power off server before retry: %w", err)
+			}
+			if err := args.Conditions.Update(
+				powerOffCondition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(constants.ReasonResetIssued),
+				conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
+			); err != nil {
+				return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+			}
+			return false, args.Persist(ctx, powerOffCondition)
+		}
+
+		inOffState, err := IsServerInPowerState(ctx, args.BMCClient, args.Server, metalv1alpha1.ServerOffPowerState)
+		if err != nil {
+			return false, fmt.Errorf("failed to check server power state: %w", err)
+		}
+		if !inOffState {
+			// Still stuck - escalate to a forced power-off, then give up, in order of severity.
+			if args.PowerOffTimeout > 0 && time.Since(powerOffCondition.LastTransitionTime.Time) > args.PowerOffTimeout {
+				forceOffCondition, err := GetCondition(args.Conditions, args.StatusConditions, constants.ConditionServerResetForcePowerOffIssued)
+				if err != nil {
+					return false, fmt.Errorf("failed to get condition for forced server power-off before retry: %w", err)
+				}
+				if forceOffCondition.Status != metav1.ConditionTrue {
+					log.V(1).Info("Graceful power-off did not complete in time, escalating to forced power-off",
+						"Server", args.Server.Name, "PowerOffTimeout", args.PowerOffTimeout)
+					if err := args.BMCClient.ForcePowerOff(ctx, args.Server.Spec.SystemURI); err != nil {
+						return false, fmt.Errorf("failed to force power off server before retry: %w", err)
+					}
+					if err := args.Conditions.Update(
+						forceOffCondition,
+						conditionutils.UpdateStatus(corev1.ConditionTrue),
+						conditionutils.UpdateReason(constants.ReasonForcePowerOffIssued),
+						conditionutils.UpdateMessage(fmt.Sprintf(
+							"Graceful power-off did not complete within %v, escalated to a forced power-off", args.PowerOffTimeout)),
+					); err != nil {
+						return false, fmt.Errorf("failed to update forced server power-off condition: %w", err)
+					}
+					return false, args.Persist(ctx, forceOffCondition)
+				}
+			}
+			if err := giveUpIfStuck(powerOffCondition); err != nil {
+				return false, err
+			}
+			log.V(1).Info("Waiting for server to power off before retrying", "Server", args.Server.Name)
+			return false, nil
+		}
+		if err := args.Conditions.Update(
+			powerOffCondition,
+			conditionutils.UpdateStatus(corev1.ConditionTrue),
+			conditionutils.UpdateReason(constants.ReasonResetIssued),
+			conditionutils.UpdateMessage("Server confirmed powered off before retry"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+		}
+		return false, args.Persist(ctx, powerOffCondition)
+	}
+
+	if powerOnCondition.Reason != constants.ReasonResetIssued {
+		if err := args.BMCClient.PowerOn(ctx, args.Server.Spec.SystemURI); err != nil {
+			return false, fmt.Errorf("failed to power on server before retry: %w", err)
+		}
+		if err := args.Conditions.Update(
+			powerOnCondition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(constants.ReasonResetIssued),
+			conditionutils.UpdateMessage("Issued power-on request to the server before retrying"),
+		); err != nil {
+			return false, fmt.Errorf("failed to update server power-on condition: %w", err)
+		}
+		return false, args.Persist(ctx, powerOnCondition)
+	}
+
+	inOnState, err := IsServerInPowerState(ctx, args.BMCClient, args.Server, metalv1alpha1.ServerOnPowerState)
+	if err != nil {
+		return false, fmt.Errorf("failed to check server power state: %w", err)
+	}
+	if !inOnState {
+		if err := giveUpIfStuck(powerOnCondition); err != nil {
+			return false, err
+		}
+		log.V(1).Info("Waiting for server to power back on before retrying", "Server", args.Server.Name)
+		return false, nil
+	}
+
+	if err := args.Conditions.Update(
+		powerOnCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonResetIssued),
+		conditionutils.UpdateMessage("Server confirmed powered back on before retry"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update server power-on condition: %w", err)
+	}
+	if err := args.Persist(ctx, powerOnCondition); err != nil {
+		return false, err
+	}
+
+	if err := args.Conditions.Update(
+		resetCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonResetIssued),
+		conditionutils.UpdateMessage("Server reset completed before retrying"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update server reset condition: %w", err)
+	}
+	return false, args.Persist(ctx, resetCondition)
 }
 
 // --- Image credential helpers ---

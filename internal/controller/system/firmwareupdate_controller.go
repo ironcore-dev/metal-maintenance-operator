@@ -79,6 +79,14 @@ type FirmwareUpdateReconciler struct {
 	// before the controller powers the server back on to let the job proceed.
 	// A value <= 0 disables this check.
 	ScheduledJobPowerOnTimeout time.Duration
+	// ServerPowerOffTimeout bounds how long to wait for a graceful power-off to complete, before
+	// retrying a Failed resource, before escalating to a forced power-off. A value <= 0 disables
+	// escalation.
+	ServerPowerOffTimeout time.Duration
+	// ServerResetGiveUpTimeout bounds how long the whole server power-cycle performed before
+	// retrying a Failed resource may take before giving up on the retry and releasing
+	// maintenance. A value <= 0 disables the give-up check.
+	ServerResetGiveUpTimeout time.Duration
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates,verbs=get;list;watch;create;update;patch;delete
@@ -366,6 +374,9 @@ func (r *FirmwareUpdateReconciler) handleBMCReset(
 	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
 		Condition: resetBMC,
 		Reason:    constants.ReasonResetIssued,
+		// The retry reset is required to recover from a failed state, so it must never be skipped
+		// due to an earlier, unrelated reset falling within the cooldown.
+		SkipRecentlyResetCheck: conditionType == constants.ConditionRetryResetIssued,
 		RecentlyReset: func(ctx context.Context) (bool, error) {
 			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.MinBMCResetInterval)
 		},
@@ -556,110 +567,31 @@ func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, b
 		return false, err
 	}
 	log.V(1).Info("Resetting server for retry", "Server", server.Name)
-	return r.resetServerForRetry(ctx, bmcClient, fw, server)
-}
-
-// resetServerForRetry power-cycles the server before a Failed FirmwareUpdate is retried.
-func (r *FirmwareUpdateReconciler) resetServerForRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
-
-	resetCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionServerResetIssued)
-	if err != nil {
-		return false, fmt.Errorf("failed to get condition for server reset before retry: %w", err)
-	}
-	if resetCondition.Status == metav1.ConditionTrue {
-		return true, nil
-	}
-
-	powerOffCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionServerResetPowerOffIssued)
-	if err != nil {
-		return false, fmt.Errorf("failed to get condition for server power-off before retry: %w", err)
-	}
-
-	if powerOffCondition.Status != metav1.ConditionTrue {
-		if powerOffCondition.Reason != constants.ReasonResetIssued {
-			currentPowerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
-			if err != nil {
-				return false, fmt.Errorf("failed to check server power state: %w", err)
-			}
-			if currentPowerState == metalv1alpha1.ServerOffPowerState {
-				// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
-				if err := r.Conditions.Update(
-					powerOffCondition,
-					conditionutils.UpdateStatus(corev1.ConditionTrue),
-					conditionutils.UpdateReason(constants.ReasonResetIssued),
-					conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
-				); err != nil {
-					return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+	return utils.HandleServerPowerCycle(ctx, utils.ServerRetryResetArgs{
+		Conditions:       r.Conditions,
+		StatusConditions: fw.Status.Conditions,
+		BMCClient:        bmcClient,
+		Server:           server,
+		Persist: func(ctx context.Context, condition *metav1.Condition) error {
+			return r.updateStatus(ctx, fw, fw.Status.State, condition)
+		},
+		PowerOffTimeout: r.ServerPowerOffTimeout,
+		GiveUpTimeout:   r.ServerResetGiveUpTimeout,
+		GiveUp: func(ctx context.Context) error {
+			// The server's state is unknown - keep it in maintenance rather than releasing it, and
+			// just stop requesting further automatic retries.
+			if utils.ShouldRetryReconciliation(fw) {
+				fwBase := fw.DeepCopy()
+				annotations := fw.GetAnnotations()
+				delete(annotations, constants.OperationAnnotation)
+				fw.SetAnnotations(annotations)
+				if err := r.Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
+					return fmt.Errorf("failed to clear retry annotation after giving up retry: %w", err)
 				}
-				return false, r.updateStatus(ctx, fw, fw.Status.State, powerOffCondition)
 			}
-			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
-				return false, fmt.Errorf("failed to power off server before retry: %w", err)
-			}
-			if err := r.Conditions.Update(
-				powerOffCondition,
-				conditionutils.UpdateStatus(corev1.ConditionFalse),
-				conditionutils.UpdateReason(constants.ReasonResetIssued),
-				conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
-			); err != nil {
-				return false, fmt.Errorf("failed to update server power-off condition: %w", err)
-			}
-			return false, r.updateStatus(ctx, fw, fw.Status.State, powerOffCondition)
-		}
-
-		inOffState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOffPowerState)
-		if err != nil {
-			return false, fmt.Errorf("failed to check server power state: %w", err)
-		}
-		if !inOffState {
-			log.V(1).Info("Waiting for server to power off before retrying", "Server", server.Name)
-			return false, nil
-		}
-		if err := r.Conditions.Update(
-			powerOffCondition,
-			conditionutils.UpdateStatus(corev1.ConditionTrue),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("Server confirmed powered off before retry"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update server power-off condition: %w", err)
-		}
-		return false, r.updateStatus(ctx, fw, fw.Status.State, powerOffCondition)
-	}
-
-	if resetCondition.Reason != constants.ReasonResetIssued {
-		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
-			return false, fmt.Errorf("failed to power on server before retry: %w", err)
-		}
-		if err := r.Conditions.Update(
-			resetCondition,
-			conditionutils.UpdateStatus(corev1.ConditionFalse),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("Issued power-on request to the server before retrying"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update server reset condition: %w", err)
-		}
-		return false, r.updateStatus(ctx, fw, fw.Status.State, resetCondition)
-	}
-
-	inOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
-	if err != nil {
-		return false, fmt.Errorf("failed to check server power state: %w", err)
-	}
-	if !inOnState {
-		log.V(1).Info("Waiting for server to power back on before retrying", "Server", server.Name)
-		return false, nil
-	}
-
-	if err := r.Conditions.Update(
-		resetCondition,
-		conditionutils.UpdateStatus(corev1.ConditionTrue),
-		conditionutils.UpdateReason(constants.ReasonResetIssued),
-		conditionutils.UpdateMessage("Server reset completed before retrying"),
-	); err != nil {
-		return false, fmt.Errorf("failed to update server reset condition: %w", err)
-	}
-	return false, r.updateStatus(ctx, fw, fw.Status.State, resetCondition)
+			return nil
+		},
+	})
 }
 
 func (r *FirmwareUpdateReconciler) getServerMaintenanceForRef(ctx context.Context, serverMaintenanceRef *metalv1alpha1.ObjectReference) (*maintenancev1alpha1.ServerMaintenance, error) {
@@ -971,10 +903,15 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByBMC(ctx context.Contex
 				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: fwUpdate.Namespace, Name: fwUpdate.Name}})
 			}
 		case systemv1alpha1.FirmwareUpdateStateFailed:
-			// Always enqueue Failed FirmwareUpdates on BMC changes: a retry-before-retry BMC
-			// reset may be waiting on this BMC's reset annotation to clear, and reconciling
-			// a Failed object that isn't actually retrying is a cheap no-op.
-			reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: fwUpdate.Namespace, Name: fwUpdate.Name}})
+			retryReset, err := utils.GetCondition(r.Conditions, fwUpdate.Status.Conditions, constants.ConditionRetryResetIssued)
+			if err != nil {
+				log.Error(err, "Failed to get retry reset BMC condition")
+				continue
+			}
+			// enqueue only if a retry-before-retry BMC reset is pending for this BMC
+			if retryReset.Status != metav1.ConditionTrue && retryReset.Reason == constants.ReasonResetIssued {
+				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: fwUpdate.Namespace, Name: fwUpdate.Name}})
+			}
 		}
 	}
 	return reqs

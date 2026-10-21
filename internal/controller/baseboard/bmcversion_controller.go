@@ -664,12 +664,11 @@ func (r *BMCVersionReconciler) resetBMC(ctx context.Context, bmcVersion *baseboa
 	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
 		Condition: condition,
 		Reason:    constants.ReasonResetIssued,
+		// The post-upgrade reboot is required to make the just-upgraded firmware take effect, and the
+		// retry reset is required to recover from a failed state, so neither must be skipped due to
+		// an earlier, unrelated reset falling within the cooldown.
+		SkipRecentlyResetCheck: conditionType == constants.ConditionVersionUpgradeReboot || conditionType == constants.ConditionRetryResetIssued,
 		RecentlyReset: func(ctx context.Context) (bool, error) {
-			// The post-upgrade reboot is required to make the just-upgraded firmware take effect, so
-			// it must never be skipped due to an earlier, unrelated reset falling within the cooldown.
-			if conditionType == constants.ConditionVersionUpgradeReboot {
-				return false, nil
-			}
 			return utils.IsBMCRecentlyReset(bmcObj, r.MinBMCResetInterval), nil
 		},
 		IssueReset: func(ctx context.Context) error {

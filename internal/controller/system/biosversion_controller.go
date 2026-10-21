@@ -64,6 +64,14 @@ type BIOSVersionReconciler struct {
 	// completed reset.  Set to 0 to always reset.
 	// Has no effect for servers using an inline Spec.BMC (no managed BMC object to check).
 	MinBMCResetInterval time.Duration
+	// ServerPowerOffTimeout bounds how long to wait for a graceful power-off to complete, before
+	// retrying a Failed resource, before escalating to a forced power-off. A value <= 0 disables
+	// escalation.
+	ServerPowerOffTimeout time.Duration
+	// ServerResetGiveUpTimeout bounds how long the whole server power-cycle performed before
+	// retrying a Failed resource may take before giving up on the retry and releasing
+	// maintenance. A value <= 0 disables the give-up check.
+	ServerResetGiveUpTimeout time.Duration
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=biosversions,verbs=get;list;watch;create;update;patch;delete
@@ -555,110 +563,31 @@ func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 	if ok, err := r.handleBMCReset(ctx, bmcClient, biosVersion, server, constants.ConditionRetryResetIssued); !ok || err != nil {
 		return false, err
 	}
-	return r.resetServerForRetry(ctx, bmcClient, biosVersion, server)
-}
-
-// resetServerForRetry power-cycles the server before a Failed BIOSVersion is retried.
-func (r *BIOSVersionReconciler) resetServerForRetry(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
-
-	resetCondition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionServerResetIssued)
-	if err != nil {
-		return false, fmt.Errorf("failed to get condition for server reset before retry: %w", err)
-	}
-	if resetCondition.Status == metav1.ConditionTrue {
-		return true, nil
-	}
-
-	powerOffCondition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionServerResetPowerOffIssued)
-	if err != nil {
-		return false, fmt.Errorf("failed to get condition for server power-off before retry: %w", err)
-	}
-
-	if powerOffCondition.Status != metav1.ConditionTrue {
-		if powerOffCondition.Reason != constants.ReasonResetIssued {
-			currentPowerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
-			if err != nil {
-				return false, fmt.Errorf("failed to check server power state: %w", err)
-			}
-			if currentPowerState == metalv1alpha1.ServerOffPowerState {
-				// already off, nothing to power off - mark this stage done and proceed to PowerOn below.
-				if err := r.Conditions.Update(
-					powerOffCondition,
-					conditionutils.UpdateStatus(corev1.ConditionTrue),
-					conditionutils.UpdateReason(constants.ReasonResetIssued),
-					conditionutils.UpdateMessage("Server is already off, no power-off needed before retry"),
-				); err != nil {
-					return false, fmt.Errorf("failed to update server power-off condition: %w", err)
+	return utils.HandleServerPowerCycle(ctx, utils.ServerRetryResetArgs{
+		Conditions:       r.Conditions,
+		StatusConditions: biosVersion.Status.Conditions,
+		BMCClient:        bmcClient,
+		Server:           server,
+		Persist: func(ctx context.Context, condition *metav1.Condition) error {
+			return r.updateStatus(ctx, biosVersion, biosVersion.Status.State, nil, condition)
+		},
+		PowerOffTimeout:  r.ServerPowerOffTimeout,
+		GiveUpTimeout:    r.ServerResetGiveUpTimeout,
+		GiveUp: func(ctx context.Context) error {
+			// The server's state is unknown - keep it in maintenance rather than releasing it, and
+			// just stop requesting further automatic retries.
+			if utils.ShouldRetryReconciliation(biosVersion) {
+				biosVersionBase := biosVersion.DeepCopy()
+				annotations := biosVersion.GetAnnotations()
+				delete(annotations, constants.OperationAnnotation)
+				biosVersion.SetAnnotations(annotations)
+				if err := r.Patch(ctx, biosVersion, client.MergeFrom(biosVersionBase)); err != nil {
+					return fmt.Errorf("failed to clear retry annotation after giving up retry: %w", err)
 				}
-				return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, nil, powerOffCondition)
 			}
-			if err := bmcClient.PowerOff(ctx, server.Spec.SystemURI); err != nil {
-				return false, fmt.Errorf("failed to power off server before retry: %w", err)
-			}
-			if err := r.Conditions.Update(
-				powerOffCondition,
-				conditionutils.UpdateStatus(corev1.ConditionFalse),
-				conditionutils.UpdateReason(constants.ReasonResetIssued),
-				conditionutils.UpdateMessage("Issued power-off request to the server before retrying"),
-			); err != nil {
-				return false, fmt.Errorf("failed to update server power-off condition: %w", err)
-			}
-			return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, nil, powerOffCondition)
-		}
-
-		inOffState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOffPowerState)
-		if err != nil {
-			return false, fmt.Errorf("failed to check server power state: %w", err)
-		}
-		if !inOffState {
-			log.V(1).Info("Waiting for server to power off before retrying", "Server", server.Name)
-			return false, nil
-		}
-		if err := r.Conditions.Update(
-			powerOffCondition,
-			conditionutils.UpdateStatus(corev1.ConditionTrue),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("Server confirmed powered off before retry"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update server power-off condition: %w", err)
-		}
-		return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, nil, powerOffCondition)
-	}
-
-	if resetCondition.Reason != constants.ReasonResetIssued {
-		if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
-			return false, fmt.Errorf("failed to power on server before retry: %w", err)
-		}
-		if err := r.Conditions.Update(
-			resetCondition,
-			conditionutils.UpdateStatus(corev1.ConditionFalse),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("Issued power-on request to the server before retrying"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update server reset condition: %w", err)
-		}
-		return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, nil, resetCondition)
-	}
-
-	inOnState, err := utils.IsServerInPowerState(ctx, bmcClient, server, metalv1alpha1.ServerOnPowerState)
-	if err != nil {
-		return false, fmt.Errorf("failed to check server power state: %w", err)
-	}
-	if !inOnState {
-		log.V(1).Info("Waiting for server to power back on before retrying", "Server", server.Name)
-		return false, nil
-	}
-
-	if err := r.Conditions.Update(
-		resetCondition,
-		conditionutils.UpdateStatus(corev1.ConditionTrue),
-		conditionutils.UpdateReason(constants.ReasonResetIssued),
-		conditionutils.UpdateMessage("Server reset completed before retrying"),
-	); err != nil {
-		return false, fmt.Errorf("failed to update server reset condition: %w", err)
-	}
-	return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, nil, resetCondition)
+			return nil
+		},
+	})
 }
 
 func (r *BIOSVersionReconciler) handleBMCReset(
@@ -677,6 +606,9 @@ func (r *BIOSVersionReconciler) handleBMCReset(
 	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
 		Condition: resetBMC,
 		Reason:    constants.ReasonResetIssued,
+		// The retry reset is required to recover from a failed state, so it must never be skipped
+		// due to an earlier, unrelated reset falling within the cooldown.
+		SkipRecentlyResetCheck: conditionType == constants.ConditionRetryResetIssued,
 		RecentlyReset: func(ctx context.Context) (bool, error) {
 			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.MinBMCResetInterval)
 		},

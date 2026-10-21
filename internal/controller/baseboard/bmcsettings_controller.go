@@ -655,12 +655,11 @@ func (r *BMCSettingsReconciler) handleBMCReset(
 	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
 		Condition: resetBMC,
 		Reason:    constants.ReasonResetIssued,
+		// The post-apply reset is required to make the just-applied settings take effect, and the
+		// retry reset is required to recover from a failed state, so neither must be skipped due to
+		// an earlier, unrelated reset falling within the cooldown.
+		SkipRecentlyResetCheck: conditionType == ConditionBMCResetPostSettingApply || conditionType == constants.ConditionRetryResetIssued,
 		RecentlyReset: func(ctx context.Context) (bool, error) {
-			// The post-apply reset is required to make the just-applied settings take effect, so it
-			// must never be skipped due to an earlier, unrelated reset falling within the cooldown.
-			if conditionType == ConditionBMCResetPostSettingApply {
-				return false, nil
-			}
 			return utils.IsBMCRecentlyReset(bmcObj, r.MinBMCResetInterval), nil
 		},
 		IssueReset: func(ctx context.Context) error {
