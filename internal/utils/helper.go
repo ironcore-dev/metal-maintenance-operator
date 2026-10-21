@@ -697,8 +697,10 @@ func HandleServerPowerCycle(ctx context.Context, args ServerRetryResetArgs) (boo
 
 	// giveUpIfStuck reports whether the current stage (identified by stageCondition, one of
 	// powerOffCondition/powerOnCondition) has been stuck for longer than args.GiveUpTimeout since
-	// that stage was first issued, and if so, invokes args.GiveUp and returns an error so the
-	// caller backs off exponentially.
+	// that stage was first issued, and if so, invokes args.GiveUp, clears all reset-stage progress
+	// conditions (power-off, forced power-off, power-on) so a later retry starts a fresh
+	// power-cycle instead of immediately giving up again based on these same stale timestamps, and
+	// returns an error so the caller backs off exponentially.
 	giveUpIfStuck := func(stageCondition *metav1.Condition) error {
 		if args.GiveUpTimeout <= 0 || stageCondition.Reason != constants.ReasonResetIssued {
 			return nil
@@ -722,6 +724,27 @@ func HandleServerPowerCycle(ctx context.Context, args ServerRetryResetArgs) (boo
 		}
 		if err := args.Persist(ctx, resetCondition); err != nil {
 			return err
+		}
+		// Clear stage progress so a later (manual or automatic) retry starts a fresh cycle
+		// instead of inheriting an already-expired stage timer.
+		for _, stage := range []string{
+			constants.ConditionServerResetPowerOffIssued,
+			constants.ConditionServerResetForcePowerOffIssued,
+			constants.ConditionServerResetPowerOnIssued,
+		} {
+			cond, err := GetCondition(args.Conditions, args.StatusConditions, stage)
+			if err != nil {
+				return err
+			}
+			if err := args.Conditions.Update(cond,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(constants.ReasonServerResetGaveUp),
+				conditionutils.UpdateMessage("Reset after giving up")); err != nil {
+				return err
+			}
+			if err := args.Persist(ctx, cond); err != nil {
+				return err
+			}
 		}
 		return fmt.Errorf("server did not recover within %v, gave up retrying", args.GiveUpTimeout)
 	}

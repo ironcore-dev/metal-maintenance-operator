@@ -643,8 +643,8 @@ func (r *BMCVersionReconciler) handleFailedState(
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to update retry condition for BMCVersion: %w", err)
 			}
-			bmcVersion.Status.Conditions = []metav1.Condition{*retryCondition}
 		}
+		bmcVersion.Status.Conditions = []metav1.Condition{*retryCondition}
 		if err := r.Status().Patch(ctx, bmcVersion, client.MergeFrom(bmcVersionBase)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to patch BMCVersion status for retrying: %w", err)
 		}
@@ -1406,7 +1406,15 @@ func (r *BMCVersionReconciler) enqueueBMCVersionByBMCRefs(ctx context.Context, o
 	var requests []ctrl.Request
 	for _, bmcVersion := range bmcVersionList.Items {
 		if bmcVersion.Status.State == baseboardv1alpha1.BMCVersionStateFailed {
-			continue
+			retryReset, err := utils.GetCondition(r.Conditions, bmcVersion.Status.Conditions, constants.ConditionRetryResetIssued)
+			if err != nil {
+				log.Error(err, "Failed to get retry reset BMC condition")
+				continue
+			}
+			// enqueue only if a retry-before-retry BMC reset is pending for this BMC
+			if retryReset.Status == metav1.ConditionTrue || retryReset.Reason != constants.ReasonResetIssued {
+				continue
+			}
 		}
 		// A Completed object only needs to be re-evaluated if it has ReadinessGates
 		// that could later become unsatisfied again; otherwise there is nothing to recheck.

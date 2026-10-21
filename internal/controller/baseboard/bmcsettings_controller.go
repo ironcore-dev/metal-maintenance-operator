@@ -1454,6 +1454,17 @@ func (r *BMCSettingsReconciler) enqueueBMCSettingsByBMCRefs(ctx context.Context,
 			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied {
 				continue
 			}
+			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
+				retryReset, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionRetryResetIssued)
+				if err != nil {
+					log.Error(err, "Failed to get retry reset BMC condition")
+					continue
+				}
+				// enqueue only if a retry-before-retry BMC reset is pending for this BMC
+				if retryReset.Status == metav1.ConditionTrue || retryReset.Reason != constants.ReasonResetIssued {
+					continue
+				}
+			}
 			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: settings.Namespace, Name: settings.Name}})
 		}
 	}

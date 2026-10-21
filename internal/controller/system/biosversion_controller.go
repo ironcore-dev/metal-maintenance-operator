@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -73,9 +74,10 @@ type BIOSVersionReconciler struct {
 	// retrying a Failed resource, before escalating to a forced power-off. A value <= 0 disables
 	// escalation.
 	ServerPowerOffTimeout time.Duration
-	// ServerResetGiveUpTimeout bounds how long the whole server power-cycle performed before
-	// retrying a Failed resource may take before giving up on the retry and releasing
-	// maintenance. A value <= 0 disables the give-up check.
+	// ServerResetGiveUpTimeout bounds how long each stage (power-off, and separately power-on) of
+	// the server power-cycle performed before retrying a Failed resource may individually take
+	// before giving up on the retry. Giving up stops further automatic retries but does not
+	// release maintenance. A value <= 0 disables the give-up check.
 	ServerResetGiveUpTimeout time.Duration
 }
 
@@ -670,6 +672,7 @@ func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 	if ok, err := r.handleBMCReset(ctx, bmcClient, biosVersion, server, constants.ConditionRetryResetIssued); !ok || err != nil {
 		return false, err
 	}
+
 	return utils.HandleServerPowerCycle(ctx, utils.ServerRetryResetArgs{
 		Conditions:       r.Conditions,
 		StatusConditions: biosVersion.Status.Conditions,
@@ -681,8 +684,9 @@ func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 		PowerOffTimeout: r.ServerPowerOffTimeout,
 		GiveUpTimeout:   r.ServerResetGiveUpTimeout,
 		GiveUp: func(ctx context.Context) error {
-			// The server's state is unknown - keep it in maintenance rather than releasing it, and
-			// just stop requesting further automatic retries.
+			// clear any pending manual retry request, and mark automatic retries as exhausted so they don't
+			// keep re-triggering give-up. An explicit manual retry (new annotation) or a spec change
+			// can still trigger retrying.
 			if utils.ShouldRetryReconciliation(biosVersion) {
 				biosVersionBase := biosVersion.DeepCopy()
 				annotations := biosVersion.GetAnnotations()
@@ -690,6 +694,13 @@ func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 				biosVersion.SetAnnotations(annotations)
 				if err := r.Patch(ctx, biosVersion, client.MergeFrom(biosVersionBase)); err != nil {
 					return fmt.Errorf("failed to clear retry annotation after giving up retry: %w", err)
+				}
+			}
+			if biosVersion.Status.FailedAttempts != math.MaxInt32 {
+				biosVersionBase := biosVersion.DeepCopy()
+				biosVersion.Status.FailedAttempts = math.MaxInt32
+				if err := r.Status().Patch(ctx, biosVersion, client.MergeFrom(biosVersionBase)); err != nil {
+					return fmt.Errorf("failed to mark automatic retries exhausted after giving up: %w", err)
 				}
 			}
 			return nil
@@ -1366,10 +1377,15 @@ func (r *BIOSVersionReconciler) enqueueBiosSettingsByBMC(ctx context.Context, ob
 				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: biosVersion.Namespace, Name: biosVersion.Name}})
 			}
 		case systemv1alpha1.BIOSVersionStateFailed:
-			// Always enqueue Failed BIOSVersions on BMC changes: a retry-before-retry BMC
-			// reset may be waiting on this BMC's reset annotation to clear, and reconciling
-			// a Failed object that isn't actually retrying is a cheap no-op.
-			reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: biosVersion.Namespace, Name: biosVersion.Name}})
+			retryReset, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionRetryResetIssued)
+			if err != nil {
+				log.Error(err, "Failed to get retry reset BMC condition")
+				continue
+			}
+			// enqueue only if a retry-before-retry BMC reset is pending for this BMC
+			if retryReset.Status != metav1.ConditionTrue && retryReset.Reason == constants.ReasonResetIssued {
+				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: biosVersion.Namespace, Name: biosVersion.Name}})
+			}
 		}
 	}
 	return reqs

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,9 +103,10 @@ type BIOSSettingsReconciler struct {
 	// retrying a Failed resource, before escalating to a forced power-off. A value <= 0 disables
 	// escalation.
 	ServerPowerOffTimeout time.Duration
-	// ServerResetGiveUpTimeout bounds how long the whole server power-cycle performed before
-	// retrying a Failed resource may take before giving up on the retry and releasing
-	// maintenance. A value <= 0 disables the give-up check.
+	// ServerResetGiveUpTimeout bounds how long each stage (power-off, and separately power-on) of
+	// the server power-cycle performed before retrying a Failed resource may individually take
+	// before giving up on the retry. Giving up stops further automatic retries but does not
+	// release maintenance. A value <= 0 disables the give-up check.
 	ServerResetGiveUpTimeout time.Duration
 }
 
@@ -1336,6 +1338,7 @@ func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmc
 	if ok, err := r.handleBMCReset(ctx, bmcClient, settings, server, constants.ConditionRetryResetIssued); !ok || err != nil {
 		return false, err
 	}
+
 	log.V(1).Info("Resetting server for retry", "Server", server.Name)
 	return utils.HandleServerPowerCycle(ctx, utils.ServerRetryResetArgs{
 		Conditions:       r.Conditions,
@@ -1348,8 +1351,9 @@ func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmc
 		PowerOffTimeout: r.ServerPowerOffTimeout,
 		GiveUpTimeout:   r.ServerResetGiveUpTimeout,
 		GiveUp: func(ctx context.Context) error {
-			// The server's state is unknown - keep it in maintenance rather than releasing it, and
-			// just stop requesting further automatic retries.
+			// clear any pending manual retry request, and mark automatic retries as exhausted so they don't
+			// keep re-triggering server reset. An explicit manual retry (new annotation) or a spec change
+			// can still trigger new retrying.
 			if utils.ShouldRetryReconciliation(settings) {
 				settingsBase := settings.DeepCopy()
 				annotations := settings.GetAnnotations()
@@ -1357,6 +1361,13 @@ func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmc
 				settings.SetAnnotations(annotations)
 				if err := r.Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
 					return fmt.Errorf("failed to clear retry annotation after giving up retry: %w", err)
+				}
+			}
+			if settings.Status.FailedAttempts != math.MaxInt32 {
+				settingsBase := settings.DeepCopy()
+				settings.Status.FailedAttempts = math.MaxInt32
+				if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
+					return fmt.Errorf("failed to mark automatic retries exhausted after giving up: %w", err)
 				}
 			}
 			return nil
@@ -1713,10 +1724,11 @@ func (r *BIOSSettingsReconciler) enqueueBiosSettingsByBMC(ctx context.Context, o
 					reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
 				}
 			case systemv1alpha1.BIOSSettingsStateFailed:
-				// Always enqueue Failed BIOSSettings on BMC changes: a retry-before-retry BMC
-				// reset may be waiting on this BMC's reset annotation to clear, and
-				// reconciling a Failed object that isn't actually retrying is a cheap no-op.
-				reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
+				// Only enqueue if a retry-before-retry BMC reset is pending for this BMC.
+				retryReset, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionRetryResetIssued)
+				if err == nil && retryReset.Status != metav1.ConditionTrue && retryReset.Reason == constants.ReasonResetIssued {
+					reqs = append(reqs, ctrl.Request{NamespacedName: types.NamespacedName{Name: settings.Name}})
+				}
 			}
 		}
 	}
