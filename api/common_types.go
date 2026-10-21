@@ -35,6 +35,52 @@ type SettingsTemplate struct {
 	ServerMaintenancePolicy maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
 }
 
+// VersionTemplate defines the fields shared by BIOS and BMC version (firmware upgrade) templates.
+type VersionTemplate struct {
+	// Version specifies the software version (e.g. BIOS, BMC) to upgrade to.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies.
+	// +optional
+	UpdatePolicy *UpdatePolicy `json:"updatePolicy,omitempty"`
+
+	// Image specifies the image to use to upgrade to the given version.
+	// +required
+	Image ImageSpec `json:"image"`
+
+	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
+	// +optional
+	RetryPolicy *RetryPolicy `json:"retryPolicy,omitempty"`
+
+	// ServerMaintenancePolicy is a maintenance policy to be applied on the server.
+	// +optional
+	ServerMaintenancePolicy maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
+}
+
+// ReadinessGating defines the readiness-gate and completion-condition fields shared by the
+// BIOS/BMC settings and version templates. It is embedded (inline) in each template so both
+// the single-object resource (e.g. BIOSSettingsSpec) and the corresponding Set resource's
+// template (e.g. BIOSSettingsSetSpec.BIOSSettingsTemplate) expose it identically, and Set
+// controllers propagate it to owned objects for free by copying the whole template.
+type ReadinessGating struct {
+	// ReadinessGates is a list of Server conditions that must be satisfied before the
+	// controller starts applying this resource. Semantics mirror Kubernetes
+	// Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+	// Server(s) with the required status.
+	// +optional
+	ReadinessGates []metalv1alpha1.ConditionRequirement `json:"readinessGates,omitempty"`
+
+	// CompletionConditionType, if set, is the condition Type patched (status True) onto the
+	// related Server(s) once this resource reaches its terminal success state. Downstream
+	// resources can reference this Type in their own ReadinessGates to build a manual
+	// sequence across resources.
+	// +optional
+	// +kubebuilder:validation:MaxLength=316
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`
+	CompletionConditionType string `json:"completionConditionType,omitempty"`
+}
+
 // ServerMaintenanceRefItem is a reference to a ServerMaintenance object.
 type ServerMaintenanceRefItem struct {
 	// ServerMaintenanceRef is a reference to a ServerMaintenance object that the BMCSettings has requested for the referred server.

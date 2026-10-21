@@ -13,6 +13,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -110,9 +111,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 mockUpServerBMCVersion,
-					Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 mockUpServerBMCVersion,
+						Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -162,9 +165,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -280,9 +285,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
 				},
 			},
 		}
@@ -377,10 +384,12 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion + " fail",
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
-					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion + " fail",
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion + " fail"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
+					},
 				},
 			},
 		}
@@ -431,9 +440,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -480,9 +491,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -558,9 +571,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 mockUpServerBMCVersion,
-					Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 mockUpServerBMCVersion,
+						Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -608,9 +623,11 @@ var _ = Describe("BMCVersion Controller", func() {
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version:                 upgradeServerBMCVersion,
-					Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
-					ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 			},
 		}
@@ -652,6 +669,236 @@ var _ = Describe("BMCVersion Controller", func() {
 
 		// cleanup
 		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+	})
+
+	It("should reset the completion condition on the Server when a previously Completed BMCVersion drifts", func(ctx SpecContext) {
+		By("Creating a BMCVersion with a CompletionConditionType, matching the current version")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-drift-reset-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 mockUpServerBMCVersion,
+						Image:                   api.ImageSpec{URI: mockUpServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						CompletionConditionType: "BMCVersionUpgraded",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that BMC upgrade has completed")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCVersionUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Simulating drift/restart by requesting a different version than what is installed")
+		Eventually(Update(bmcVersion, func() {
+			bmcVersion.Spec.Version = upgradeServerBMCVersion
+			bmcVersion.Spec.Image = api.ImageSpec{URI: upgradeServerBMCVersion}
+		})).Should(Succeed())
+
+		By("Ensuring the completion condition is reset away from True on the Server once drift is detected")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCVersionUpgraded"),
+					HaveField("Status", Not(Equal(metav1.ConditionTrue))),
+				),
+			)),
+		)
+
+		By("Ensuring the BMCVersion re-upgrades and reaches Completed again")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition is patched True again once re-completed")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCVersionUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should wait for readiness gates to be satisfied before starting the upgrade", func(ctx SpecContext) {
+		By("Creating a BMCVersion with a ReadinessGate that is not yet satisfied on the Server")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-readiness-gate-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SomePrerequisiteReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring that the BMCVersion remains Pending because the readiness gate is not satisfied")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStatePending),
+		)
+		Consistently(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStatePending),
+		)
+
+		By("Ensuring the ReadinessGatesSatisfied condition is False on the BMCVersion")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Satisfying the readiness gate on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring that the BMCVersion now proceeds and reaches Completed")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should stay Completed and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating a BMCVersion gated on that condition, with a CompletionConditionType")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-readiness-gate-recheck-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{
+							{
+								Type:           "SiblingGateReady",
+								RequiredStatus: metav1.ConditionTrue,
+							},
+						},
+						CompletionConditionType: "BMCVersionGateRecheckUpgraded",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+
+		By("Ensuring the BMCVersion reaches Completed")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition has been patched True onto the Server")
+		Eventually(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCVersionGateRecheckUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Flipping the readiness gate back to unsatisfied on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SiblingGateReady",
+				Status: metav1.ConditionFalse,
+				Reason: "NoLongerReady",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the ReadinessGatesSatisfied condition goes False on the BMCVersion")
+		Eventually(Object(bmcVersion)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", ConditionReadinessGatesSatisfied),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", ReasonReadinessGatesNotSatisfied),
+				),
+			)),
+		)
+
+		By("Ensuring the BMCVersion stays Completed and does not re-actuate")
+		Consistently(Object(bmcVersion)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
+		)
+
+		By("Ensuring the completion condition on the Server is left untouched (still True) while gates are unsatisfied")
+		Consistently(Object(server)).Should(
+			HaveField("Status.Conditions", ContainElement(
+				SatisfyAll(
+					HaveField("Type", "BMCVersionGateRecheckUpgraded"),
+					HaveField("Status", metav1.ConditionTrue),
+				),
+			)),
+		)
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
+		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
 })
 

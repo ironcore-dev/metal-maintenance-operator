@@ -9,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
-	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
@@ -29,25 +28,8 @@ const (
 
 // BIOSVersionTemplate defines the desired BIOS firmware version and upgrade parameters.
 type BIOSVersionTemplate struct {
-	// Version specifies the BIOS version to upgrade to.
-	// +optional
-	Version string `json:"version,omitempty"`
-
-	// UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies.
-	// +optional
-	UpdatePolicy *api.UpdatePolicy `json:"updatePolicy,omitempty"`
-
-	// Image specifies the image to use to upgrade to the given BIOS version.
-	// +required
-	Image api.ImageSpec `json:"image"`
-
-	// ServerMaintenancePolicy is a maintenance policy to be enforced on the server.
-	// +optional
-	ServerMaintenancePolicy *maintenancev1alpha1.ServerMaintenancePolicy `json:"serverMaintenancePolicy,omitempty"`
-
-	// RetryPolicy defines the retry behavior for automatic retries on transient failures.
-	// +optional
-	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
+	api.VersionTemplate `json:",inline"`
+	api.ReadinessGating `json:",inline"`
 }
 
 // BIOSVersionSpec defines the desired state of BIOSVersion.

@@ -135,6 +135,8 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 | `serverMaintenanceRefs` _ServerMaintenanceRefItem array_ | ServerMaintenanceRefs are references to ServerMaintenance objects which are created by the controller for each<br />server that needs to be updated with the BMC settings. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply settings to. |  |  |
 | `writeOnlyDriftPolicy` _[WriteOnlyDriftPolicy](#writeonlydriftpolicy)_ | WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for<br />a resource containing a write-only key changes.  Defaults to Conservative.<br />See WriteOnlyDriftPolicy for full semantics and limitations. | Conservative | Enum: [Conservative Strict] <br /> |
@@ -198,6 +200,8 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 
 
 #### BMCUser
@@ -349,11 +353,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ | Version specifies the BMC version to upgrade to. |  |  |
+| `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) to upgrade to. |  |  |
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
-| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
+| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 | `serverMaintenanceRefs` _ObjectReference array_ | ServerMaintenanceRefs are references to ServerMaintenance objects that the controller has requested for the related servers. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef is a reference to a specific BMC to apply BMC upgrade on. |  |  |
 
@@ -411,11 +417,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ | Version specifies the BMC version to upgrade to. |  |  |
+| `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) to upgrade to. |  |  |
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
-| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BMC version. |  |  |
+| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server managed by referred BMC. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 
 
 #### WriteOnlyDriftPolicy
@@ -497,6 +505,7 @@ _Appears in:_
 - [FirmwareUpdateTemplate](#firmwareupdatetemplate)
 - [ServerMaintenanceSpec](#servermaintenancespec)
 - [SettingsTemplate](#settingstemplate)
+- [VersionTemplate](#versiontemplate)
 
 | Field | Description |
 | --- | --- |
@@ -836,6 +845,8 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to a ServerMaintenance object that BIOSSettings has requested for the referred server. |  |  |
 | `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the BIOS settings on. |  |  |
 
@@ -899,6 +910,8 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 
 
 #### BIOSVersion
@@ -990,11 +1003,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ | Version specifies the BIOS version to upgrade to. |  |  |
+| `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) to upgrade to. |  |  |
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
-| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BIOS version. |  |  |
-| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 | `serverMaintenanceRef` _[ObjectReference](#objectreference)_ | ServerMaintenanceRef is a reference to a ServerMaintenance object that the controller has requested for the referred server. |  |  |
 | `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the BIOS upgrade on. |  |  |
 
@@ -1052,11 +1067,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `version` _string_ | Version specifies the BIOS version to upgrade to. |  |  |
+| `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) to upgrade to. |  |  |
 | `updatePolicy` _[UpdatePolicy](#updatepolicy)_ | UpdatePolicy indicates whether the server's upgrade service should bypass vendor update policies. |  |  |
-| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given BIOS version. |  |  |
-| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
+| `image` _[ImageSpec](#imagespec)_ | Image specifies the image to use to upgrade to the given version. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
+| `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
+| `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
 
 
 #### ComponentJobsSummary
