@@ -6,6 +6,7 @@ require (
 	github.com/HewlettPackard/oneview-golang v11.4.0+incompatible
 	github.com/blang/semver/v4 v4.0.0
 	github.com/go-logr/logr v1.4.4
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/ironcore-dev/controller-utils v0.14.0
 	github.com/ironcore-dev/metal-operator v0.8.1-0.20261016140341-c0b87c0bb354
