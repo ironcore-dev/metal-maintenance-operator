@@ -463,7 +463,7 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			HaveField("Status.FailedBIOSSettings", BeNumerically("==", 0)),
 		))
 
-		By("Create duplicate BIOSSettingsSet resource")
+		By("Create 2nd BIOSSettingsSet resource with an overlapping selector")
 		biosSettingsSet2 := &systemv1alpha1.BIOSSettingsSet{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test-biossettings-set2-",
@@ -489,7 +489,23 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, biosSettingsSet2)).To(Succeed())
 
-		By("Re-Checking if the status of 1st BIOSSettingsSet")
+		By("Checking if the BIOSSettings has been created by the 2nd BIOSSettingsSet")
+		biosSettings02_02 := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: biosSettingsSet2.Name + "-" + server02.Name,
+			},
+		}
+		Eventually(Get(biosSettings02_02)).Should(Succeed())
+
+		By("Checking if the 2nd BIOSSettings has been created by the 2nd BIOSSettingsSet")
+		biosSettings03_02 := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: biosSettingsSet2.Name + "-" + server03.Name,
+			},
+		}
+		Eventually(Get(biosSettings03_02)).Should(Succeed())
+
+		By("Re-Checking if the status of 1st BIOSSettingsSet is unaffected")
 		Eventually(Object(biosSettingsSet1)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledServers", BeNumerically("==", 2)),
 			HaveField("Status.AvailableBIOSSettings", BeNumerically("==", 2)),
@@ -498,21 +514,14 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 			HaveField("Status.FailedBIOSSettings", BeNumerically("==", 0)),
 		))
 
-		By("Checking the status of the 2nd BIOSSettingsSet")
+		By("Checking the status of the 2nd BIOSSettingsSet independently reaches completion")
 		Eventually(Object(biosSettingsSet2)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledServers", BeNumerically("==", 2)),
-			HaveField("Status.AvailableBIOSSettings", BeNumerically("==", 0)),
-			HaveField("Status.CompletedBIOSSettings", BeNumerically("==", 0)),
+			HaveField("Status.AvailableBIOSSettings", BeNumerically("==", 2)),
+			HaveField("Status.CompletedBIOSSettings", BeNumerically("==", 2)),
 			HaveField("Status.InProgressBIOSSettings", BeNumerically("==", 0)),
 			HaveField("Status.FailedBIOSSettings", BeNumerically("==", 0)),
 		))
-
-		By("Pausing the 2nd BIOSSettingsSet")
-		Eventually(Update(biosSettingsSet2, func() {
-			biosSettingsSet2.Annotations = map[string]string{
-				constants.OperationAnnotation: constants.OperationAnnotationIgnore,
-			}
-		})).Should(Succeed())
 
 		By("Deleting the 1st BIOSSettingsSet")
 		Expect(k8sClient.Delete(ctx, biosSettingsSet1)).To(Succeed())
@@ -522,44 +531,7 @@ var _ = Describe("BIOSSettingsSet Controller", func() {
 		Expect(k8sClient.Delete(ctx, biosSettings03)).To(Succeed())
 		Eventually(Get(biosSettings03)).Should(Satisfy(apierrors.IsNotFound))
 
-		By("Checking the status at the 2nd BIOSSettingsSet")
-		Eventually(Object(biosSettingsSet2)).Should(SatisfyAll(
-			HaveField("Status.FullyLabeledServers", BeNumerically("==", 2)),
-			HaveField("Status.AvailableBIOSSettings", BeNumerically("==", 0)),
-			HaveField("Status.CompletedBIOSSettings", BeNumerically("==", 0)),
-			HaveField("Status.InProgressBIOSSettings", BeNumerically("==", 0)),
-			HaveField("Status.FailedBIOSSettings", BeNumerically("==", 0)),
-		))
-
-		By("Re enable the 2nd BIOSSettingsSet")
-		Eventually(Update(biosSettingsSet2, func() {
-			delete(biosSettingsSet2.Annotations, constants.OperationAnnotation)
-		})).Should(Succeed())
-
-		By("Checking if the status has been updated by the 2nd BIOSSettingsSet")
-		Eventually(Object(biosSettingsSet2)).Should(SatisfyAll(
-			HaveField("Status.FullyLabeledServers", BeNumerically("==", 2)),
-			HaveField("Status.AvailableBIOSSettings", BeNumerically("==", 2)),
-			HaveField("Status.FailedBIOSSettings", BeNumerically("==", 0)),
-		))
-
-		By("Checking if the BIOSSettings has been created by the 2nd BIOSSettingsSet")
-		biosSettings02_02 := &systemv1alpha1.BIOSSettings{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: biosSettingsSet2.Name + "-" + server02.Name,
-			},
-		}
-		Eventually(Get(biosSettings02_02)).Should(Succeed())
-
-		By("Checking if the 2nd BIOSSettings has been created")
-		biosSettings03_02 := &systemv1alpha1.BIOSSettings{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: biosSettingsSet2.Name + "-" + server03.Name,
-			},
-		}
-		Eventually(Get(biosSettings03_02)).Should(Succeed())
-
-		By("Checking if the status has been updated")
+		By("Checking the 2nd BIOSSettingsSet's own resources are unaffected by the 1st's deletion")
 		Eventually(Object(biosSettingsSet2)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledServers", BeNumerically("==", 2)),
 			HaveField("Status.AvailableBIOSSettings", BeNumerically("==", 2)),

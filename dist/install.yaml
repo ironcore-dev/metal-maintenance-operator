@@ -74,9 +74,14 @@ spec:
                   related Server(s) once this resource reaches its terminal success state. Downstream
                   resources can reference this Type in their own ReadinessGates to build a manual
                   sequence across resources.
+                  Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                  afterwards.
                 maxLength: 316
                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                 type: string
+                x-kubernetes-validations:
+                - message: completionConditionType is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               readinessGates:
                 description: |-
                   ReadinessGates is a list of Server conditions that must be satisfied before the
@@ -571,9 +576,14 @@ spec:
                       related Server(s) once this resource reaches its terminal success state. Downstream
                       resources can reference this Type in their own ReadinessGates to build a manual
                       sequence across resources.
+                      Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                      afterwards.
                     maxLength: 316
                     pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                     type: string
+                    x-kubernetes-validations:
+                    - message: completionConditionType is immutable once set
+                      rule: oldSelf == '' || self == oldSelf
                   readinessGates:
                     description: |-
                       ReadinessGates is a list of Server conditions that must be satisfied before the
@@ -839,9 +849,6 @@ spec:
             - biosSettingsTemplate
             - serverSelector
             type: object
-            x-kubernetes-validations:
-            - message: version is required
-              rule: size(self.biosSettingsTemplate.version) > 0
           status:
             description: BIOSSettingsSetStatus defines the observed state of BIOSSettingsSet.
             properties:
@@ -957,9 +964,14 @@ spec:
                   related Server(s) once this resource reaches its terminal success state. Downstream
                   resources can reference this Type in their own ReadinessGates to build a manual
                   sequence across resources.
+                  Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                  afterwards.
                 maxLength: 316
                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                 type: string
+                x-kubernetes-validations:
+                - message: completionConditionType is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               image:
                 description: Image specifies the image to use to upgrade to the given
                   version.
@@ -1264,9 +1276,14 @@ spec:
                       related Server(s) once this resource reaches its terminal success state. Downstream
                       resources can reference this Type in their own ReadinessGates to build a manual
                       sequence across resources.
+                      Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                      afterwards.
                     maxLength: 316
                     pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                     type: string
+                    x-kubernetes-validations:
+                    - message: completionConditionType is immutable once set
+                      rule: oldSelf == '' || self == oldSelf
                   image:
                     description: Image specifies the image to use to upgrade to the
                       given version.
@@ -1523,9 +1540,14 @@ spec:
                   related Server(s) once this resource reaches its terminal success state. Downstream
                   resources can reference this Type in their own ReadinessGates to build a manual
                   sequence across resources.
+                  Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                  afterwards.
                 maxLength: 316
                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                 type: string
+                x-kubernetes-validations:
+                - message: completionConditionType is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               readinessGates:
                 description: |-
                   ReadinessGates is a list of Server conditions that must be satisfied before the
@@ -2022,9 +2044,14 @@ spec:
                       related Server(s) once this resource reaches its terminal success state. Downstream
                       resources can reference this Type in their own ReadinessGates to build a manual
                       sequence across resources.
+                      Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                      afterwards.
                     maxLength: 316
                     pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                     type: string
+                    x-kubernetes-validations:
+                    - message: completionConditionType is immutable once set
+                      rule: oldSelf == '' || self == oldSelf
                   readinessGates:
                     description: |-
                       ReadinessGates is a list of Server conditions that must be satisfied before the
@@ -2247,9 +2274,6 @@ spec:
             - bmcSelector
             - bmcSettingsTemplate
             type: object
-            x-kubernetes-validations:
-            - message: version is required
-              rule: size(self.bmcSettingsTemplate.version) > 0
           status:
             description: BMCSettingsSetStatus defines the observed state of BMCSettingsSet.
             properties:
@@ -2588,9 +2612,14 @@ spec:
                   related Server(s) once this resource reaches its terminal success state. Downstream
                   resources can reference this Type in their own ReadinessGates to build a manual
                   sequence across resources.
+                  Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                  afterwards.
                 maxLength: 316
                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                 type: string
+                x-kubernetes-validations:
+                - message: completionConditionType is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               image:
                 description: Image specifies the image to use to upgrade to the given
                   version.
@@ -2928,9 +2957,14 @@ spec:
                       related Server(s) once this resource reaches its terminal success state. Downstream
                       resources can reference this Type in their own ReadinessGates to build a manual
                       sequence across resources.
+                      Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                      afterwards.
                     maxLength: 316
                     pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                     type: string
+                    x-kubernetes-validations:
+                    - message: completionConditionType is immutable once set
+                      rule: oldSelf == '' || self == oldSelf
                   image:
                     description: Image specifies the image to use to upgrade to the
                       given version.

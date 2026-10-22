@@ -126,9 +126,14 @@ spec:
                       related Server(s) once this resource reaches its terminal success state. Downstream
                       resources can reference this Type in their own ReadinessGates to build a manual
                       sequence across resources.
+                      Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                      afterwards.
                     maxLength: 316
                     pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                     type: string
+                    x-kubernetes-validations:
+                    - message: completionConditionType is immutable once set
+                      rule: oldSelf == '' || self == oldSelf
                   image:
                     description: Image specifies the image to use to upgrade to the
                       given version.

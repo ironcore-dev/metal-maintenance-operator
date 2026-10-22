@@ -75,9 +75,12 @@ type ReadinessGating struct {
 	// related Server(s) once this resource reaches its terminal success state. Downstream
 	// resources can reference this Type in their own ReadinessGates to build a manual
 	// sequence across resources.
+	// Immutable once set: it can be patched from empty to a value, but not changed or cleared
+	// afterwards.
 	// +optional
 	// +kubebuilder:validation:MaxLength=316
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="completionConditionType is immutable once set"
 	CompletionConditionType string `json:"completionConditionType,omitempty"`
 }
 
