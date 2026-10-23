@@ -162,7 +162,15 @@ spec:
                       - name
                       - priority
                       type: object
+                    maxItems: 64
                     type: array
+                    x-kubernetes-validations:
+                    - message: settingsFlow item names must be unique
+                      rule: self.all(a, self.filter(b, b.name == a.name).size() ==
+                        1)
+                    - message: settingsFlow item priorities must be unique
+                      rule: self.all(a, self.filter(b, b.priority == a.priority).size()
+                        == 1)
                   variables:
                     description: Variables is a list of variables that can be used
                       in the settings for templating.

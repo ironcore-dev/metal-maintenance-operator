@@ -60,6 +60,46 @@ _Appears in:_
 | `applyMethod` _string_ | ApplyMethod is the HTTP method used to apply the value (e.g. "POST" or "PATCH").<br />Values applied via POST create a (possibly ephemeral) resource whose URI cannot be<br />used for ETag-based drift detection. These keys are not read back from the BMC;<br />they are re-applied only when the desired value fingerprint (ValueHash) changes. |  |  |
 
 
+#### BMCSettingsFlowState
+
+_Underlying type:_ _string_
+
+BMCSettingsFlowState describes the state of a single settings-flow priority step.
+
+
+
+_Appears in:_
+- [BMCSettingsFlowStatus](#bmcsettingsflowstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | BMCSettingsFlowStatePending specifies that the settings update for this priority is pending.<br /> |
+| `InProgress` | BMCSettingsFlowStateInProgress specifies that the settings update for this priority is in progress.<br /> |
+| `Applied` | BMCSettingsFlowStateApplied specifies that the settings for this priority have been applied.<br /> |
+| `Failed` | BMCSettingsFlowStateFailed specifies that the settings update for this priority has failed.<br /> |
+
+
+#### BMCSettingsFlowStatus
+
+
+
+BMCSettingsFlowStatus describes the per-priority-step reconciliation state.
+Fields mirror api.SettingsFlowStatus — update both when changing either.
+
+
+
+_Appears in:_
+- [BMCSettingsStatus](#bmcsettingsstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `priority` _integer_ | Priority identifies the settings priority from the spec. |  |  |
+| `name` _string_ | Name identifies the flow step from the spec. |  |  |
+| `flowState` _[BMCSettingsFlowState](#bmcsettingsflowstate)_ | State is the current reconciliation state of this flow step. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest observations of this flow step's progress. |  |  |
+| `lastAppliedTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastAppliedTime is the timestamp when this flow step was last successfully applied. |  |  |
+
+
 #### BMCSettingsSet
 
 
@@ -131,7 +171,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
-| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  | MaxItems: 64 <br /> |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
@@ -178,6 +218,7 @@ _Appears in:_
 | `failedAttempts` _integer_ | FailedAttempts is the number of automatic retry attempts made after failure. |  |  |
 | `observedGeneration` _integer_ | ObservedGeneration is the most recent generation observed by the controller. |  |  |
 | `appliedETags` _object (keys:string, values:[BMCSettingsApplyResultEntry](#bmcsettingsapplyresultentry))_ | AppliedETags stores the URI, ETag, and value hash from the last successful<br />apply for each settings key. Used for ETag-based drift detection during<br />verification to avoid unnecessary re-applies and to reliably detect<br />write-only field drift (e.g. passwords) and POST-created resource drift<br />(e.g. certificates). |  |  |
+| `flowState` _[BMCSettingsFlowStatus](#bmcsettingsflowstatus) array_ | FlowState tracks the per-priority-step reconciliation state for settingsFlow items.<br />Each entry corresponds to one priority level in spec.settingsFlow. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions represents the latest available observations of the BMC Settings Resource state. |  |  |
 
 
@@ -196,7 +237,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
-| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  | MaxItems: 64 <br /> |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
@@ -841,7 +882,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
-| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  | MaxItems: 64 <br /> |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
@@ -906,7 +947,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `version` _string_ | Version specifies the software version (e.g. BIOS, BMC) these settings apply to. |  |  |
-| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  |  |
+| `settingsFlow` _[SettingsFlowItem](#settingsflowitem) array_ | SettingsFlow contains the settings sequence to apply in the given order. |  | MaxItems: 64 <br /> |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `variables` _[Variable](#variable) array_ | Variables is a list of variables that can be used in the settings for templating. |  | MaxItems: 64 <br /> |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |

@@ -67,6 +67,45 @@ type BMCSettingsSpec struct {
 	WriteOnlyDriftPolicy WriteOnlyDriftPolicy `json:"writeOnlyDriftPolicy,omitempty"`
 }
 
+// BMCSettingsFlowState describes the state of a single settings-flow priority step.
+type BMCSettingsFlowState string
+
+const (
+	// BMCSettingsFlowStatePending specifies that the settings update for this priority is pending.
+	BMCSettingsFlowStatePending BMCSettingsFlowState = "Pending"
+	// BMCSettingsFlowStateInProgress specifies that the settings update for this priority is in progress.
+	BMCSettingsFlowStateInProgress BMCSettingsFlowState = "InProgress"
+	// BMCSettingsFlowStateApplied specifies that the settings for this priority have been applied.
+	BMCSettingsFlowStateApplied BMCSettingsFlowState = "Applied"
+	// BMCSettingsFlowStateFailed specifies that the settings update for this priority has failed.
+	BMCSettingsFlowStateFailed BMCSettingsFlowState = "Failed"
+)
+
+// BMCSettingsFlowStatus describes the per-priority-step reconciliation state.
+// Fields mirror api.SettingsFlowStatus — update both when changing either.
+type BMCSettingsFlowStatus struct {
+	// Priority identifies the settings priority from the spec.
+	Priority int32 `json:"priority"`
+
+	// Name identifies the flow step from the spec.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// State is the current reconciliation state of this flow step.
+	// +optional
+	State BMCSettingsFlowState `json:"flowState,omitempty"`
+
+	// Conditions represents the latest observations of this flow step's progress.
+	// +patchStrategy=merge
+	// +patchMergeKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+	// LastAppliedTime is the timestamp when this flow step was last successfully applied.
+	// +optional
+	LastAppliedTime *metav1.Time `json:"lastAppliedTime,omitempty"`
+}
+
 // BMCSettingsState specifies the current state of the server maintenance.
 type BMCSettingsState string
 
@@ -140,6 +179,11 @@ type BMCSettingsStatus struct {
 	// (e.g. certificates).
 	// +optional
 	AppliedETags map[string]BMCSettingsApplyResultEntry `json:"appliedETags,omitempty"`
+
+	// FlowState tracks the per-priority-step reconciliation state for settingsFlow items.
+	// Each entry corresponds to one priority level in spec.settingsFlow.
+	// +optional
+	FlowState []BMCSettingsFlowStatus `json:"flowState,omitempty"`
 
 	// Conditions represents the latest available observations of the BMC Settings Resource state.
 	// +patchStrategy=merge

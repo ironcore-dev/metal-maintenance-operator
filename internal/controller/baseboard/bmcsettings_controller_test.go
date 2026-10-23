@@ -32,6 +32,26 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 )
 
+type flowDiffTestClient struct {
+	attributes schemas.SettingsAttributes
+}
+
+// FetchETags satisfies the BMC client interface; returns nil for unit tests that don't exercise ETag fetching.
+func (c *flowDiffTestClient) FetchETags(context.Context, []string) (map[string]string, error) {
+	return nil, nil
+}
+
+// GetBMCAttributeValues returns the pre-seeded attribute values for the requested keys.
+func (c *flowDiffTestClient) GetBMCAttributeValues(_ context.Context, req bmc.GetBMCAttributeValuesRequest) (schemas.SettingsAttributes, error) {
+	current := make(schemas.SettingsAttributes, len(req.Attributes))
+	for key := range req.Attributes {
+		if value, ok := c.attributes[key]; ok {
+			current[key] = value
+		}
+	}
+	return current, nil
+}
+
 var _ = Describe("BMCSettings Controller", func() {
 	ns := SetupTest(nil)
 
@@ -1194,9 +1214,7 @@ var _ = Describe("BMCSettings Controller", func() {
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
 	})
-})
 
-var _ = Describe("classifyKey", func() {
 	const (
 		uri          = "/redfish/v1/Managers/BMC/Settings"
 		storedETag   = `W/"v1"`
@@ -2055,6 +2073,9 @@ var _ = Describe("BMCSettings Controller ETag drift detection", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			_ = k8sClient.Delete(ctx, settings)
+		})
 
 		By("Ensuring the BMCSettings reaches Applied despite a Strict write-only key")
 		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
@@ -2063,6 +2084,234 @@ var _ = Describe("BMCSettings Controller ETag drift detection", func() {
 		Consistently(Object(settings), "2s").Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
 
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Get(settings)).Should(MatchError(ContainSubstring("not found")))
+		mockServers[0].SetBMCSettingAttr("BMC", "abc", "bar")
+		mockServers[0].SetResourceETag(bmcSettingsURI, `W/"v0"`)
+	})
+
+	It("applies settingsFlow priority groups sequentially, advancing only after each group is verified", func(ctx SpecContext) {
+		// Overlapping keys make the intermediate priority value observable.
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-flow-priority-"},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version: "1.45.455b66-rev4",
+						SettingsFlow: []api.SettingsFlowItem{
+							{Name: "step1", Priority: 1, Settings: map[string]string{"abc": "step1-value"}},
+							{Name: "step2", Priority: 2, Settings: map[string]string{"abc": "step2-value"}},
+						},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			_ = k8sClient.Delete(ctx, settings)
+		})
+
+		By("Waiting for step1 to reach Applied before step2 starts")
+		Eventually(func() []baseboardv1alpha1.BMCSettingsFlowStatus {
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(settings), settings); err != nil {
+				return nil
+			}
+			return settings.Status.FlowState
+		}).Should(ContainElement(baseboardv1alpha1.BMCSettingsFlowStatus{
+			Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied,
+		}))
+		// step1 is Applied in status; step2 has not been started yet by definition
+		// (the controller advances groups one at a time). This is the ordering proof.
+		Expect(settings.Status.FlowState).To(HaveLen(1))
+
+		By("Waiting for step2 to reach Applied")
+		Eventually(func() []baseboardv1alpha1.BMCSettingsFlowStatus {
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(settings), settings); err != nil {
+				return nil
+			}
+			return settings.Status.FlowState
+		}).Should(ConsistOf(
+			baseboardv1alpha1.BMCSettingsFlowStatus{
+				Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied,
+			},
+			baseboardv1alpha1.BMCSettingsFlowStatus{
+				Name: "step2", Priority: 2, State: baseboardv1alpha1.BMCSettingsFlowStateApplied,
+			},
+		))
+		Expect(settings.Status.FlowState[0].Name).To(Equal("step1"), "priority 1 must complete before priority 2")
+		Expect(settings.Status.FlowState[1].Name).To(Equal("step2"))
+
+		By("Ensuring the BMCSettings overall state reaches Applied")
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+
+		By("Verifying the BMC has the final priority group's value")
+		Eventually(func() any {
+			return mockServers[0].GetBMCSettingAttr("BMC")["abc"]
+		}).Should(Equal("step2-value"))
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Get(settings)).Should(MatchError(ContainSubstring("not found")))
+		mockServers[0].SetBMCSettingAttr("BMC", "abc", "bar")
+		mockServers[0].SetResourceETag(bmcSettingsURI, `W/"v0"`)
+	})
+
+	It("marks matching settingsFlow groups Applied without requesting maintenance", func(ctx SpecContext) {
+		mockServers[0].SetBMCSettingAttr("BMC", "abc", "already-correct")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-flow-noop-"},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version: "1.45.455b66-rev4",
+						SettingsFlow: []api.SettingsFlowItem{
+							{Name: "step1", Priority: 1, Settings: map[string]string{"abc": "already-correct"}},
+							{Name: "step2", Priority: 2, Settings: map[string]string{"abc": "already-correct"}},
+						},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		DeferCleanup(func(ctx SpecContext) {
+			_ = k8sClient.Delete(ctx, settings)
+		})
+
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+		Eventually(Object(settings)).Should(HaveField("Status.FlowState", ConsistOf(
+			baseboardv1alpha1.BMCSettingsFlowStatus{Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+			baseboardv1alpha1.BMCSettingsFlowStatus{Name: "step2", Priority: 2, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+		)))
+		Expect(settings.Status.ObservedGeneration).To(Equal(settings.Generation))
+		Expect(settings.Spec.ServerMaintenanceRefs).To(BeEmpty())
+
+		By("Reapplying an earlier priority after its desired value changes while the final value stays the same")
+		prevGeneration := settings.Generation
+		Eventually(Update(settings, func() {
+			settings.Spec.SettingsFlow[0].Settings["abc"] = "updated-earlier-value"
+		})).Should(Succeed())
+
+		By("Waiting for the controller to observe the new generation and stay Applied")
+		// The merged final value is unchanged (step2 still writes "already-correct"),
+		// so the top-level diff is zero and the controller re-applies without leaving Applied.
+		Eventually(Object(settings)).Should(SatisfyAll(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
+			HaveField("Status.ObservedGeneration", BeNumerically(">", prevGeneration)),
+		))
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+		Eventually(Get(settings)).Should(MatchError(ContainSubstring("not found")))
+		mockServers[0].SetBMCSettingAttr("BMC", "abc", "bar")
+		mockServers[0].SetResourceETag(bmcSettingsURI, `W/"v0"`)
+	})
+})
+
+var _ = Describe("flowGroupDiff", func() {
+	It("computes overlapping-key diffs from each priority group's own values", func(ctx SpecContext) {
+		settings := &baseboardv1alpha1.BMCSettings{
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{
+							{Name: "step1", Priority: 1, Settings: map[string]string{"abc": "step1-value"}},
+							{Name: "step2", Priority: 2, Settings: map[string]string{"abc": "step2-value"}},
+						},
+					},
+				},
+			},
+		}
+		bmcObj := &metalv1alpha1.BMC{}
+		fakeClient := &flowDiffTestClient{attributes: schemas.SettingsAttributes{"abc": "original"}}
+		r := &BMCSettingsReconciler{HMACKey: testHMACKey}
+		mergedDiff := schemas.SettingsAttributes{"abc": "step2-value"}
+
+		groupDiff, _, changed, err := r.flowGroupDiff(ctx, settings, bmcObj, fakeClient, mergedDiff, map[string]string{"abc": "step2-value"}, false)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse())
+		Expect(groupDiff).To(HaveKeyWithValue("abc", "step1-value"))
+
+		fakeClient.attributes["abc"] = "step1-value"
+		groupDiff, _, changed, err = r.flowGroupDiff(ctx, settings, bmcObj, fakeClient, mergedDiff, map[string]string{"abc": "step2-value"}, true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(settings.Status.FlowState).To(ContainElement(HaveField("Name", "step1")))
+		Expect(groupDiff).To(HaveKeyWithValue("abc", "step2-value"))
+
+		fakeClient.attributes["abc"] = "step2-value"
+		groupDiff, _, changed, err = r.flowGroupDiff(ctx, settings, bmcObj, fakeClient, schemas.SettingsAttributes{}, map[string]string{"abc": "step2-value"}, true)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(groupDiff).To(BeEmpty())
+		Expect(settings.Status.FlowState).To(ConsistOf(
+			baseboardv1alpha1.BMCSettingsFlowStatus{Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+			baseboardv1alpha1.BMCSettingsFlowStatus{Name: "step2", Priority: 2, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+		))
+	})
+})
+
+var _ = Describe("clearFlowStateOnGenerationChange", func() {
+	It("clears FlowState for an older observed generation regardless of ChangesIssued reason", func() {
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{Generation: 2},
+			Status: baseboardv1alpha1.BMCSettingsStatus{
+				FlowState: []baseboardv1alpha1.BMCSettingsFlowStatus{
+					{Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+				},
+			},
+		}
+		changesIssued := &metav1.Condition{
+			Reason:             ReasonBMCSettingsVerificationPending,
+			ObservedGeneration: 1,
+		}
+
+		r := &BMCSettingsReconciler{}
+		Expect(r.clearFlowStateOnGenerationChange(settings, changesIssued)).To(BeTrue())
+
+		Expect(settings.Status.FlowState).To(BeNil())
+	})
+
+	It("clears FlowState when Status.ObservedGeneration is stale", func() {
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{Generation: 2},
+			Status: baseboardv1alpha1.BMCSettingsStatus{
+				ObservedGeneration: 1,
+				FlowState: []baseboardv1alpha1.BMCSettingsFlowStatus{
+					{Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+				},
+			},
+		}
+
+		r := &BMCSettingsReconciler{}
+		Expect(r.clearFlowStateOnGenerationChange(settings, &metav1.Condition{})).To(BeTrue())
+		Expect(settings.Status.FlowState).To(BeNil())
+	})
+
+	It("resets a legacy Applied flow with no generation markers only once", func() {
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{Generation: 2},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{{Name: "step1", Priority: 1}},
+					},
+				},
+			},
+			Status: baseboardv1alpha1.BMCSettingsStatus{
+				State: baseboardv1alpha1.BMCSettingsStateApplied,
+				FlowState: []baseboardv1alpha1.BMCSettingsFlowStatus{
+					{Name: "step1", Priority: 1, State: baseboardv1alpha1.BMCSettingsFlowStateApplied},
+				},
+			},
+		}
+
+		r := &BMCSettingsReconciler{}
+		Expect(r.clearFlowStateOnGenerationChange(settings, &metav1.Condition{})).To(BeTrue())
+		Expect(settings.Status.FlowState).To(BeNil())
+		settings.Status.State = ""
+		settings.Status.ObservedGeneration = settings.Generation
+		Expect(r.clearFlowStateOnGenerationChange(settings, &metav1.Condition{})).To(BeFalse())
 	})
 })
 
