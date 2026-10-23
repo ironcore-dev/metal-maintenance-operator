@@ -5,11 +5,13 @@ package system
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
@@ -382,5 +384,125 @@ var _ = Describe("handleStuckScheduledJob", func() {
 		Expect(condition).NotTo(BeNil())
 		Expect(condition.Type).To(Equal(ConditionScheduledJobStuckPowerOnIssued))
 		Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+	})
+})
+
+// checkProgressDeadline is exercised directly (bypassing the manager/BMC mock
+// server) since it only touches fw.Spec/fw.Status and the k8s client - this
+// is a regression test for the bug where a FirmwareUpdate stuck retrying
+// forever in Pending or Completed (e.g. a BMC error that's silently retried)
+// never hit any deadline and left the server in Maintenance indefinitely in completed state.
+var _ = Describe("checkProgressDeadline", func() {
+	var (
+		r  *FirmwareUpdateReconciler
+		ns *v1.Namespace
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		r = &FirmwareUpdateReconciler{
+			Client:     k8sClient,
+			Conditions: conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
+		}
+
+		ns = &v1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+	})
+
+	AfterEach(func(ctx SpecContext) {
+		Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+	})
+
+	// newFirmwareUpdate creates a FirmwareUpdate with the given
+	// ProgressDeadlineSeconds and persists the given Status (via a Status
+	// subresource update) before returning it. ProgressDeadlineSeconds must be
+	// set at Create time (a plain Spec field, not persisted again afterwards)
+	// and Status must be persisted via its own Update call, since
+	// checkProgressDeadline (via updateStatus) computes its patch from a fresh
+	// DeepCopy of the passed object and the API server's response overwrites
+	// the in-memory object with whatever is actually stored - any Status field
+	// set only in memory beforehand would otherwise be silently lost.
+	newFirmwareUpdate := func(ctx SpecContext, progressDeadlineSeconds *int32, status systemv1alpha1.FirmwareUpdateStatus) *systemv1alpha1.FirmwareUpdate {
+		fw := &systemv1alpha1.FirmwareUpdate{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+				Namespace:    ns.Name,
+			},
+			Spec: systemv1alpha1.FirmwareUpdateSpec{
+				ServerRef:               &v1.LocalObjectReference{Name: "does-not-matter"},
+				ProgressDeadlineSeconds: progressDeadlineSeconds,
+			},
+		}
+		Expect(k8sClient.Create(ctx, fw)).To(Succeed())
+		fw.Status = status
+		Expect(k8sClient.Status().Update(ctx, fw)).To(Succeed())
+		return fw
+	}
+
+	for _, state := range []systemv1alpha1.FirmwareUpdateState{
+		systemv1alpha1.FirmwareUpdateStatePending,
+		systemv1alpha1.FirmwareUpdateStateCompleted,
+		systemv1alpha1.FirmwareUpdateStateInProgress,
+	} {
+		It(fmt.Sprintf("transitions a FirmwareUpdate stuck in %s to Failed once the deadline is exceeded", state), func(ctx SpecContext) {
+			stuckSince := metav1.NewTime(time.Now().Add(-2 * time.Minute))
+			maintenanceRef := &metalv1alpha1.ObjectReference{Namespace: ns.Name, Name: "some-maintenance"}
+			fw := newFirmwareUpdate(ctx, new(int32(60)), systemv1alpha1.FirmwareUpdateStatus{
+				State:                state,
+				LastProgressTime:     &stuckSince,
+				ServerMaintenanceRef: maintenanceRef,
+			})
+
+			exceeded, err := r.checkProgressDeadline(ctx, fw)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exceeded).To(BeTrue())
+			Expect(fw.Status.State).To(Equal(systemv1alpha1.FirmwareUpdateStateFailed))
+			Expect(fw.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", constants.ConditionProgressDeadlineExceeded),
+				HaveField("Status", metav1.ConditionTrue),
+			)))
+
+			// checkProgressDeadline must never touch ServerMaintenanceRef: keeping
+			// the server in Maintenance once permanently Failed is deliberate (a
+			// human should investigate before the server rejoins the pool).
+			Expect(fw.Status.ServerMaintenanceRef).To(Equal(maintenanceRef))
+		})
+	}
+
+	It("does nothing while the deadline has not yet elapsed", func(ctx SpecContext) {
+		recentProgress := metav1.NewTime(time.Now().Add(-time.Second))
+		fw := newFirmwareUpdate(ctx, new(int32(3600)), systemv1alpha1.FirmwareUpdateStatus{
+			State:            systemv1alpha1.FirmwareUpdateStateCompleted,
+			LastProgressTime: &recentProgress,
+		})
+
+		exceeded, err := r.checkProgressDeadline(ctx, fw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exceeded).To(BeFalse())
+		Expect(fw.Status.State).To(Equal(systemv1alpha1.FirmwareUpdateStateCompleted))
+	})
+
+	It("does nothing when ProgressDeadlineSeconds is unset", func(ctx SpecContext) {
+		stuckSince := metav1.NewTime(time.Now().Add(-24 * time.Hour))
+		fw := &systemv1alpha1.FirmwareUpdate{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: "unpersisted"},
+			Status: systemv1alpha1.FirmwareUpdateStatus{
+				State:            systemv1alpha1.FirmwareUpdateStateCompleted,
+				LastProgressTime: &stuckSince,
+			},
+		}
+
+		exceeded, err := r.checkProgressDeadline(ctx, fw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exceeded).To(BeFalse())
+	})
+
+	It("does nothing when LastProgressTime has never been set", func(ctx SpecContext) {
+		fw := newFirmwareUpdate(ctx, new(int32(1)), systemv1alpha1.FirmwareUpdateStatus{
+			State: systemv1alpha1.FirmwareUpdateStateCompleted,
+		})
+
+		exceeded, err := r.checkProgressDeadline(ctx, fw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exceeded).To(BeFalse())
 	})
 })

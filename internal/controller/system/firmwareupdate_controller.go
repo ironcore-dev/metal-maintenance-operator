@@ -249,9 +249,27 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 			log.V(1).Info("Removed retry annotation from FirmwareUpdate for retrying", "FirmwareUpdate", fw.Annotations)
 			return false, nil
 		}
-		return h.handlePending(ctx, fw, bmcClient, r, server)
+
+		// handlePending runs first so that any progress it records (e.g. a
+		// repository check actually completing) has a chance to bump
+		// fw.Status.LastProgressTime via patchProgress before checking deadline.
+		requeue, handleErr := h.handlePending(ctx, fw, bmcClient, r, server)
+		if exceeded, deadlineErr := r.checkProgressDeadline(ctx, fw); deadlineErr != nil || exceeded {
+			return false, errors.Join(handleErr, deadlineErr)
+		}
+		return requeue, handleErr
 	case systemv1alpha1.FirmwareUpdateStateCompleted:
-		return h.handleCompleted(ctx, fw, bmcClient, r, server)
+		// handleCompleted runs first so that any progress it records (e.g. the
+		// periodic drift-recheck actually completing) has a chance to bump
+		// fw.Status.LastProgressTime via patchProgress before checking deadline.
+		// This guards against the periodic repository recheck getting stuck
+		// (e.g. a BMC error it keeps retrying forever) and leaving the server
+		// in Maintenance indefinitely.
+		requeue, handleErr := h.handleCompleted(ctx, fw, bmcClient, r, server)
+		if exceeded, deadlineErr := r.checkProgressDeadline(ctx, fw); deadlineErr != nil || exceeded {
+			return false, errors.Join(handleErr, deadlineErr)
+		}
+		return requeue, handleErr
 	case systemv1alpha1.FirmwareUpdateStateInProgress:
 		// handleInProgress runs first so that any recovery action it takes
 		// (e.g. the Dell handler's stuck-scheduled-job PowerOn) has a chance
