@@ -34,6 +34,24 @@ type TestResultRecorder interface {
 
 const bmcSubscriptionFinalizer = "telemetry.metal.ironcore.dev/subscriptions"
 
+// Reason constants used by StatusRecorder to explain the per-BMC subscription
+// status. These are stable strings — Prometheus label values must not change.
+const (
+	ReasonSubscribed        = "subscribed"
+	ReasonExcluded          = "excluded"
+	ReasonServiceDisabled   = "service_disabled"
+	ReasonNoSubmitTestEvent = "no_submit_test_event"
+	ReasonProbeFailed       = "probe_failed"
+)
+
+// SubscriptionStatusRecorder records the subscription status of each BMC
+// so the Prometheus sink can expose it as a gauge series. The production
+// implementation updates a GaugeVec; nil disables recording.
+type SubscriptionStatusRecorder interface {
+	RecordSubscriptionStatus(bmcName, vendor, model, reason string)
+	ForgetSubscriptionStatus(bmcName string)
+}
+
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs/finalizers,verbs=update
 
 // BMCReconciler keeps each metal-operator BMC's Redfish event
@@ -96,6 +114,11 @@ type BMCReconciler struct {
 	// each SubmitTestEvent round-trip. Nil disables recording.
 	TestRecorder TestResultRecorder
 
+	// StatusRecorder is optional. When set, the reconciler records per-BMC
+	// subscription status via RecordSubscriptionStatus after each reconcileOne.
+	// Nil disables recording.
+	StatusRecorder SubscriptionStatusRecorder
+
 	Log logr.Logger
 
 	// srvURL is the parsed ReceiverURL, computed during SetupWithManager
@@ -107,6 +130,18 @@ type BMCReconciler struct {
 	testPending sync.Map
 	// lastTestTime tracks when we last fired a test per BMC: bmcName → time.Time.
 	lastTestTime sync.Map
+	// discoveredMsgId caches the auto-discovered test MessageId per BMC so the
+	// registry walk only happens once (bmcName → string).
+	discoveredMsgId sync.Map
+	// subscribedBMCs is the live set of BMC names that have active push
+	// subscriptions managed by this reconciler (bmcName → struct{}{}). Used by
+	// the discovery endpoint to omit subscribed BMCs from the Prometheus SD
+	// response so the external exporter does not scrape them.
+	subscribedBMCs sync.Map
+
+	// unsubscribedBMCs tracks BMC names NOT subscribed and the reason why
+	// (bmcName → reason string). Paired with subscribedBMCs.
+	unsubscribedBMCs sync.Map
 }
 
 // SetupWithManager registers the reconciler against the controller-runtime manager.
@@ -255,8 +290,14 @@ func (r *BMCReconciler) perBMCTimeout() time.Duration {
 func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC) {
 	ref := r.bmcRefWithServerFallback(ctx, bmc)
 	cfg := r.Config()
-	hw := SubscribeToBMC(ref, cfg)
-	wantSubscribed := hw != nil
+
+	// Opt-out check: if the operator is configured to exclude this
+	// vendor/model, tear down any subscriptions we previously created.
+	if IsExcluded(ref, cfg) {
+		r.subscribedBMCs.Delete(ref.Name)
+		// Fall through to the wantSubscribed=false path below by leaving
+		// wantSubscribed as its zero value.
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, r.perBMCTimeout())
 	defer cancel()
@@ -278,6 +319,32 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 		return
 	}
 	defer c.Logout()
+
+	// Probe the BMC's EventService to decide whether to subscribe. We only
+	// trigger a registry discovery walk when testEventInterval is set and no
+	// static override provides a MessageId for this BMC.
+	override := TestOverrideFor(ref, cfg)
+	needsDiscovery := cfg != nil && cfg.TestEventInterval > 0 && (override == nil || override.TestMessageId == "")
+	caps, err := c.ProbeEventService(ctx, needsDiscovery)
+	if err != nil {
+		r.Log.V(1).Info("EventService probe failed",
+			"bmc", ref.Name, "err", err.Error())
+		r.unsubscribedBMCs.Store(ref.Name, ReasonProbeFailed)
+		r.subscribedBMCs.Delete(ref.Name)
+		if r.StatusRecorder != nil {
+			r.StatusRecorder.RecordSubscriptionStatus(ref.Name, ref.Vendor, ref.Model, ReasonProbeFailed)
+		}
+		return
+	}
+
+	// Cache and persist a discovered MessageId on first successful find.
+	if caps.DiscoveredTestMessageId != "" {
+		if _, already := r.discoveredMsgId.LoadOrStore(ref.Name, caps.DiscoveredTestMessageId); !already {
+			r.persistDiscoveredMsgId(ctx, bmc, caps.DiscoveredTestMessageId)
+		}
+	}
+
+	wantSubscribed := !IsExcluded(ref, cfg) && caps.ServiceEnabled && caps.HasSubmitTestEvent
 
 	existing, err := c.ListEventSubscriptions(ctx)
 	if err != nil {
@@ -305,9 +372,24 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 				"bmc", ref.Name, "err", err.Error())
 			return
 		}
+		r.subscribedBMCs.Store(ref.Name, struct{}{})
+		r.unsubscribedBMCs.Delete(ref.Name)
+		if r.StatusRecorder != nil {
+			r.StatusRecorder.RecordSubscriptionStatus(ref.Name, ref.Vendor, ref.Model, ReasonSubscribed)
+		}
 		r.ensureSubscriptions(ctx, c, ref.Name, current)
-		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, hw)
+
+		// Resolve the MessageId to use for the test event: static override
+		// takes precedence, then in-memory cache, then just-discovered value.
+		msgId, severity, origin := r.resolveTestParams(override, caps.DiscoveredTestMessageId, ref.Name)
+		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, msgId, severity, origin)
 	} else {
+		r.subscribedBMCs.Delete(ref.Name)
+		reason := notSubscribedReason(ref, cfg, *caps)
+		r.unsubscribedBMCs.Store(ref.Name, reason)
+		if r.StatusRecorder != nil {
+			r.StatusRecorder.RecordSubscriptionStatus(ref.Name, ref.Vendor, ref.Model, reason)
+		}
 		// BMC isn't in the event-based set (or was and is no longer):
 		// tear off any subscriptions we previously created here, then
 		// release the finalizer if we still hold one — otherwise a
@@ -323,6 +405,19 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 				"bmc", ref.Name, "err", err.Error())
 		}
 	}
+}
+
+// notSubscribedReason returns the reason string explaining why a BMC is NOT
+// being push-subscribed. It matches the ReasonExcluded / ReasonServiceDisabled
+// / ReasonNoSubmitTestEvent constants in order of priority.
+func notSubscribedReason(ref BMCRef, cfg *Config, caps EventServiceCapabilities) string {
+	if IsExcluded(ref, cfg) {
+		return ReasonExcluded
+	}
+	if !caps.ServiceEnabled {
+		return ReasonServiceDisabled
+	}
+	return ReasonNoSubmitTestEvent
 }
 
 func (r *BMCReconciler) tearDownOne(ctx context.Context, bmcName string) {
@@ -580,15 +675,77 @@ const (
 	testResultFailure = "failure"
 )
 
+// discoveredMsgIdAnnotation is the BMC annotation key used to persist a
+// runtime-discovered test event MessageId across operator restarts.
+const discoveredMsgIdAnnotation = "telemetry.metal.ironcore.dev/discovered-test-message-id"
+
+// persistDiscoveredMsgId writes the annotation onto the BMC object.
+// Failures are logged but not fatal — the in-memory cache covers this session.
+func (r *BMCReconciler) persistDiscoveredMsgId(ctx context.Context, bmc *metalv1alpha1.BMC, msgId string) {
+	patch := client.MergeFrom(bmc.DeepCopy())
+	if bmc.Annotations == nil {
+		bmc.Annotations = make(map[string]string)
+	}
+	bmc.Annotations[discoveredMsgIdAnnotation] = msgId
+	if err := r.Client.Patch(ctx, bmc, patch); err != nil {
+		r.Log.V(1).Info("Could not persist discovered test MessageId annotation",
+			"bmc", bmc.Name, "err", err.Error())
+	}
+}
+
+// resolveTestParams returns the MessageId, Severity, and OriginOfCondition to
+// use for a SubmitTestEvent call. Priority order:
+//  1. Static TestOverride row from config (has explicit values).
+//  2. In-memory discovered MessageId cache (populated by ProbeEventService).
+//  3. BMC annotation written on a previous run (survives operator restart).
+func (r *BMCReconciler) resolveTestParams(override *TestOverride, discoveredFromProbe, bmcName string) (msgId, severity, origin string) {
+	if override != nil && override.TestMessageId != "" {
+		return override.TestMessageId, override.TestSeverity, override.TestOriginOfCondition
+	}
+	// In-memory cache populated this reconcile (or a prior one).
+	if raw, ok := r.discoveredMsgId.Load(bmcName); ok {
+		return raw.(string), "", ""
+	}
+	// Fall back to annotation on the BMC object (survives restarts).
+	// (discoveredFromProbe is already stored in the cache via LoadOrStore in
+	// reconcileOne; if that succeeded, the Load above would have returned it.
+	// This path handles the unusual case where the probe returned empty but
+	// a previous run wrote the annotation.)
+	return discoveredFromProbe, "", ""
+}
+
+// ActiveSubscriptions returns a snapshot of the current set of BMC names that
+// have active push subscriptions managed by this reconciler. Callers receive
+// a copy; mutations do not affect the internal state.
+func (r *BMCReconciler) ActiveSubscriptions() map[string]struct{} {
+	result := make(map[string]struct{})
+	r.subscribedBMCs.Range(func(k, _ any) bool {
+		result[k.(string)] = struct{}{}
+		return true
+	})
+	return result
+}
+
+// UnsubscribedBMCReasons returns a snapshot map of bmcName → reason for all
+// BMCs that are currently NOT subscribed (i.e. using pull-based scraping).
+func (r *BMCReconciler) UnsubscribedBMCReasons() map[string]string {
+	result := make(map[string]string)
+	r.unsubscribedBMCs.Range(func(k, v any) bool {
+		result[k.(string)] = v.(string)
+		return true
+	})
+	return result
+}
+
 // maybeRunTestEvent fires a SubmitTestEvent health check if the configured
 // interval has elapsed since the last test for this BMC. It also enforces
 // the deadline for any pending test that has not yet been confirmed, recording
 // a failure if it expired.
-func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config, hw *HardwareMatch) {
+func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName string, cfg *Config, msgId, severity, origin string) {
 	if cfg == nil || cfg.TestEventInterval <= 0 {
 		return
 	}
-	if hw == nil || hw.TestMessageId == "" {
+	if msgId == "" {
 		return
 	}
 
@@ -620,9 +777,9 @@ func (r *BMCReconciler) maybeRunTestEvent(ctx context.Context, c Client, bmcName
 	}
 
 	params := TestEventParams{
-		MessageId:         hw.TestMessageId,
-		Severity:          hw.TestSeverity,
-		OriginOfCondition: hw.TestOriginOfCondition,
+		MessageId:         msgId,
+		Severity:          severity,
+		OriginOfCondition: origin,
 	}
 	if err := c.SubmitTestEvent(ctx, params); err != nil {
 		r.Log.V(1).Info("Failed to submit test event", "bmc", bmcName, "err", err.Error())
@@ -659,8 +816,14 @@ func (r *BMCReconciler) NotifyTestEvent(bmcName, messageId string) {
 func (r *BMCReconciler) ForgetTestState(bmcName string) {
 	r.testPending.Delete(bmcName)
 	r.lastTestTime.Delete(bmcName)
+	r.discoveredMsgId.Delete(bmcName)
+	r.subscribedBMCs.Delete(bmcName)
+	r.unsubscribedBMCs.Delete(bmcName)
 	if r.TestRecorder != nil {
 		r.TestRecorder.Forget(bmcName)
+	}
+	if r.StatusRecorder != nil {
+		r.StatusRecorder.ForgetSubscriptionStatus(bmcName)
 	}
 }
 

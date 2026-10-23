@@ -17,8 +17,12 @@ data:
     {{- with .Values.telemetry.config.testEventTimeout }}
     testEventTimeout: {{ . }}
     {{- end }}
-    {{- if .Values.telemetry.config.eventBasedHardware }}
-    eventBasedHardware:
-{{ .Values.telemetry.config.eventBasedHardware | toYaml | indent 6 }}
+    {{- if .Values.telemetry.config.excludeHardware }}
+    excludeHardware:
+{{ .Values.telemetry.config.excludeHardware | toYaml | indent 6 }}
+    {{- end }}
+    {{- if .Values.telemetry.config.testEventOverrides }}
+    testEventOverrides:
+{{ .Values.telemetry.config.testEventOverrides | toYaml | indent 6 }}
     {{- end }}
 {{- end }}
