@@ -558,6 +558,11 @@ func main() {
 			os.Exit(1)
 		}
 
+		if err = webhookbaseboardv1alpha1.SetupBMCSettingsSetWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BMCSettingsSet webhook")
+			os.Exit(1)
+		}
+
 		if err = webhookbaseboardv1alpha1.SetupBMCVersionWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BMCVersion webhook")
 			os.Exit(1)
@@ -578,7 +583,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-
 	if err = (&baseboardctrl.BMCUserReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),

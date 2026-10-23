@@ -269,5 +269,119 @@ var _ = Describe("BMCSettings Webhook", func() {
 				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
 			})).Should(Succeed())
 		})
+
+		It("should deny creation when a fieldRef uses Go struct capitalisation", func(ctx SpecContext) {
+			By("Creating a BMCSettings with spec.BMCRef.name (wrong casing)")
+			bad := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "test-bad-casing-"},
+				Spec: baseboardv1alpha1.BMCSettingsSpec{
+					BMCRef: &v1.LocalObjectReference{Name: "foo2"},
+					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "1.0",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+							Variables: []api.Variable{
+								{
+									Key: "BmcName",
+									ValueFrom: &api.VariableSourceValueFrom{
+										FieldRef: &api.FieldRefSelector{
+											FieldPath: "spec.BMCRef.name",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bad)).To(
+				MatchError(ContainSubstring("uses a Go struct field name")),
+			)
+		})
+
+		It("should deny creation when an objectFieldRef uses Go struct capitalisation", func(ctx SpecContext) {
+			By("Creating a BMCSettings with objectFieldRef.fieldPath spec.BMCRef.name (wrong casing)")
+			bad := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "test-bad-casing-obj-"},
+				Spec: baseboardv1alpha1.BMCSettingsSpec{
+					BMCRef: &v1.LocalObjectReference{Name: "foo2b"},
+					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "1.0",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+							Variables: []api.Variable{
+								{
+									Key: "BmcName",
+									ValueFrom: &api.VariableSourceValueFrom{
+										ObjectFieldRef: &api.ObjectFieldRefSelector{
+											Kind:      "BMC",
+											Name:      "some-bmc",
+											FieldPath: "spec.BMCRef.name",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bad)).To(
+				MatchError(ContainSubstring("uses a Go struct field name")),
+			)
+		})
+
+		It("should allow creation when a fieldRef segment is lowercase-initial despite inner uppercase", func(ctx SpecContext) {
+			By("Creating a BMCSettings with spec.bmcREF.name (lowercase-initial, passes admission)")
+			bad := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "test-bad-casing2-"},
+				Spec: baseboardv1alpha1.BMCSettingsSpec{
+					BMCRef: &v1.LocalObjectReference{Name: "foo3"},
+					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "1.0",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+							Variables: []api.Variable{
+								{
+									Key: "BmcName",
+									ValueFrom: &api.VariableSourceValueFrom{
+										FieldRef: &api.FieldRefSelector{
+											FieldPath: "spec.bmcREF.name",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bad)).To(Succeed())
+		})
+
+		It("should allow creation when fieldRef uses correct JSON casing", func(ctx SpecContext) {
+			By("Creating a BMCSettings with spec.bmcRef.name (correct casing)")
+			good := &baseboardv1alpha1.BMCSettings{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "test-good-casing-"},
+				Spec: baseboardv1alpha1.BMCSettingsSpec{
+					BMCRef: &v1.LocalObjectReference{Name: "foo4"},
+					BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+						SettingsTemplate: api.SettingsTemplate{
+							Version:                 "1.0",
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+							Variables: []api.Variable{
+								{
+									Key: "BmcName",
+									ValueFrom: &api.VariableSourceValueFrom{
+										FieldRef: &api.FieldRefSelector{
+											FieldPath: "spec.bmcRef.name",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, good)).To(Succeed())
+		})
 	})
 })

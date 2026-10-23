@@ -73,6 +73,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-baseboard-metal-ironcore-dev-v1alpha1-bmcsettingsset
+  failurePolicy: Fail
+  name: vbmcsettingsset-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - baseboard.metal.ironcore.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - bmcsettingssets
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-baseboard-metal-ironcore-dev-v1alpha1-bmcversion
   failurePolicy: Fail
   name: vbmcversion-v1alpha1.kb.io

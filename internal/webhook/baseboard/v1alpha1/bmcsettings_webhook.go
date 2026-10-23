@@ -15,6 +15,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	webhookutils "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook"
@@ -45,6 +46,11 @@ type BMCSettingsValidator struct {
 // ValidateCreate implements admission.Validator so a webhook will be registered for the type BMCSettings.
 func (v *BMCSettingsValidator) ValidateCreate(ctx context.Context, obj *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	bmcsettingslog.Info("Validation for BMCSettings upon creation", "name", obj.GetName())
+	if errs := validateVariableFieldPaths(obj.Spec.Variables, field.NewPath("spec", "variables")); len(errs) > 0 {
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: obj.GroupVersionKind().Group, Kind: obj.Kind},
+			obj.GetName(), errs)
+	}
 	bmcSettingsList := &baseboardv1alpha1.BMCSettingsList{}
 	if err := v.Client.List(ctx, bmcSettingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCSettings: %w", err)
@@ -75,6 +81,11 @@ func (v *BMCSettingsValidator) ValidateUpdate(ctx context.Context, oldObj, newOb
 		}
 	}
 
+	if errs := validateVariableFieldPaths(newObj.Spec.Variables, field.NewPath("spec", "variables")); len(errs) > 0 {
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: newObj.GroupVersionKind().Group, Kind: newObj.Kind},
+			newObj.GetName(), errs)
+	}
 	bmcSettingsList := &baseboardv1alpha1.BMCSettingsList{}
 	if err := v.Client.List(ctx, bmcSettingsList); err != nil {
 		return nil, fmt.Errorf("failed to list BMCSettings: %w", err)
@@ -127,4 +138,30 @@ func checkForDuplicateBMCSettingsRefToBMC(settingsList *baseboardv1alpha1.BMCSet
 		}
 	}
 	return nil, nil
+}
+
+// validateVariableFieldPaths rejects field paths whose segments start with an uppercase
+// letter. Structural casing check only — does not resolve the path against the object,
+// so it is safe for create requests and paths containing $(VAR) substitutions.
+func validateVariableFieldPaths(variables []api.Variable, fp *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	for i, v := range variables {
+		if v.ValueFrom == nil {
+			continue
+		}
+		vfp := fp.Index(i).Child("valueFrom")
+		if ref := v.ValueFrom.FieldRef; ref != nil {
+			if err := utils.ValidateFieldPathCasing(ref.FieldPath); err != nil {
+				errs = append(errs, field.Invalid(
+					vfp.Child("fieldRef", "fieldPath"), ref.FieldPath, err.Error()))
+			}
+		}
+		if ref := v.ValueFrom.ObjectFieldRef; ref != nil {
+			if err := utils.ValidateFieldPathCasing(ref.FieldPath); err != nil {
+				errs = append(errs, field.Invalid(
+					vfp.Child("objectFieldRef", "fieldPath"), ref.FieldPath, err.Error()))
+			}
+		}
+	}
+	return errs
 }
