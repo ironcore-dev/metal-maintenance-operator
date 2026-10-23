@@ -67,6 +67,11 @@ type Options struct {
 	// Prometheus SD endpoint omits subscribed BMCs.
 	// This field is an output; callers must not set it before calling AddTo.
 	ActiveSubscriptions func() map[string]struct{}
+
+	// UnsubscribedBMCReasons is populated by AddTo with a function that
+	// returns a map of bmcName → reason for BMCs not push-subscribed.
+	// This field is an output; callers must not set it before calling AddTo.
+	UnsubscribedBMCReasons func() map[string]string
 }
 
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;patch;watch
@@ -102,6 +107,10 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	testSink, err := promsink.NewTestEventSink(ctrlmetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("init test-event sink: %w", err)
+	}
+	statusSink, err := promsink.NewSubscriptionStatusSink(ctrlmetrics.Registry)
+	if err != nil {
+		return fmt.Errorf("init subscription status sink: %w", err)
 	}
 
 	var criticalHandler *criticalevent.ConditionHandler
@@ -192,6 +201,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		MetricReportSink: metricSink,
 		AlertHandler:     criticalHandler,
 		TestRecorder:     testSink,
+		StatusRecorder:   statusSink,
 		ReceiverURL:      opts.ReceiverURL,
 		SubscriberID:     opts.SubscriberID,
 		// ReconcileInterval and PerBMCTimeout intentionally unset:
@@ -207,6 +217,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	// Expose the live set of subscribed BMC names so callers can wire it into
 	// the discovery endpoint to omit push-subscribed BMCs from scrape targets.
 	opts.ActiveSubscriptions = subReconciler.ActiveSubscriptions
+	opts.UnsubscribedBMCReasons = subReconciler.UnsubscribedBMCReasons
 
 	// Wire the receiver's test notifier to the reconciler so round-trip
 	// confirmations update the health-check metric.

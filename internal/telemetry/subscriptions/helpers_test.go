@@ -128,8 +128,8 @@ func (c *fakeClient) ProbeEventService(_ context.Context, _ bool) (*subscription
 		return nil, c.probeErr
 	}
 	return &subscriptions.EventServiceCapabilities{
-		ServiceEnabled:     c.probeEnabled,
-		HasSubmitTestEvent: c.probeHasSubmit,
+		ServiceEnabled:          c.probeEnabled,
+		HasSubmitTestEvent:      c.probeHasSubmit,
 		DiscoveredTestMessageId: c.probeDiscovered,
 	}, nil
 }
@@ -382,7 +382,67 @@ func capableFakeClient() *fakeClient {
 	}
 }
 
-// newRec builds a fully-initialised BMCReconciler for unit tests.
+// fakeStatusRecorder records RecordSubscriptionStatus and ForgetSubscriptionStatus calls.
+type fakeStatusRecorder struct {
+	mu        sync.Mutex
+	statuses  []subscriptionStatus
+	forgotten []string
+}
+
+type subscriptionStatus struct {
+	bmcName string
+	vendor  string
+	model   string
+	reason  string
+}
+
+func (r *fakeStatusRecorder) RecordSubscriptionStatus(bmcName, vendor, model, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.statuses = append(r.statuses, subscriptionStatus{bmcName: bmcName, vendor: vendor, model: model, reason: reason})
+}
+
+func (r *fakeStatusRecorder) ForgetSubscriptionStatus(bmcName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.forgotten = append(r.forgotten, bmcName)
+}
+
+func (r *fakeStatusRecorder) snapshotStatuses() []subscriptionStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]subscriptionStatus, len(r.statuses))
+	copy(out, r.statuses)
+	return out
+}
+
+func (r *fakeStatusRecorder) snapshotForgottenStatuses() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.forgotten))
+	copy(out, r.forgotten)
+	return out
+}
+
+// newRecWithStatusRecorder builds a reconciler with a fakeStatusRecorder.
+func newRecWithStatusRecorder(t *testing.T, c client.Client, cfg *subscriptions.Config, res *fakeResolver, fac *fakeFactory, rec *fakeStatusRecorder) *subscriptions.BMCReconciler {
+	t.Helper()
+	r := &subscriptions.BMCReconciler{
+		Client:            c,
+		Config:            func() *subscriptions.Config { return cfg },
+		Resolver:          res,
+		Factory:           fac,
+		ReceiverURL:       testReceiverURL,
+		ReconcileInterval: time.Hour,
+		PerBMCTimeout:     time.Second,
+		StatusRecorder:    rec,
+	}
+	if err := subscriptions.InitForTest(r); err != nil {
+		t.Fatalf("InitForTest: %v", err)
+	}
+	return r
+}
+
 // ReconcileInterval is set to time.Hour by default so a successful
 // reconcile's RequeueAfter doesn't drive surprise re-runs in tests.
 func newRec(t *testing.T, c client.Client, cfg *subscriptions.Config, res *fakeResolver, fac *fakeFactory) *subscriptions.BMCReconciler {

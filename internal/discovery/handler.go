@@ -46,6 +46,11 @@ type Handler struct {
 	Client         client.Client
 	Log            logr.Logger
 	SubscribedBMCs func() map[string]struct{}
+
+	// UnsubscribedBMCReasons is optional. When set, it is called on each request
+	// to obtain a map of bmcName → reason for BMCs not push-subscribed. The reason
+	// is added as __meta_bmc_subscription_reason label on each SD target.
+	UnsubscribedBMCReasons func() map[string]string
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -67,7 +72,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		subscribed = h.SubscribedBMCs()
 	}
 
-	targets := Render(list.Items, subscribed)
+	var reasons map[string]string
+	if h.UnsubscribedBMCReasons != nil {
+		reasons = h.UnsubscribedBMCReasons()
+	}
+
+	targets := Render(list.Items, subscribed, reasons)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(targets); err != nil {
@@ -78,9 +88,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Render projects the BMC list onto Prometheus SD targets.
 // subscribed is the optional set of BMC names to exclude (those with active
 // push subscriptions that the external exporter should not scrape).
+// reasons is the optional map of bmcName → subscription reason for BMCs
+// that are not push-subscribed; the reason is added as a label on each target.
 // Extracted from ServeHTTP so the contract is unit-testable without an
 // HTTP server.
-func Render(bmcs []metalv1alpha1.BMC, subscribed map[string]struct{}) []Target {
+func Render(bmcs []metalv1alpha1.BMC, subscribed map[string]struct{}, reasons map[string]string) []Target {
 	out := make([]Target, 0, len(bmcs))
 	for i := range bmcs {
 		b := &bmcs[i]
@@ -95,7 +107,7 @@ func Render(bmcs []metalv1alpha1.BMC, subscribed map[string]struct{}) []Target {
 		}
 		out = append(out, Target{
 			Targets: []string{hostPort(b)},
-			Labels:  labelsFor(b),
+			Labels:  labelsFor(b, reasons[b.Name]),
 		})
 	}
 	return out
@@ -110,7 +122,7 @@ func hostPort(b *metalv1alpha1.BMC) string {
 }
 
 // labelsFor builds the Prometheus meta-labels for one BMC.
-func labelsFor(b *metalv1alpha1.BMC) map[string]string {
+func labelsFor(b *metalv1alpha1.BMC, subscriptionReason string) map[string]string {
 	labels := map[string]string{
 		"__meta_bmc_name":      b.Name,
 		"__meta_bmc_namespace": b.Namespace,
@@ -135,6 +147,9 @@ func labelsFor(b *metalv1alpha1.BMC) map[string]string {
 	if name := b.Spec.BMCSecretRef.Name; name != "" {
 		labels["__meta_bmc_secret_name"] = name
 		labels["__meta_bmc_secret_namespace"] = b.Namespace
+	}
+	if subscriptionReason != "" {
+		labels["__meta_bmc_subscription_reason"] = subscriptionReason
 	}
 	return labels
 }

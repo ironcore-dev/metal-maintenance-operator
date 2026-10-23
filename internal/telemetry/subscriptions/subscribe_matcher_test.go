@@ -102,7 +102,7 @@ func TestIsExcluded_SpecificModel_MatchesExact(t *testing.T) {
 	}{
 		{"PowerEdge R650", true},
 		{modelPowerEdgeR750, true},
-		{"powerEDGE r650", true},    // case-insensitive
+		{"powerEDGE r650", true},     // case-insensitive
 		{"  PowerEdge R650  ", true}, // whitespace tolerant
 		{"PowerEdge R840", false},    // not in list
 		{modelR650, false},           // partial match → no

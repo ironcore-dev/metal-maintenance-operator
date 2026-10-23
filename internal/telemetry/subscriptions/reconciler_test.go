@@ -913,3 +913,157 @@ func TestForgetTestState_ClearsAndCallsRecorderForget(t *testing.T) {
 		t.Errorf("after ForgetTestState, NotifyTestEvent should be a no-op, got %+v", results)
 	}
 }
+
+// -- StatusRecorder / reason constants --
+
+func TestStatusRecorder_ReasonSubscribed(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := capableFakeClient()
+	rec := &fakeStatusRecorder{}
+	r := newRecWithStatusRecorder(t, c, dellVendorMatch(), res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	statuses := rec.snapshotStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("expected at least one status recording")
+	}
+	last := statuses[len(statuses)-1]
+	if last.reason != subscriptions.ReasonSubscribed {
+		t.Errorf("reason: got %q, want %q", last.reason, subscriptions.ReasonSubscribed)
+	}
+	if last.bmcName != testBMCName {
+		t.Errorf("bmcName: got %q, want %q", last.bmcName, testBMCName)
+	}
+}
+
+func TestStatusRecorder_ReasonExcluded(t *testing.T) {
+	// Use a Lenovo BMC — dellVendorMatch() only covers Dell, so Lenovo is excluded.
+	c := newClientWith(t, bmcObject(testBMCName, "Lenovo", ""))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	rec := &fakeStatusRecorder{}
+	// Config explicitly excludes Lenovo.
+	cfg := &subscriptions.Config{
+		ExcludeHardware: []subscriptions.ExcludeRule{{Vendor: "Lenovo", Models: []string{"*"}}},
+	}
+	r := newRecWithStatusRecorder(t, c, cfg, res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	statuses := rec.snapshotStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("expected at least one status recording")
+	}
+	last := statuses[len(statuses)-1]
+	if last.reason != subscriptions.ReasonExcluded {
+		t.Errorf("reason: got %q, want %q", last.reason, subscriptions.ReasonExcluded)
+	}
+}
+
+func TestStatusRecorder_ReasonServiceDisabled(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	// ServiceEnabled=false → ReasonServiceDisabled.
+	fc := &fakeClient{probeEnabled: false, probeHasSubmit: false}
+	rec := &fakeStatusRecorder{}
+	r := newRecWithStatusRecorder(t, c, dellVendorMatch(), res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	statuses := rec.snapshotStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("expected at least one status recording")
+	}
+	last := statuses[len(statuses)-1]
+	if last.reason != subscriptions.ReasonServiceDisabled {
+		t.Errorf("reason: got %q, want %q", last.reason, subscriptions.ReasonServiceDisabled)
+	}
+}
+
+func TestStatusRecorder_ReasonNoSubmitTestEvent(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	// ServiceEnabled=true but HasSubmitTestEvent=false → ReasonNoSubmitTestEvent.
+	fc := &fakeClient{probeEnabled: true, probeHasSubmit: false}
+	rec := &fakeStatusRecorder{}
+	r := newRecWithStatusRecorder(t, c, dellVendorMatch(), res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	statuses := rec.snapshotStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("expected at least one status recording")
+	}
+	last := statuses[len(statuses)-1]
+	if last.reason != subscriptions.ReasonNoSubmitTestEvent {
+		t.Errorf("reason: got %q, want %q", last.reason, subscriptions.ReasonNoSubmitTestEvent)
+	}
+}
+
+func TestStatusRecorder_ReasonProbeFailed(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := capableFakeClient()
+	fc.probeErr = errors.New("connection refused")
+	rec := &fakeStatusRecorder{}
+	r := newRecWithStatusRecorder(t, c, dellVendorMatch(), res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	statuses := rec.snapshotStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("expected at least one status recording for probe failure")
+	}
+	last := statuses[len(statuses)-1]
+	if last.reason != subscriptions.ReasonProbeFailed {
+		t.Errorf("reason: got %q, want %q", last.reason, subscriptions.ReasonProbeFailed)
+	}
+}
+
+func TestStatusRecorder_ForgetCalledOnForgetTestState(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := capableFakeClient()
+	rec := &fakeStatusRecorder{}
+	r := newRecWithStatusRecorder(t, c, dellVendorMatch(), res, &fakeFactory{client: fc}, rec)
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	r.ForgetTestState(testBMCName)
+
+	if forgotten := rec.snapshotForgottenStatuses(); len(forgotten) == 0 || forgotten[0] != testBMCName {
+		t.Errorf("ForgetTestState should call StatusRecorder.ForgetSubscriptionStatus(%q), got %v", testBMCName, forgotten)
+	}
+}
+
+func TestUnsubscribedBMCReasons_PopulatedAfterReconcile(t *testing.T) {
+	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	// ServiceEnabled=false so BMC is unsubscribed.
+	fc := &fakeClient{probeEnabled: false, probeHasSubmit: false}
+	r := newRec(t, c, dellVendorMatch(), res, &fakeFactory{client: fc})
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	reasons := r.UnsubscribedBMCReasons()
+	if reasons[testBMCName] == "" {
+		t.Errorf("expected a reason for %q, got empty map %v", testBMCName, reasons)
+	}
+}

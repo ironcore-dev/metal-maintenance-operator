@@ -34,6 +34,24 @@ type TestResultRecorder interface {
 
 const bmcSubscriptionFinalizer = "telemetry.metal.ironcore.dev/subscriptions"
 
+// Reason constants used by StatusRecorder to explain the per-BMC subscription
+// status. These are stable strings — Prometheus label values must not change.
+const (
+	ReasonSubscribed        = "subscribed"
+	ReasonExcluded          = "excluded"
+	ReasonServiceDisabled   = "service_disabled"
+	ReasonNoSubmitTestEvent = "no_submit_test_event"
+	ReasonProbeFailed       = "probe_failed"
+)
+
+// SubscriptionStatusRecorder records the subscription status of each BMC
+// so the Prometheus sink can expose it as a gauge series. The production
+// implementation updates a GaugeVec; nil disables recording.
+type SubscriptionStatusRecorder interface {
+	RecordSubscriptionStatus(bmcName, vendor, model, reason string)
+	ForgetSubscriptionStatus(bmcName string)
+}
+
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs/finalizers,verbs=update
 
 // BMCReconciler keeps each metal-operator BMC's Redfish event
@@ -96,6 +114,11 @@ type BMCReconciler struct {
 	// each SubmitTestEvent round-trip. Nil disables recording.
 	TestRecorder TestResultRecorder
 
+	// StatusRecorder is optional. When set, the reconciler records per-BMC
+	// subscription status via RecordSubscriptionStatus after each reconcileOne.
+	// Nil disables recording.
+	StatusRecorder SubscriptionStatusRecorder
+
 	Log logr.Logger
 
 	// srvURL is the parsed ReceiverURL, computed during SetupWithManager
@@ -115,6 +138,10 @@ type BMCReconciler struct {
 	// the discovery endpoint to omit subscribed BMCs from the Prometheus SD
 	// response so the external exporter does not scrape them.
 	subscribedBMCs sync.Map
+
+	// unsubscribedBMCs tracks BMC names NOT subscribed and the reason why
+	// (bmcName → reason string). Paired with subscribedBMCs.
+	unsubscribedBMCs sync.Map
 }
 
 // SetupWithManager registers the reconciler against the controller-runtime manager.
@@ -302,6 +329,11 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 	if err != nil {
 		r.Log.V(1).Info("EventService probe failed",
 			"bmc", ref.Name, "err", err.Error())
+		r.unsubscribedBMCs.Store(ref.Name, ReasonProbeFailed)
+		r.subscribedBMCs.Delete(ref.Name)
+		if r.StatusRecorder != nil {
+			r.StatusRecorder.RecordSubscriptionStatus(ref.Name, ref.Vendor, ref.Model, ReasonProbeFailed)
+		}
 		return
 	}
 
@@ -341,6 +373,10 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 			return
 		}
 		r.subscribedBMCs.Store(ref.Name, struct{}{})
+		r.unsubscribedBMCs.Delete(ref.Name)
+		if r.StatusRecorder != nil {
+			r.StatusRecorder.RecordSubscriptionStatus(ref.Name, ref.Vendor, ref.Model, ReasonSubscribed)
+		}
 		r.ensureSubscriptions(ctx, c, ref.Name, current)
 
 		// Resolve the MessageId to use for the test event: static override
@@ -349,6 +385,11 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 		r.maybeRunTestEvent(ctx, c, ref.Name, cfg, msgId, severity, origin)
 	} else {
 		r.subscribedBMCs.Delete(ref.Name)
+		reason := notSubscribedReason(ref, cfg, *caps)
+		r.unsubscribedBMCs.Store(ref.Name, reason)
+		if r.StatusRecorder != nil {
+			r.StatusRecorder.RecordSubscriptionStatus(ref.Name, ref.Vendor, ref.Model, reason)
+		}
 		// BMC isn't in the event-based set (or was and is no longer):
 		// tear off any subscriptions we previously created here, then
 		// release the finalizer if we still hold one — otherwise a
@@ -364,6 +405,19 @@ func (r *BMCReconciler) reconcileOne(ctx context.Context, bmc *metalv1alpha1.BMC
 				"bmc", ref.Name, "err", err.Error())
 		}
 	}
+}
+
+// notSubscribedReason returns the reason string explaining why a BMC is NOT
+// being push-subscribed. It matches the ReasonExcluded / ReasonServiceDisabled
+// / ReasonNoSubmitTestEvent constants in order of priority.
+func notSubscribedReason(ref BMCRef, cfg *Config, caps EventServiceCapabilities) string {
+	if IsExcluded(ref, cfg) {
+		return ReasonExcluded
+	}
+	if !caps.ServiceEnabled {
+		return ReasonServiceDisabled
+	}
+	return ReasonNoSubmitTestEvent
 }
 
 func (r *BMCReconciler) tearDownOne(ctx context.Context, bmcName string) {
@@ -672,6 +726,17 @@ func (r *BMCReconciler) ActiveSubscriptions() map[string]struct{} {
 	return result
 }
 
+// UnsubscribedBMCReasons returns a snapshot map of bmcName → reason for all
+// BMCs that are currently NOT subscribed (i.e. using pull-based scraping).
+func (r *BMCReconciler) UnsubscribedBMCReasons() map[string]string {
+	result := make(map[string]string)
+	r.unsubscribedBMCs.Range(func(k, v any) bool {
+		result[k.(string)] = v.(string)
+		return true
+	})
+	return result
+}
+
 // maybeRunTestEvent fires a SubmitTestEvent health check if the configured
 // interval has elapsed since the last test for this BMC. It also enforces
 // the deadline for any pending test that has not yet been confirmed, recording
@@ -753,8 +818,12 @@ func (r *BMCReconciler) ForgetTestState(bmcName string) {
 	r.lastTestTime.Delete(bmcName)
 	r.discoveredMsgId.Delete(bmcName)
 	r.subscribedBMCs.Delete(bmcName)
+	r.unsubscribedBMCs.Delete(bmcName)
 	if r.TestRecorder != nil {
 		r.TestRecorder.Forget(bmcName)
+	}
+	if r.StatusRecorder != nil {
+		r.StatusRecorder.ForgetSubscriptionStatus(bmcName)
 	}
 }
 

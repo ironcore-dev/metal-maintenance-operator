@@ -607,9 +607,10 @@ func main() {
 		// subscriptions so the exporter only scrapes what the push pipeline
 		// hasn't claimed.
 		sdHandler := &discovery.Handler{
-			Client:         mgr.GetClient(),
-			Log:            ctrl.Log.WithName("discovery"),
-			SubscribedBMCs: telemetryOpts.ActiveSubscriptions,
+			Client:                 mgr.GetClient(),
+			Log:                    ctrl.Log.WithName("discovery"),
+			SubscribedBMCs:         telemetryOpts.ActiveSubscriptions,
+			UnsubscribedBMCReasons: telemetryOpts.UnsubscribedBMCReasons,
 		}
 		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
 			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
