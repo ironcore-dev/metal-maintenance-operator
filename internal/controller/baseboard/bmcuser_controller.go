@@ -23,6 +23,7 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
@@ -38,19 +39,15 @@ const (
 	conditionTypeCredentialsBootstrapped = "CredentialsBootstrapped"
 	reasonCredentialsBootstrapped        = "CredentialsBootstrapped"
 	reasonCredentialsPending             = "CredentialsPending"
-)
 
-// passwordLength returns maxLen as int, falling back to r.DefaultPasswordLength
-// (or 20 if not configured) when the BMC firmware omits the field (value is zero).
-func (r *BMCUserReconciler) passwordLength(maxLen uint) int {
-	if maxLen != 0 {
-		return int(maxLen)
-	}
-	if r.DefaultPasswordLength > 0 {
-		return r.DefaultPasswordLength
-	}
-	return 20
-}
+	// conditionTypePasswordValid is False when a user-supplied password in the
+	// referenced BMCSecret violates the BMC's reported length limits. The controller
+	// skips applying such a password (the BMC would silently reject it) and surfaces
+	// the reason here instead of looping.
+	conditionTypePasswordValid = "PasswordValid"
+	reasonPasswordValid        = "PasswordValid"
+	reasonPasswordInvalid      = "PasswordInvalid"
+)
 
 // rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
 func (r *BMCUserReconciler) rotationFailureDelay() time.Duration {
@@ -171,6 +168,20 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
+		}
+		accountService, err := bmcClient.GetAccountService()
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
+		}
+		if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength); err != nil {
+			log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
+			if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
+				return ctrl.Result{}, condErr
+			}
+			return ctrl.Result{}, nil
+		}
+		if err := r.setPasswordValidCondition(ctx, user, true, ""); err != nil {
+			return ctrl.Result{}, err
 		}
 		if err = bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to create or update BMC account with new password: %w", err)
@@ -408,7 +419,11 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	if err != nil {
 		return fmt.Errorf("failed to get account service: %w", err)
 	}
-	newPassword, err := bmc.GenerateSecurePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), r.passwordLength(accountService.MaxPasswordLength))
+	fallback := r.DefaultPasswordLength
+	if fallback <= 0 {
+		fallback = 20
+	}
+	newPassword, err := utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
 	if err != nil {
 		return fmt.Errorf("failed to generate new password for BMC account %s: %w", user.Name, err)
 	}
@@ -424,6 +439,10 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 
 // handleUpdatedSecretRef applies the credentials from a newly referenced
 // BMCSecret to the BMC account and records the secret as the effective one.
+// It validates the new password against the BMC's reported length limits first;
+// on violation it records PasswordValid=False and returns without touching the
+// account, so an over-length password is surfaced instead of being silently
+// rejected by the BMC (see the create path in reconcile).
 func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcSecret *metalv1alpha1.BMCSecret, bmcClient bmc.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("BMCSecret credentials have changed, updating BMC user")
@@ -431,10 +450,18 @@ func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *ba
 	if err != nil {
 		return fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
 	}
+	accountService, err := bmcClient.GetAccountService()
+	if err != nil {
+		return fmt.Errorf("failed to get account service: %w", err)
+	}
+	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength); err != nil {
+		log.Info("Updated password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
+		return r.setPasswordValidCondition(ctx, user, false, err.Error())
+	}
 	if err := bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
 		return fmt.Errorf("failed to create or update BMC account with new password: %w", err)
 	}
-	return nil
+	return r.setPasswordValidCondition(ctx, user, true, "")
 }
 
 // createBMCSecretForUser builds a BMCSecret (owned by the BMCUser) populated
@@ -746,7 +773,11 @@ func (r *BMCUserReconciler) delete(ctx context.Context, user *baseboardv1alpha1.
 	defer bmcClient.Logout()
 
 	log.V(1).Info("Deleting BMC account for User")
-	if err := bmcClient.DeleteAccount(ctx, user.Spec.UserName, user.Status.ID); err != nil {
+	if user.Status.ID == "" {
+		// The account was never created on the BMC (e.g. the password was rejected
+		// before it could be applied), so there is nothing to delete.
+		log.V(1).Info("No BMC account recorded for User, skipping BMC account deletion")
+	} else if err := bmcClient.DeleteAccount(ctx, user.Spec.UserName, user.Status.ID); err != nil {
 		var httpErr *schemas.Error
 		if errors.As(err, &httpErr) && httpErr.HTTPReturnedStatusCode == 404 {
 			log.V(1).Info("BMC account not found, continuing finalizer removal")
@@ -868,6 +899,31 @@ func (r *BMCUserReconciler) pruneOldSecrets(ctx context.Context, user *baseboard
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// setPasswordValidCondition sets the PasswordValid condition on the BMCUser. message is
+// ignored when valid is true.
+func (r *BMCUserReconciler) setPasswordValidCondition(ctx context.Context, user *baseboardv1alpha1.BMCUser, valid bool, message string) error {
+	cond := metav1.Condition{
+		Type:               conditionTypePasswordValid,
+		Status:             metav1.ConditionTrue,
+		Reason:             reasonPasswordValid,
+		Message:            "Password meets BMC length requirements",
+		ObservedGeneration: user.Generation,
+	}
+	if !valid {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = reasonPasswordInvalid
+		cond.Message = message
+	}
+
+	userBase := user.DeepCopy()
+	if apimeta.SetStatusCondition(&user.Status.Conditions, cond) {
+		if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
+			return fmt.Errorf("failed to patch PasswordValid condition: %w", err)
+		}
+	}
+	return nil
 }
 
 // updateCredentialsBootstrappedCondition sets the CredentialsBootstrapped condition

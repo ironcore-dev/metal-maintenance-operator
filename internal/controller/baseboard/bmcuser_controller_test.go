@@ -7,11 +7,13 @@ import (
 	"time"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -110,8 +112,13 @@ var _ = Describe("BMCUser Controller", func() {
 		By("Ensuring the effective bmcSecret has the correct data")
 		Expect(effectiveSecret.Data).To(HaveKeyWithValue("username", []byte("user")))
 		password := string(effectiveSecret.Data["password"])
-		// make sure that the password has a length of 30 (default max length for redfish mock server)
-		Expect(password).To(HaveLen(30))
+		// The redfish mock server reports MaxPasswordLength=30. The generator leaves a
+		// margin below the max and may shrink further so the HTML-escaped password stays
+		// within the limit (see utils.GenerateHTMLSafePassword), so assert the bound
+		// rather than an exact length.
+		Expect(utils.EscapedLen(password)).To(BeNumerically("<=", 30))
+		Expect(len(password)).To(BeNumerically(">=", 8))
+		Expect(len(password)).To(BeNumerically("<=", 30))
 
 		By("Deleting the User resource and ensuring the effective secret is deleted")
 
@@ -121,6 +128,131 @@ var _ = Describe("BMCUser Controller", func() {
 		By("Ensuring that the effective BMCSecret has been deleted")
 		Expect(k8sClient.Delete(ctx, effectiveSecret)).To(Succeed())
 		Eventually(Get(effectiveSecret)).Should(Satisfy(apierrors.IsNotFound))
+	})
+
+	It("should not apply a user-supplied password that exceeds the BMC length limit", func(ctx SpecContext) {
+		By("Creating a BMCSecret with an over-length password (mock MaxPasswordLength is 30)")
+		longSecret := &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "over-length-secret",
+			},
+			Data: map[string][]byte{
+				"username": []byte("longpwuser"),
+				"password": []byte("0000000000000000000000000000000000000000"), // 40 chars > 30
+			},
+		}
+		Expect(k8sClient.Create(ctx, longSecret)).To(Succeed())
+		Eventually(Get(longSecret)).Should(Succeed())
+
+		By("Creating a User resource referencing the over-length secret")
+		user := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "over-length-user",
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName: "longpwuser",
+				RoleID:   "ReadOnly",
+				BMCSecretRef: &v1.LocalObjectReference{
+					Name: longSecret.Name,
+				},
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Succeed())
+
+		By("Ensuring the PasswordValid condition is set to False")
+		Eventually(func(g Gomega) {
+			fetched := &baseboardv1alpha1.BMCUser{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: user.Name}, fetched)).To(Succeed())
+			cond := apimeta.FindStatusCondition(fetched.Status.Conditions, "PasswordValid")
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(cond.Reason).To(Equal("PasswordInvalid"))
+		}, "5s", "250ms").Should(Succeed())
+
+		By("Ensuring the BMC account was not created")
+		Expect(mockServers[0].GetAccountNames()).ShouldNot(HaveKey("longpwuser"))
+
+		Expect(k8sClient.Delete(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Satisfy(apierrors.IsNotFound))
+		Expect(k8sClient.Delete(ctx, longSecret)).To(Succeed())
+	})
+
+	It("should not apply an updated user-supplied password that exceeds the BMC length limit", func(ctx SpecContext) {
+		By("Creating a BMCSecret with a valid password")
+		validSecret := &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "update-valid-secret",
+			},
+			Data: map[string][]byte{
+				"username": []byte("updatepwuser"),
+				"password": []byte("validpass123"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, validSecret)).To(Succeed())
+		Eventually(Get(validSecret)).Should(Succeed())
+
+		By("Creating a User resource referencing the valid secret")
+		user := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "update-pw-user",
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName: "updatepwuser",
+				RoleID:   "ReadOnly",
+				BMCSecretRef: &v1.LocalObjectReference{
+					Name: validSecret.Name,
+				},
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Succeed())
+
+		By("Ensuring the account was created and the credential became effective")
+		Eventually(mockServers[0].GetAccountNames, "5s").Should(HaveKey("updatepwuser"))
+		Eventually(Object(user), "5s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		By("Creating an over-length BMCSecret and pointing the User at it")
+		longSecret := &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "update-over-length-secret",
+			},
+			Data: map[string][]byte{
+				"username": []byte("updatepwuser"),
+				"password": []byte("0000000000000000000000000000000000000000"), // 40 chars > 30
+			},
+		}
+		Expect(k8sClient.Create(ctx, longSecret)).To(Succeed())
+		Eventually(Get(longSecret)).Should(Succeed())
+		Eventually(Update(user, func() {
+			user.Spec.BMCSecretRef = &v1.LocalObjectReference{Name: longSecret.Name}
+		})).Should(Succeed())
+
+		By("Ensuring the PasswordValid condition flips to False")
+		Eventually(func(g Gomega) {
+			fetched := &baseboardv1alpha1.BMCUser{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: user.Name}, fetched)).To(Succeed())
+			cond := apimeta.FindStatusCondition(fetched.Status.Conditions, "PasswordValid")
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(cond.Reason).To(Equal("PasswordInvalid"))
+		}, "5s", "250ms").Should(Succeed())
+
+		By("Ensuring the BMC account password was not changed to the over-length value")
+		Consistently(func() bool {
+			return mockServers[0].Authenticate("updatepwuser", "validpass123")
+		}, "1s").Should(BeTrue())
+
+		Expect(k8sClient.Delete(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Satisfy(apierrors.IsNotFound))
+		Expect(k8sClient.Delete(ctx, validSecret)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, longSecret)).To(Succeed())
 	})
 
 	It("should just create additional BMC users", func(ctx SpecContext) {
