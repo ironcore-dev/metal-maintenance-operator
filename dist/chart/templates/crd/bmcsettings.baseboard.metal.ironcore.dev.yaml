@@ -70,6 +70,52 @@ spec:
                 x-kubernetes-validations:
                 - message: bmcRef is immutable
                   rule: self == oldSelf
+              completionConditionType:
+                description: |-
+                  CompletionConditionType, if set, is the condition Type patched (status True) onto the
+                  related Server(s) once this resource reaches its terminal success state. Downstream
+                  resources can reference this Type in their own ReadinessGates to build a manual
+                  sequence across resources.
+                  Immutable once set: it can be patched from empty to a value, but not changed or cleared
+                  afterwards.
+                maxLength: 316
+                pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                type: string
+                x-kubernetes-validations:
+                - message: completionConditionType is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
+              readinessGates:
+                description: |-
+                  ReadinessGates is a list of Server conditions that must be satisfied before the
+                  controller starts applying this resource. Semantics mirror Kubernetes
+                  Pod.Spec.ReadinessGates: every listed condition type must be present on the related
+                  Server(s) with the required status.
+                items:
+                  description: |-
+                    ConditionRequirement defines a specific Server condition and the status value
+                    required to trigger the controller's action.
+                  properties:
+                    requiredStatus:
+                      description: RequiredStatus is status of the condition, one
+                        of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Type of server condition
+
+                        Following kubebuilder validation is referred from https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Condition
+                      maxLength: 316
+                      minLength: 1
+                      type: string
+                  required:
+                  - requiredStatus
+                  - type
+                  type: object
+                type: array
               retryPolicy:
                 description: RetryPolicy defines the retry behavior for automatic
                   retries on transient failures.
@@ -273,12 +319,20 @@ spec:
                 description: Version specifies the software version (e.g. BIOS, BMC)
                   these settings apply to.
                 type: string
+              writeOnlyDriftPolicy:
+                default: Conservative
+                description: |-
+                  WriteOnlyDriftPolicy controls the operator's behaviour when the ETag for
+                  a resource containing a write-only key changes.  Defaults to Conservative.
+                  See WriteOnlyDriftPolicy for full semantics and limitations.
+                enum:
+                - Conservative
+                - Strict
+                type: string
             required:
             - bmcRef
             type: object
             x-kubernetes-validations:
-            - message: version is required
-              rule: size(self.version) > 0
             - message: variable keys must be unique
               rule: '!has(self.variables) || self.variables.all(v, self.variables.filter(w,
                 w.key == v.key).size() == 1)'
@@ -291,6 +345,13 @@ spec:
                     BMCSettingsApplyResultEntry holds the URI, ETag, and value hash from the last
                     successful apply of a single settings key. Used for ETag-based drift detection.
                   properties:
+                    applyMethod:
+                      description: |-
+                        ApplyMethod is the HTTP method used to apply the value (e.g. "POST" or "PATCH").
+                        Values applied via POST create a (possibly ephemeral) resource whose URI cannot be
+                        used for ETag-based drift detection. These keys are not read back from the BMC;
+                        they are re-applied only when the desired value fingerprint (ValueHash) changes.
+                      type: string
                     etag:
                       description: |-
                         ETag is the drift-detection token captured after the last successful apply.
@@ -306,9 +367,9 @@ spec:
                       type: string
                     valueHash:
                       description: |-
-                        ValueHash is the SHA-256 hash of the effective (resolved) value at apply time.
-                        Used to detect desired-state changes from ConfigMap/Secret rotation independent
-                        of BMC-side drift.
+                        ValueHash is the keyed HMAC-SHA256 fingerprint of the effective (resolved) value
+                        at apply time. Used to detect desired-state changes from ConfigMap/Secret rotation
+                        independent of BMC-side drift.
                       type: string
                   type: object
                 description: |-

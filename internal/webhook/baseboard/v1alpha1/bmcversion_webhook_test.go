@@ -35,8 +35,10 @@ var _ = Describe("BMCVersion Webhook", func() {
 			},
 			Spec: baseboardv1alpha1.BMCVersionSpec{
 				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-					Version: "P70 v1.45 (12/06/2017)",
-					Image:   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
+					VersionTemplate: api.VersionTemplate{
+						Version: "P70 v1.45 (12/06/2017)",
+						Image:   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
+					},
 				},
 				BMCRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -54,7 +56,7 @@ var _ = Describe("BMCVersion Webhook", func() {
 	})
 
 	Context("When creating or updating BMCVersion under Validating Webhook", func() {
-		It("should deny creation if a BMC referred is already referred by another", func(ctx SpecContext) {
+		It("should deny creation if an existing sibling referring to the same BMC has no ReadinessGates", func(ctx SpecContext) {
 			By("Creating another BMCVersion with reference to existing referred BMC")
 			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
@@ -62,14 +64,41 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P71 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "foo"},
 				},
 			}
 			Expect(validator.ValidateCreate(ctx, BMCVersionV2)).Error().To(HaveOccurred())
+		})
+
+		It("should allow creation if every existing sibling referring to the same BMC already has ReadinessGates", func(ctx SpecContext) {
+			By("Giving BMCVersionV1 non-empty ReadinessGates")
+			Eventually(Update(BMCVersionV1, func() {
+				BMCVersionV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+			})).Should(Succeed())
+
+			By("Creating another BMCVersion with reference to existing referred BMC")
+			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-bmc-ver",
+				},
+				Spec: baseboardv1alpha1.BMCVersionSpec{
+					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
+					},
+					BMCRef: &v1.LocalObjectReference{Name: "foo"},
+				},
+			}
+			Expect(validator.ValidateCreate(ctx, BMCVersionV2)).Error().ToNot(HaveOccurred())
 		})
 
 		It("should create if a referenced BMC is NOT duplicate", func() {
@@ -80,9 +109,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P70 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P70 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P70 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -90,7 +121,7 @@ var _ = Describe("BMCVersion Webhook", func() {
 			Expect(k8sClient.Create(ctx, BMCVersionV2)).To(Succeed())
 		})
 
-		It("should deny update if a BMC referred is already referred by another", func() {
+		It("should deny update if an existing sibling referring to the same BMC has no ReadinessGates", func() {
 			By("Creating another BMCVersion with different BMCRef")
 			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
 				ObjectMeta: metav1.ObjectMeta{
@@ -98,9 +129,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P71 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},
@@ -113,6 +146,36 @@ var _ = Describe("BMCVersion Webhook", func() {
 			Expect(validator.ValidateUpdate(ctx, BMCVersionV1, BMCVersionV2Updated)).Error().To(HaveOccurred())
 		})
 
+		It("should allow update if every existing sibling referring to the same BMC already has ReadinessGates", func() {
+			By("Giving BMCVersionV1 non-empty ReadinessGates")
+			Eventually(Update(BMCVersionV1, func() {
+				BMCVersionV1.Spec.ReadinessGates = []metalv1alpha1.ConditionRequirement{{Type: "SomeGate", RequiredStatus: metav1.ConditionTrue}}
+			})).Should(Succeed())
+
+			By("Creating another BMCVersion with different BMCRef")
+			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "test-bmc-ver",
+				},
+				Spec: baseboardv1alpha1.BMCVersionSpec{
+					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
+					},
+					BMCRef: &v1.LocalObjectReference{Name: "bar"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, BMCVersionV2)).To(Succeed())
+
+			By("Updating an BMCVersionV2 to refer to existing BMC")
+			BMCVersionV2Updated := BMCVersionV2.DeepCopy()
+			BMCVersionV2Updated.Spec.BMCRef = BMCVersionV1.Spec.BMCRef
+			Expect(validator.ValidateUpdate(ctx, BMCVersionV1, BMCVersionV2Updated)).Error().ToNot(HaveOccurred())
+		})
+
 		It("should update if a BMC referred is not referred by another", func() {
 			By("Creating another BMCVersion with different BMCref")
 			BMCVersionV2 := &baseboardv1alpha1.BMCVersion{
@@ -121,9 +184,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				},
 				Spec: baseboardv1alpha1.BMCVersionSpec{
 					BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
-						Version:                 "P71 v1.45 (12/06/2017)",
-						Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						VersionTemplate: api.VersionTemplate{
+							Version:                 "P71 v1.45 (12/06/2017)",
+							Image:                   api.ImageSpec{URI: "P71 v1.45 (12/06/2017)"},
+							ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						},
 					},
 					BMCRef: &v1.LocalObjectReference{Name: "bar"},
 				},

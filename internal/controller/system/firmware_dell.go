@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"time"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
@@ -42,14 +44,22 @@ const (
 	// found powered off.
 	ConditionRepositoryUpdatePowerOnIssued = "RepositoryUpdatePowerOnIssued"
 
-	ReasonRepositoryCheckIssued     = "RepositoryCheckIssuedToBMC"
-	ReasonRepositoryCheckCompleted  = "RepositoryCheckCompleted"
-	ReasonRepositoryCheckFailed     = "RepositoryCheckFailed"
-	ReasonRepositoryUpdateIssued    = "RepositoryUpdateIssuedToBMC"
-	ReasonRepositoryUpdateCompleted = "RepositoryUpdateCompleted"
-	ReasonRepositoryUpdateFailed    = "RepositoryUpdateFailed"
-	ReasonComponentJobsCompleted    = "ComponentJobsCompleted"
-	ReasonComponentJobFailed        = "ComponentJobFailed"
+	// ConditionScheduledJobStuckPowerOnIssued tracks a PowerOn request issued
+	// because the repository-update apply job remained in Dell's "Scheduled"
+	// state (queued, awaiting a reboot/power cycle to execute) with the
+	// server powered off and no observed progress for longer than
+	// FirmwareUpdateReconciler.ScheduledJobPowerOnTimeout.
+	ConditionScheduledJobStuckPowerOnIssued = "ScheduledJobStuckPowerOnIssued"
+
+	ReasonRepositoryCheckIssued          = "RepositoryCheckIssuedToBMC"
+	ReasonRepositoryCheckCompleted       = "RepositoryCheckCompleted"
+	ReasonRepositoryCheckFailed          = "RepositoryCheckFailed"
+	ReasonRepositoryUpdateIssued         = "RepositoryUpdateIssuedToBMC"
+	ReasonRepositoryUpdateCompleted      = "RepositoryUpdateCompleted"
+	ReasonRepositoryUpdateFailed         = "RepositoryUpdateFailed"
+	ReasonComponentJobsCompleted         = "ComponentJobsCompleted"
+	ReasonComponentJobFailed             = "ComponentJobFailed"
+	ReasonScheduledJobStuckPowerOnIssued = "ScheduledJobStuckPowerOnIssued"
 )
 
 type dellHandler struct{}
@@ -174,7 +184,7 @@ func (dh *dellHandler) processInProgress(ctx context.Context, bmcClient bmc.BMC,
 	}
 	if componentsCompleted.Status != metav1.ConditionTrue {
 		log.V(1).Info("RepositoryUpdate apply job completed, tracking spawned component firmware jobs", "Server", server.Name)
-		return dh.trackComponentJobs(ctx, updater, fw, r, componentsCompleted)
+		return dh.trackComponentJobs(ctx, bmcClient, updater, fw, r, server, componentsCompleted)
 	}
 
 	// This pass's apply and component-job tracking are done. Hand back to
@@ -344,6 +354,117 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 	return false, r.Status().Patch(ctx, fw, client.MergeFrom(fwBase))
 }
 
+// handleStuckScheduledJob issues a PowerOn request to the server if one or
+// more component firmware jobs are stuck in Dell's "Scheduled" state
+// (queued, awaiting a reboot/power cycle to execute), the server is
+// currently powered off, and no progress has been observed for longer than
+// r.ScheduledJobPowerOnTimeout.
+func (dh *dellHandler) handleStuckScheduledJob(
+	ctx context.Context,
+	bmcClient bmc.BMC,
+	fw *systemv1alpha1.FirmwareUpdate,
+	r *FirmwareUpdateReconciler,
+	server *metalv1alpha1.Server,
+	scheduledJobIDs []string,
+) (*metav1.Condition, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if r.ScheduledJobPowerOnTimeout <= 0 {
+		return nil, nil
+	}
+
+	condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionScheduledJobStuckPowerOnIssued)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get condition for stuck scheduled job power on: %w", err)
+	}
+	alreadyIssued := condition.Status == metav1.ConditionTrue
+
+	resolve := func(message string) (*metav1.Condition, error) {
+		if !alreadyIssued {
+			return nil, nil
+		}
+		if err := r.Conditions.Update(
+			condition,
+			conditionutils.UpdateStatus(corev1.ConditionFalse),
+			conditionutils.UpdateReason(ReasonScheduledJobStuckPowerOnIssued),
+			conditionutils.UpdateMessage(message),
+		); err != nil {
+			return nil, fmt.Errorf("failed to update ScheduledJobStuckPowerOnIssued condition: %w", err)
+		}
+		return condition, nil
+	}
+
+	if len(scheduledJobIDs) == 0 {
+		return resolve("No component firmware jobs currently stuck in Scheduled state")
+	}
+
+	powerState, err := utils.GetServerPowerState(ctx, bmcClient, server)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check server power state: %w", err)
+	}
+	if powerState == metalv1alpha1.ServerOnPowerState {
+		return resolve("Server is powered on; no PowerOn action currently needed")
+	}
+	if powerState != metalv1alpha1.ServerOffPowerState {
+		// Server is mid-transition (PoweringOn/PoweringOff) or Paused - not
+		// actionable yet. Wait for it to settle into a stable On/Off state
+		// before deciding whether a PowerOn is needed.
+		return nil, nil
+	}
+
+	if alreadyIssued {
+		// PowerOn was already issued for this still-ongoing incident and the
+		// server is still off (e.g. it's still booting) - wait for it to
+		// resolve instead of issuing PowerOn again.
+		return nil, nil
+	}
+
+	// if scheduledJobIDs has an entry not yet reflected in
+	// fw.Status.DellStatus.ComponentJobs as Scheduled, wait until it's
+	// confirmed scheduled on a later reconcile before evaluating staleness -
+	// LastProgressTime may be old for reasons unrelated to this newly
+	// discovered job.
+	notYetConfirmedScheduled := make(map[string]struct{}, len(scheduledJobIDs))
+	for _, id := range scheduledJobIDs {
+		notYetConfirmedScheduled[id] = struct{}{}
+	}
+	if fw.Status.DellStatus != nil {
+		for _, job := range fw.Status.DellStatus.ComponentJobs {
+			if (&bmc.DellJob{State: job.State}).IsScheduled() {
+				delete(notYetConfirmedScheduled, job.JobID)
+				if len(notYetConfirmedScheduled) == 0 {
+					// All currently-scheduled jobs were already known from the previous reconcile.
+					break
+				}
+			}
+		}
+	}
+	if len(notYetConfirmedScheduled) > 0 {
+		return nil, nil
+	}
+
+	if fw.Status.LastProgressTime == nil || time.Since(fw.Status.LastProgressTime.Time) < r.ScheduledJobPowerOnTimeout {
+		return nil, nil
+	}
+
+	log.Info("Component firmware job(s) stuck in Scheduled state with server powered off, issuing PowerOn",
+		"Server", server.Name, "ScheduledJobIDs", scheduledJobIDs, "StuckSince", fw.Status.LastProgressTime.Time)
+	if err := bmcClient.PowerOn(ctx, server.Spec.SystemURI); err != nil {
+		return nil, fmt.Errorf("failed to power on server for stuck scheduled job: %w", err)
+	}
+
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(ReasonScheduledJobStuckPowerOnIssued),
+		conditionutils.UpdateMessage(fmt.Sprintf(
+			"Job(s) %v remained Scheduled with server powered off for over %v with no progress; issued PowerOn",
+			scheduledJobIDs, r.ScheduledJobPowerOnTimeout)),
+	); err != nil {
+		return nil, fmt.Errorf("failed to update ScheduledJobStuckPowerOnIssued condition: %w", err)
+	}
+	return condition, nil
+}
+
 // ensureServerPoweredOn issues a PowerOn request to the server via BMC if it
 // is found powered off before applying the repository update
 func (dh *dellHandler) ensureServerPoweredOn(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server) (bool, error) {
@@ -374,7 +495,7 @@ func (dh *dellHandler) ensureServerPoweredOn(ctx context.Context, bmcClient bmc.
 		); err != nil {
 			return false, fmt.Errorf("failed to update issued power on condition: %w", err)
 		}
-		return false, r.updateStatus(ctx, fw, fw.Status.State, powerOnIssued)
+		return false, r.patchProgress(ctx, fw, fw.Status.State, powerOnIssued, nil)
 	}
 	// no watch event to notice the power-on completing in real BMC - poll periodically instead.
 	log.V(1).Info("Server in powered off state, retrying", "Server", server.Name)
@@ -501,13 +622,17 @@ func (dh *dellHandler) pollRepositoryUpdate(ctx context.Context, updater bmc.Fir
 	})
 }
 
-func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, condition *metav1.Condition) (bool, error) {
+func (dh *dellHandler) trackComponentJobs(ctx context.Context, bmcClient bmc.BMC, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server, condition *metav1.Condition) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
 	jobIDs, err := updater.ListJobs(ctx, "")
 	if err != nil {
 		log.V(1).Info("Failed to list jobs for component tracking, retrying", "error", err)
 		return true, nil
 	}
+	//
+	// Sort jobs so that an unchanged set of outstanding jobs always produces ComponentJobs
+	// in the same order
+	slices.Sort(jobIDs)
 	log.V(1).Info("Listed BMC jobs for component tracking", "TotalJobsOnBMC", len(jobIDs))
 
 	var baselineJobIDs []string
@@ -530,6 +655,7 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	summary := &systemv1alpha1.ComponentJobsSummary{}
 	allTerminal := true
 	anyFailed := false
+	var scheduledJobIDs []string
 	for _, id := range jobIDs {
 		if _, ok := known[id]; ok {
 			continue
@@ -552,6 +678,9 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 		default:
 			summary.InProgress++
 			log.V(1).Info("Component firmware job still in progress", "JobID", job.ID, "Name", job.Name, "State", job.State, "PercentComplete", job.PercentComplete)
+			if job.IsScheduled() {
+				scheduledJobIDs = append(scheduledJobIDs, job.ID)
+			}
 		}
 		if !job.IsTerminal() {
 			allTerminal = false
@@ -561,7 +690,11 @@ func (dh *dellHandler) trackComponentJobs(ctx context.Context, updater bmc.Firmw
 	if !allTerminal {
 		log.V(1).Info("Component firmware jobs still in progress",
 			"Total", summary.Total, "Completed", summary.Completed, "Failed", summary.Failed, "InProgress", summary.InProgress)
-		return true, r.patchProgress(ctx, fw, fw.Status.State, nil, func(status *systemv1alpha1.FirmwareUpdateStatus) {
+		powerOnCondition, err := dh.handleStuckScheduledJob(ctx, bmcClient, fw, r, server, scheduledJobIDs)
+		if err != nil {
+			return false, err
+		}
+		return true, r.patchProgress(ctx, fw, fw.Status.State, powerOnCondition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
 			ds := dellStatus(status)
 			ds.ComponentJobs = componentJobs
 			ds.ComponentJobsSummary = summary
@@ -637,6 +770,8 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 		applyDowngradeVersions = true
 	}
 
+	ignoreCertWarning := ptr.Deref(repo.CertificateVerification, "") == systemv1alpha1.DellCertificateVerificationPolicyIgnore
+
 	return &bmc.RepositoryUpdateParameters{
 		ShareType:              string(repo.ShareType),
 		IPAddress:              repo.Address,
@@ -644,6 +779,7 @@ func buildRepositoryParameters(ctx context.Context, r *FirmwareUpdateReconciler,
 		CatalogFile:            catalogFile,
 		UserName:               username,
 		Password:               password,
+		IgnoreCertWarning:      ignoreCertWarning,
 		ApplyUpdate:            applyUpdate,
 		RebootNeeded:           applyUpdate && repo.RebootNeeded,
 		ApplySameVersions:      applySameVersions,

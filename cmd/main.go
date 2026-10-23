@@ -50,6 +50,7 @@ import (
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	vendorconsolectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/vendorconsole"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/indexers"
+	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	webhookbaseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/baseboard/v1alpha1"
 	webhooksystemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/internal/webhook/system/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -103,6 +104,7 @@ func main() {
 	var biosSettingsTimeoutExpiry time.Duration
 	var rebootTimeoutExpiry time.Duration
 	var maxRepositoryPasses int
+	var scheduledJobPowerOnTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -145,7 +147,7 @@ func main() {
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
 		"Skip TLS certificate validation for BMC connections.")
-	flag.DurationVar(&resyncInterval, "resync-interval", 10*time.Minute,
+	flag.DurationVar(&resyncInterval, "resync-interval", 2*time.Minute,
 		"Resync interval for BMC/BIOS maintenance controllers.")
 	var defaultFailedAutoRetryCountInt int
 	flag.IntVar(&defaultFailedAutoRetryCountInt, "default-failed-auto-retry-count", 3,
@@ -156,6 +158,10 @@ func main() {
 		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
 	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", maxRepositoryPassesLimit,
 		"Maximum number of check->apply->track->recheck passes a FirmwareUpdate may take before being marked Failed.")
+	flag.DurationVar(&scheduledJobPowerOnTimeout, "scheduled-job-power-on-timeout", 30*time.Minute,
+		"How long a firmware upgrade job may remain in the \"Scheduled\" state (queued, awaiting a reboot/power "+
+			"cycle to execute) with the server powered off and no observed progress, before the controller powers the "+
+			"server back on to let the job proceed. A value <= 0 disables this check.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -229,6 +235,13 @@ func main() {
 	}
 	if reportBaseURL == "" {
 		setupLog.Error(nil, "Must specify --report-base-url")
+		os.Exit(1)
+	}
+	if managerNamespace == "" {
+		managerNamespace = os.Getenv("POD_NAMESPACE")
+	}
+	if managerNamespace == "" {
+		setupLog.Error(nil, "Manager configuration omitted --manager-namespace and POD_NAMESPACE is not set")
 		os.Exit(1)
 	}
 
@@ -410,6 +423,18 @@ func main() {
 	}
 	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
 
+	const hmacKeyName = "metal-maintenance-operator-hmac-key"
+	bootstrapClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		setupLog.Error(err, "Failed to create bootstrap client for HMAC signing key")
+		os.Exit(1)
+	}
+	hmacKey, err := utils.EnsureHMACKey(context.Background(), bootstrapClient, managerNamespace, hmacKeyName)
+	if err != nil {
+		setupLog.Error(err, "Failed to ensure HMAC signing key")
+		os.Exit(1)
+	}
+
 	if err = (&baseboardctrl.BMCSettingsReconciler{
 		Client:                      mgr.GetClient(),
 		ManagerNamespace:            managerNamespace,
@@ -420,6 +445,7 @@ func main() {
 		Conditions:                  accessor,
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
+		HMACKey:                     hmacKey,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create BMCSettings controller")
 		os.Exit(1)
@@ -502,6 +528,7 @@ func main() {
 		BMCOptions:                  bmcOpts,
 		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
 		MaxRepositoryPasses:         int32(maxRepositoryPasses),
+		ScheduledJobPowerOnTimeout:  scheduledJobPowerOnTimeout,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create FirmwareUpdate controller")
 		os.Exit(1)
@@ -552,6 +579,11 @@ func main() {
 
 		if err = webhooksystemv1alpha1.SetupBIOSVersionWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BIOSVersion webhook")
+			os.Exit(1)
+		}
+
+		if err = webhooksystemv1alpha1.SetupFirmwareUpdateWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up FirmwareUpdate webhook")
 			os.Exit(1)
 		}
 	}

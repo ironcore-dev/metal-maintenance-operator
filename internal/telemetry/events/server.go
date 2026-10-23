@@ -33,13 +33,26 @@ const (
 	maxBodyBytes    = 1 << 20
 	shutdownTimeout = 5 * time.Second
 	pathPrefix      = "/serverevents/"
+	// maxConcurrentFetches bounds the number of simultaneous GET-on-empty goroutines.
+	// Excess requests are acknowledged 200 without fetching.
+	maxConcurrentFetches = 10
 )
+
+// MetricFetcher fetches a full MetricReport body via authenticated GET.
+// Called when a POST notification arrives with empty MetricValues but a
+// non-empty @odata.id (Dell 17G iDRAC 10 behaviour). Nil disables the path.
+type MetricFetcher interface {
+	FetchMetricReport(ctx context.Context, bmcName, odataID string) ([]byte, error)
+}
 
 // Config for the Receiver.
 type Config struct {
 	Addr             string                // Listen address, required (e.g. ":9092").
 	EventSink        sink.EventSink        // nil → alerts route returns 503.
 	MetricReportSink sink.MetricReportSink // nil → metricsreport route returns 503.
+	// MetricFetcher is called when a MetricReport POST arrives with empty
+	// MetricValues but a non-empty @odata.id. Nil disables GET-on-empty.
+	MetricFetcher MetricFetcher
 	// SubscriberID scopes the receiver's route under a per-subscriber
 	// path segment.
 	SubscriberID string
@@ -66,6 +79,7 @@ type Receiver struct {
 	log         logr.Logger
 	alertsPath  string
 	metricsPath string
+	fetchSem    chan struct{} // bounds concurrent GET-on-empty goroutines
 }
 
 var (
@@ -92,7 +106,7 @@ func New(cfg Config) (*Receiver, error) {
 	if (log == logr.Logger{}) {
 		log = logr.Discard()
 	}
-	r := &Receiver{cfg: cfg, log: log}
+	r := &Receiver{cfg: cfg, log: log, fetchSem: make(chan struct{}, maxConcurrentFetches)}
 	r.alertsPath = alertsPathFor(cfg.SubscriberID)
 	r.metricsPath = metricsPathFor(cfg.SubscriberID)
 	r.routes()
@@ -272,7 +286,7 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 	if err != nil {
 		return
 	}
-	r.log.V(1).Info("Received metric report", "bmc", bmcName)
+	r.log.V(1).Info("Received metric report", "bmc", bmcName, "payload", string(body))
 
 	var data wireMetricReport
 	if err := json.Unmarshal(body, &data); err != nil {
@@ -283,6 +297,49 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 	}
 
 	samples := data.toSamples(r.log)
+	if strings.HasPrefix(data.ODataType, "#Event.") {
+		// Payload is a Redfish Event (sensor-change alert), not a MetricReport.
+		// This indicates the MetricReport subscription was created without explicit
+		// EventTypes: ["MetricReport"], causing the BMC to fall back to sensor event
+		// streaming. The reconciler will detect and recreate the subscription on its
+		// next pass. No metric data can be extracted from this payload.
+		r.log.Info("MetricReport endpoint received sensor Event payload — subscription has wrong EventTypes, will self-heal",
+			"bmc", bmcName, "odataType", data.ODataType)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if len(samples) == 0 && data.ODataID != "" && r.cfg.MetricFetcher != nil {
+		w.WriteHeader(http.StatusOK)
+		select {
+		case r.fetchSem <- struct{}{}:
+		default:
+			r.log.V(1).Info("GET-on-empty skipped: too many in-flight fetches", "bmc", bmcName)
+			return
+		}
+		go func() {
+			defer func() { <-r.fetchSem }()
+			// context.WithoutCancel keeps values (e.g. trace spans) but detaches
+			// from the HTTP request lifetime so the goroutine outlives the response.
+			ctx := context.WithoutCancel(req.Context())
+			fetched, err := r.cfg.MetricFetcher.FetchMetricReport(ctx, bmcName, data.ODataID)
+			if err != nil {
+				r.log.Error(err, "GET-on-empty fetch failed", "bmc", bmcName, "odataID", data.ODataID)
+				return
+			}
+			s, err := ParseMetricReportSamples(fetched, r.log)
+			if err != nil {
+				r.log.V(1).Info("Failed to decode fetched metric report",
+					"bmc", bmcName, "odataID", data.ODataID, "err", err.Error())
+				return
+			}
+			if err := r.cfg.MetricReportSink.PublishSamples(ctx, bmcName, s); err != nil {
+				r.log.Error(err, "Metric-report sink publish failed (async)", "bmc", bmcName)
+			}
+			r.log.V(1).Info("Published samples (async GET-on-empty)", "bmc", bmcName, "count", len(s))
+		}()
+		return
+	}
+
 	if err := r.cfg.MetricReportSink.PublishSamples(req.Context(), bmcName, samples); err != nil {
 		r.log.Error(err, "Metric-report sink publish failed", "bmc", bmcName)
 		http.Error(w, "Internal error", http.StatusInternalServerError)

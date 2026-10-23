@@ -570,7 +570,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			HaveField("Status.FailedBMCSettings", BeNumerically("==", 0)),
 		))
 
-		By("Creating a duplicate BMCSettingsSet resource")
+		By("Creating a 2nd BMCSettingsSet resource with an overlapping selector")
 		bmcSettingsSet2 := &baseboardv1alpha1.BMCSettingsSet{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "test2-"},
@@ -592,7 +592,15 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, bmcSettingsSet2)).To(Succeed())
 
-		By("Re-Checking if the status of the 1st BMCSettingsSet")
+		By("Checking if the BMCSettings has been created by the 2nd BMCSettingsSet")
+		bmcSettings01_02 := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: bmcSettingsSet2.Name + "-" + bmc01.Name,
+			},
+		}
+		Eventually(Get(bmcSettings01_02)).Should(Succeed())
+
+		By("Re-Checking if the status of the 1st BMCSettingsSet is unaffected")
 		Eventually(Object(bmcSettingsSet1)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledBMCs", BeNumerically("==", 1)),
 			HaveField("Status.AvailableBMCSettings", BeNumerically("==", 1)),
@@ -601,21 +609,14 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 			HaveField("Status.FailedBMCSettings", BeNumerically("==", 0)),
 		))
 
-		By("Checking the status of the 2nd BMCSettingsSet")
+		By("Checking the status of the 2nd BMCSettingsSet independently reaches completion")
 		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledBMCs", BeNumerically("==", 1)),
-			HaveField("Status.AvailableBMCSettings", BeNumerically("==", 0)),
-			HaveField("Status.CompletedBMCSettings", BeNumerically("==", 0)),
+			HaveField("Status.AvailableBMCSettings", BeNumerically("==", 1)),
+			HaveField("Status.CompletedBMCSettings", BeNumerically("==", 1)),
 			HaveField("Status.InProgressBMCSettings", BeNumerically("==", 0)),
 			HaveField("Status.FailedBMCSettings", BeNumerically("==", 0)),
 		))
-
-		By("Pausing the 2nd BMCSettingsSet")
-		Eventually(Update(bmcSettingsSet2, func() {
-			bmcSettingsSet2.Annotations = map[string]string{
-				constants.OperationAnnotation: constants.OperationAnnotationIgnore,
-			}
-		})).Should(Succeed())
 
 		By("Deleting the 1st BMCSettingsSet")
 		Expect(k8sClient.Delete(ctx, bmcSettingsSet1)).To(Succeed())
@@ -623,36 +624,7 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		Expect(k8sClient.Delete(ctx, bmcSettings01)).To(Succeed())
 		Eventually(Get(bmcSettings01)).Should(Satisfy(apierrors.IsNotFound))
 
-		By("Checking the status of the 2nd BMCSettingsSet")
-		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
-			HaveField("Status.FullyLabeledBMCs", BeNumerically("==", 1)),
-			HaveField("Status.AvailableBMCSettings", BeNumerically("==", 0)),
-			HaveField("Status.CompletedBMCSettings", BeNumerically("==", 0)),
-			HaveField("Status.InProgressBMCSettings", BeNumerically("==", 0)),
-			HaveField("Status.FailedBMCSettings", BeNumerically("==", 0)),
-		))
-
-		By("Re enable the 2nd BMCSettingsSet")
-		Eventually(Update(bmcSettingsSet2, func() {
-			delete(bmcSettingsSet2.Annotations, constants.OperationAnnotation)
-		})).Should(Succeed())
-
-		By("Checking if the status has been updated by the 2nd BMCSettingsSet")
-		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
-			HaveField("Status.FullyLabeledBMCs", BeNumerically("==", 1)),
-			HaveField("Status.AvailableBMCSettings", BeNumerically("==", 1)),
-			HaveField("Status.FailedBMCSettings", BeNumerically("==", 0)),
-		))
-
-		By("Checking if the BMCSetting has been created by the 2nd BMCSettingsSet")
-		bmcSettings01_02 := &baseboardv1alpha1.BMCSettings{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: bmcSettingsSet2.Name + "-" + bmc01.Name,
-			},
-		}
-		Eventually(Get(bmcSettings01_02)).Should(Succeed())
-
-		By("Checking if the status has been updated")
+		By("Checking the 2nd BMCSettingsSet's own resources are unaffected by the 1st's deletion")
 		Eventually(Object(bmcSettingsSet2)).Should(SatisfyAll(
 			HaveField("Status.FullyLabeledBMCs", BeNumerically("==", 1)),
 			HaveField("Status.AvailableBMCSettings", BeNumerically("==", 1)),

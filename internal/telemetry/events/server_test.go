@@ -6,6 +6,7 @@ package events_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -277,6 +278,12 @@ func (s *recordingMetricSink) lastCall() recordedSamples {
 	return s.calls[len(s.calls)-1]
 }
 
+func (s *recordingMetricSink) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
 // newReceiverWithMetrics builds a receiver wired to a metric sink. The
 // event sink is left nil to keep tests focused on the metricsreport path
 // (alerts handler returns 503 if exercised — that's tested elsewhere).
@@ -397,6 +404,143 @@ func TestMetricsReport_BodyTooLarge(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status: got %d, want 413", rec.Code)
+	}
+}
+
+// -- GET-on-empty (Dell 17G @odata.id fetch) --
+
+type fakeMetricFetcher struct {
+	mu              sync.Mutex
+	calls           []fetchCall
+	body            []byte
+	err             error
+	notifyAfterCall chan struct{} // if non-nil, closed after each FetchMetricReport call
+}
+
+type fetchCall struct {
+	bmcName string
+	odataID string
+}
+
+func (f *fakeMetricFetcher) FetchMetricReport(_ context.Context, bmcName, odataID string) ([]byte, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fetchCall{bmcName: bmcName, odataID: odataID})
+	ch := f.notifyAfterCall
+	f.mu.Unlock()
+	if ch != nil {
+		defer close(ch)
+	}
+	return f.body, f.err
+}
+
+func (f *fakeMetricFetcher) snapshot() []fetchCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fetchCall, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+func newReceiverWithFetcher(t *testing.T, mSink *recordingMetricSink, fetcher events.MetricFetcher) http.Handler {
+	t.Helper()
+	cfg := events.Config{Addr: ":0", MetricFetcher: fetcher}
+	if mSink != nil {
+		cfg.MetricReportSink = mSink
+	}
+	r, err := events.New(cfg)
+	if err != nil {
+		t.Fatalf("events.New: %v", err)
+	}
+	return r.Handler()
+}
+
+func TestMetricsReport_GetOnEmpty_FetchesAndPublishes(t *testing.T) {
+	mSink := &recordingMetricSink{}
+	fetcher := &fakeMetricFetcher{
+		body: []byte(`{"MetricValues":[{"MetricId":"PowerWatts","MetricValue":"250"}]}`),
+	}
+	h := newReceiverWithFetcher(t, mSink, fetcher)
+	res := doPost(t, h, "/serverevents/metricsreport/bmc-1",
+		`{"@odata.id":"/redfish/v1/TelemetryService/MetricReports/PowerReport","MetricValues":[]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", res.StatusCode)
+	}
+	// Fetch and publish run in a goroutine; poll until the sink receives a call.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if mSink.callCount() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	calls := fetcher.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("fetcher calls: got %d, want 1", len(calls))
+	}
+	if calls[0].bmcName != testBMCName {
+		t.Errorf("fetcher bmcName: got %q, want %q", calls[0].bmcName, testBMCName)
+	}
+	if calls[0].odataID != "/redfish/v1/TelemetryService/MetricReports/PowerReport" {
+		t.Errorf("fetcher odataID: got %q", calls[0].odataID)
+	}
+	got := mSink.lastCall()
+	if len(got.samples) != 1 || got.samples[0].MetricID != "PowerWatts" || got.samples[0].Value != 250 {
+		t.Errorf("samples: %+v", got.samples)
+	}
+}
+
+func TestMetricsReport_GetOnEmpty_NoFetcherConfigured(t *testing.T) {
+	mSink := &recordingMetricSink{}
+	h := newReceiverWithMetrics(t, mSink)
+	res := doPost(t, h, "/serverevents/metricsreport/bmc-1",
+		`{"@odata.id":"/redfish/v1/TelemetryService/MetricReports/PowerReport","MetricValues":[]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", res.StatusCode)
+	}
+	if len(mSink.calls) != 1 {
+		t.Fatalf("sink calls: got %d, want 1", len(mSink.calls))
+	}
+	if len(mSink.calls[0].samples) != 0 {
+		t.Errorf("expected no samples when no fetcher, got %+v", mSink.calls[0].samples)
+	}
+}
+
+func TestMetricsReport_GetOnEmpty_FetchError(t *testing.T) {
+	mSink := &recordingMetricSink{}
+	done := make(chan struct{})
+	fetcher := &fakeMetricFetcher{err: fmt.Errorf("connection refused"), notifyAfterCall: done}
+	h := newReceiverWithFetcher(t, mSink, fetcher)
+	res := doPost(t, h, "/serverevents/metricsreport/bmc-1",
+		`{"@odata.id":"/redfish/v1/TelemetryService/MetricReports/PowerReport","MetricValues":[]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200 (BMC notification was delivered)", res.StatusCode)
+	}
+	// Wait for the goroutine to complete the (failed) fetch before asserting the sink.
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for fetch goroutine")
+	}
+	if mSink.callCount() != 0 {
+		t.Errorf("sink should not be called when fetch fails, got %d calls", mSink.callCount())
+	}
+}
+
+func TestMetricsReport_GetOnEmpty_NotTriggeredWhenValuesPresent(t *testing.T) {
+	mSink := &recordingMetricSink{}
+	fetcher := &fakeMetricFetcher{}
+	h := newReceiverWithFetcher(t, mSink, fetcher)
+	res := doPost(t, h, "/serverevents/metricsreport/bmc-1",
+		`{"@odata.id":"/redfish/v1/TelemetryService/MetricReports/PowerReport","MetricValues":[{"MetricId":"Watts","MetricValue":"100"}]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", res.StatusCode)
+	}
+	if calls := fetcher.snapshot(); len(calls) != 0 {
+		t.Errorf("fetcher must not be called when MetricValues is populated, got %d calls", len(calls))
+	}
+	got := mSink.lastCall()
+	if len(got.samples) != 1 || got.samples[0].MetricID != "Watts" {
+		t.Errorf("samples: %+v", got.samples)
 	}
 }
 

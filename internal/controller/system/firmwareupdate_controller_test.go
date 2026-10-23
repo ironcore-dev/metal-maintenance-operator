@@ -4,10 +4,18 @@
 package system
 
 import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
+	"github.com/stmcginnis/gofish/schemas"
 	"k8s.io/utils/ptr"
 
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -220,5 +228,281 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 
 		By("Ensuring that the FirmwareUpdateDell has been removed")
 		Eventually(Get(fwUpdate)).Should(Satisfy(apierrors.IsNotFound))
+	})
+})
+
+// fakeStuckJobBMC is a minimal bmc.BMC implementation used to unit-test
+// handleStuckScheduledJob in isolation, without spinning up the full mock
+// Redfish HTTP server. Embedding bmc.BMC as a nil interface satisfies the
+// entire (large) BMC method set; only the two methods handleStuckScheduledJob
+// actually calls (GetSystemInfo and PowerOn) are overridden below. Calling any
+// other method on this fake would panic, which is fine since this test never
+// exercises them.
+type fakeStuckJobBMC struct {
+	bmc.BMC
+
+	powerState   metalv1alpha1.ServerPowerState
+	powerOnCalls int
+	powerOnErr   error
+}
+
+func (f *fakeStuckJobBMC) GetSystemInfo(_ context.Context, _ string) (bmc.SystemInfo, error) {
+	return bmc.SystemInfo{PowerState: schemas.PowerState(f.powerState)}, nil
+}
+
+func (f *fakeStuckJobBMC) PowerOn(_ context.Context, _ string) error {
+	f.powerOnCalls++
+	return f.powerOnErr
+}
+
+var _ = Describe("handleStuckScheduledJob", func() {
+	const powerOnTimeout = time.Minute
+
+	var (
+		dh          *dellHandler
+		r           *FirmwareUpdateReconciler
+		server      *metalv1alpha1.Server
+		fw          *systemv1alpha1.FirmwareUpdate
+		fakeBMCImpl *fakeStuckJobBMC
+	)
+
+	BeforeEach(func() {
+		dh = &dellHandler{}
+		r = &FirmwareUpdateReconciler{
+			Conditions:                 conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
+			ScheduledJobPowerOnTimeout: powerOnTimeout,
+		}
+		server = &metalv1alpha1.Server{
+			Spec: metalv1alpha1.ServerSpec{SystemURI: "/redfish/v1/Systems/1"},
+		}
+		fw = &systemv1alpha1.FirmwareUpdate{}
+		fakeBMCImpl = &fakeStuckJobBMC{powerState: metalv1alpha1.ServerOffPowerState}
+	})
+
+	// withIssuedCondition sets fw.Status.Conditions so ConditionScheduledJobStuckPowerOnIssued
+	// is already True, simulating a PowerOn already issued for an ongoing incident.
+	withIssuedCondition := func() {
+		fw.Status.Conditions = []metav1.Condition{{
+			Type:               ConditionScheduledJobStuckPowerOnIssued,
+			Status:             metav1.ConditionTrue,
+			Reason:             ReasonScheduledJobStuckPowerOnIssued,
+			Message:            "Job(s) remained Scheduled with server powered off; issued PowerOn",
+			LastTransitionTime: metav1.Now(),
+		}}
+	}
+
+	It("does nothing when ScheduledJobPowerOnTimeout is disabled", func() {
+		r.ScheduledJobPowerOnTimeout = 0
+		stuckSince := metav1.NewTime(time.Now().Add(-2 * powerOnTimeout))
+		fw.Status.LastProgressTime = &stuckSince
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(condition).To(BeNil())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0))
+	})
+
+	It("does nothing when no component job is stuck in Scheduled state", func() {
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(condition).To(BeNil())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0))
+	})
+
+	It("does nothing while the no-progress timeout has not yet elapsed", func() {
+		recentProgress := metav1.NewTime(time.Now().Add(-powerOnTimeout / 2))
+		fw.Status.LastProgressTime = &recentProgress
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(condition).To(BeNil())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0))
+	})
+
+	It("turns the server on when a job is stuck Scheduled, the server is off, and the timeout has elapsed", func() {
+		stuckSince := metav1.NewTime(time.Now().Add(-2 * powerOnTimeout))
+		fw.Status.LastProgressTime = &stuckSince
+		fw.Status.DellStatus = &systemv1alpha1.DellFirmwareUpdateStatus{
+			ComponentJobs: []systemv1alpha1.RepositoryJob{{JobID: "JID_1", State: "Scheduled"}},
+		}
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(1), "PowerOn should have been issued exactly once")
+
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Type).To(Equal(ConditionScheduledJobStuckPowerOnIssued))
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("defers issuing PowerOn when the Scheduled job was not yet observed as Scheduled in status", func() {
+		stuckSince := metav1.NewTime(time.Now().Add(-2 * powerOnTimeout))
+		fw.Status.LastProgressTime = &stuckSince
+		// JID_1 is newly discovered this reconcile - ComponentJobs doesn't
+		// reflect it as Scheduled yet, so it must not be treated as stuck
+		// even though LastProgressTime looks stale for unrelated reasons.
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(condition).To(BeNil())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0), "PowerOn must not be issued before the job is confirmed Scheduled in status")
+	})
+
+	It("does not issue a repeat PowerOn call while the server is still booting", func() {
+		withIssuedCondition()
+		// Server is still Off (e.g. still booting) even though PowerOn was
+		// already issued for this incident.
+		fakeBMCImpl.powerState = metalv1alpha1.ServerOffPowerState
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(condition).To(BeNil())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0), "PowerOn must not be called again for the same ongoing incident")
+	})
+
+	It("resolves the condition back to False once the server is confirmed powered on", func() {
+		withIssuedCondition()
+		fakeBMCImpl.powerState = metalv1alpha1.ServerOnPowerState
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, []string{"JID_1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0))
+
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Type).To(Equal(ConditionScheduledJobStuckPowerOnIssued))
+		Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+	})
+
+	It("resolves the condition back to False once no component job remains Scheduled", func() {
+		withIssuedCondition()
+		fakeBMCImpl.powerState = metalv1alpha1.ServerOffPowerState
+
+		condition, err := dh.handleStuckScheduledJob(context.Background(), fakeBMCImpl, fw, r, server, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeBMCImpl.powerOnCalls).To(Equal(0))
+
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Type).To(Equal(ConditionScheduledJobStuckPowerOnIssued))
+		Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+	})
+})
+
+// checkProgressDeadline is exercised directly (bypassing the manager/BMC mock
+// server) since it only touches fw.Spec/fw.Status and the k8s client - this
+// is a regression test for the bug where a FirmwareUpdate stuck retrying
+// forever in Pending or Completed (e.g. a BMC error that's silently retried)
+// never hit any deadline and left the server in Maintenance indefinitely in completed state.
+var _ = Describe("checkProgressDeadline", func() {
+	var (
+		r  *FirmwareUpdateReconciler
+		ns *v1.Namespace
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		r = &FirmwareUpdateReconciler{
+			Client:     k8sClient,
+			Conditions: conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
+		}
+
+		ns = &v1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+	})
+
+	AfterEach(func(ctx SpecContext) {
+		Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+	})
+
+	// newFirmwareUpdate creates a FirmwareUpdate with the given
+	// ProgressDeadlineSeconds and persists the given Status (via a Status
+	// subresource update) before returning it. ProgressDeadlineSeconds must be
+	// set at Create time (a plain Spec field, not persisted again afterwards)
+	// and Status must be persisted via its own Update call, since
+	// checkProgressDeadline (via updateStatus) computes its patch from a fresh
+	// DeepCopy of the passed object and the API server's response overwrites
+	// the in-memory object with whatever is actually stored - any Status field
+	// set only in memory beforehand would otherwise be silently lost.
+	newFirmwareUpdate := func(ctx SpecContext, progressDeadlineSeconds *int32, status systemv1alpha1.FirmwareUpdateStatus) *systemv1alpha1.FirmwareUpdate {
+		fw := &systemv1alpha1.FirmwareUpdate{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-",
+				Namespace:    ns.Name,
+			},
+			Spec: systemv1alpha1.FirmwareUpdateSpec{
+				ServerRef:               &v1.LocalObjectReference{Name: "does-not-matter"},
+				ProgressDeadlineSeconds: progressDeadlineSeconds,
+			},
+		}
+		Expect(k8sClient.Create(ctx, fw)).To(Succeed())
+		fw.Status = status
+		Expect(k8sClient.Status().Update(ctx, fw)).To(Succeed())
+		return fw
+	}
+
+	for _, state := range []systemv1alpha1.FirmwareUpdateState{
+		systemv1alpha1.FirmwareUpdateStatePending,
+		systemv1alpha1.FirmwareUpdateStateCompleted,
+		systemv1alpha1.FirmwareUpdateStateInProgress,
+	} {
+		It(fmt.Sprintf("transitions a FirmwareUpdate stuck in %s to Failed once the deadline is exceeded", state), func(ctx SpecContext) {
+			stuckSince := metav1.NewTime(time.Now().Add(-2 * time.Minute))
+			maintenanceRef := &metalv1alpha1.ObjectReference{Namespace: ns.Name, Name: "some-maintenance"}
+			fw := newFirmwareUpdate(ctx, new(int32(60)), systemv1alpha1.FirmwareUpdateStatus{
+				State:                state,
+				LastProgressTime:     &stuckSince,
+				ServerMaintenanceRef: maintenanceRef,
+			})
+
+			exceeded, err := r.checkProgressDeadline(ctx, fw)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exceeded).To(BeTrue())
+			Expect(fw.Status.State).To(Equal(systemv1alpha1.FirmwareUpdateStateFailed))
+			Expect(fw.Status.Conditions).To(ContainElement(SatisfyAll(
+				HaveField("Type", constants.ConditionProgressDeadlineExceeded),
+				HaveField("Status", metav1.ConditionTrue),
+			)))
+
+			// checkProgressDeadline must never touch ServerMaintenanceRef: keeping
+			// the server in Maintenance once permanently Failed is deliberate (a
+			// human should investigate before the server rejoins the pool).
+			Expect(fw.Status.ServerMaintenanceRef).To(Equal(maintenanceRef))
+		})
+	}
+
+	It("does nothing while the deadline has not yet elapsed", func(ctx SpecContext) {
+		recentProgress := metav1.NewTime(time.Now().Add(-time.Second))
+		fw := newFirmwareUpdate(ctx, new(int32(3600)), systemv1alpha1.FirmwareUpdateStatus{
+			State:            systemv1alpha1.FirmwareUpdateStateCompleted,
+			LastProgressTime: &recentProgress,
+		})
+
+		exceeded, err := r.checkProgressDeadline(ctx, fw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exceeded).To(BeFalse())
+		Expect(fw.Status.State).To(Equal(systemv1alpha1.FirmwareUpdateStateCompleted))
+	})
+
+	It("does nothing when ProgressDeadlineSeconds is unset", func(ctx SpecContext) {
+		stuckSince := metav1.NewTime(time.Now().Add(-24 * time.Hour))
+		fw := &systemv1alpha1.FirmwareUpdate{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: "unpersisted"},
+			Status: systemv1alpha1.FirmwareUpdateStatus{
+				State:            systemv1alpha1.FirmwareUpdateStateCompleted,
+				LastProgressTime: &stuckSince,
+			},
+		}
+
+		exceeded, err := r.checkProgressDeadline(ctx, fw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exceeded).To(BeFalse())
+	})
+
+	It("does nothing when LastProgressTime has never been set", func(ctx SpecContext) {
+		fw := newFirmwareUpdate(ctx, new(int32(1)), systemv1alpha1.FirmwareUpdateStatus{
+			State: systemv1alpha1.FirmwareUpdateStateCompleted,
+		})
+
+		exceeded, err := r.checkProgressDeadline(ctx, fw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exceeded).To(BeFalse())
 	})
 })

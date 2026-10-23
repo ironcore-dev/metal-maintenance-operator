@@ -98,6 +98,30 @@ func TestBMCReconciler_InitForTest_RejectsBadSubscriberID(t *testing.T) {
 
 // -- Reconcile: EventBased mode, no existing subscriptions --
 
+// TestReconcile_EventBased_ServerVendorFallback verifies that bmcRefWithServerFallback
+// uses Server.Status.Manufacturer and Server.Status.Model when the BMC object carries
+// a raw vendor string that differs from the canonical metal-operator constant.
+// Real-world case: Dell iDRAC Manager endpoint reports "Dell" while Server
+// (populated from the ComputerSystem endpoint) has "Dell Inc." and "PowerEdge R660".
+func TestReconcile_EventBased_ServerVendorFallback(t *testing.T) {
+	bmc := bmcObject(testBMCName, "Dell", "16G Monolithic")
+	srv := serverObject("server-1", testBMCName, vendorDellInc, modelR650)
+	c := newClientWithServerIndex(t, bmc, srv)
+	res := &fakeResolver{}
+	res.set(makeResolved(), nil)
+	fc := &fakeClient{}
+	r := newRec(t, c, dellVendorMatch(), res, &fakeFactory{client: fc})
+
+	if _, err := r.Reconcile(context.Background(), req()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	creates := fc.snapshotCreates()
+	if len(creates) != 2 {
+		t.Fatalf("create calls: got %d, want 2 (server vendor fallback not working)", len(creates))
+	}
+}
+
 func TestReconcile_EventBased_NoExisting_CreatesBoth(t *testing.T) {
 	c := newClientWith(t, bmcObject(testBMCName, vendorDellInc, modelR650))
 	res := &fakeResolver{}

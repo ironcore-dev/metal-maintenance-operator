@@ -59,7 +59,11 @@ type HardwareMatch struct {
 	// so the runtime match is plain equality — short forms like "Dell"
 	// or "dell" are rejected by Validate (they'd silently never match).
 	Vendor string `yaml:"vendor"`
-	// Models is the list of model strings to match; ["*"] matches all models.
+	// Models is the list of model strings to match against the hardware model;
+	// ["*"] matches all models. The runtime resolves the model from
+	// BMC.Status.Model when set, falling back to Server.Status.Model
+	// (e.g. Dell iDRAC does not populate BMC.Status.Model, so the Server
+	// model string must be used here instead).
 	Models []string `yaml:"models"`
 	// MinFirmware is the minimum firmware version required for event-based
 	// delivery. Must be a semver string if set. BMCs below this version

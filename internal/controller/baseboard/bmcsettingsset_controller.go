@@ -11,7 +11,6 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -276,17 +275,6 @@ func (r *BMCSettingsSetReconciler) createMissingBMCSettings(
 	var errs []error
 	for _, bmc := range bmcList.Items {
 		if _, ok := bmcWithSettings[bmc.Name]; !ok {
-			existingList := &baseboardv1alpha1.BMCSettingsList{}
-			if err := r.List(ctx, existingList, client.MatchingFields{constants.BMCRefField: bmc.Name}); err != nil {
-				log.Error(err, "Failed to list existing BMCSettings", "BMC", bmc.Name)
-				errs = append(errs, err)
-				continue
-			}
-			if len(existingList.Items) > 0 {
-				log.V(1).Info("Found existing BMCSettings for BMC", "BMC", bmc.Name, "BMCSettings", existingList.Items[0].Name)
-				continue
-			}
-
 			// generate a deterministic k8s conform name for bmcsettings, so that a
 			// re-reconcile on a stale cache cannot create duplicate children.
 			newBMCSettingsName := utils.VersionSetChildName(bmcSettingsSet.Name, bmc.Name)

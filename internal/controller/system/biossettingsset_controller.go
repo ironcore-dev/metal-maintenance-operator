@@ -235,16 +235,6 @@ func (r *BIOSSettingsSetReconciler) createMissingBIOSSettings(ctx context.Contex
 	var errs []error
 	for _, server := range servers.Items {
 		if _, ok := serverWithSettings[server.Name]; !ok {
-			existingList := &systemv1alpha1.BIOSSettingsList{}
-			if err := r.List(ctx, existingList, client.MatchingFields{constants.ServerRefField: server.Name}); err != nil {
-				log.Error(err, "Failed to list existing BIOSSettings", "Server", server.Name)
-				errs = append(errs, err)
-				continue
-			}
-			if len(existingList.Items) > 0 {
-				log.V(1).Info("Found existing BIOSSettings for Server", "Server", server.Name, "BIOSSettings", existingList.Items[0].Name)
-				continue
-			}
 			// generate a deterministic k8s conform name, so that a re-reconcile on a
 			// stale cache cannot create duplicate children.
 			newBiosSettingsName := utils.VersionSetChildName(set.Name, server.Name)

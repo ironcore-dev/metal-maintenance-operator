@@ -66,6 +66,12 @@ type BMCReconciler struct {
 	// same Forget-on-teardown contract as Sink, independent nil-ability.
 	MetricReportSink sink.MetricReportSink
 
+	// AlertHandler is optional. When set, Forget is called on BMC teardown
+	// to delete the per-BMC alert gauge series.
+	AlertHandler interface {
+		Forget(hostname string)
+	}
+
 	// ReceiverURL is the externally-reachable base URL the BMC POSTs to.
 	// Destination URLs are computed as
 	// "<ReceiverURL>/serverevents[/<SubscriberID>]/alerts/{bmcName}".
@@ -188,6 +194,9 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			if r.MetricReportSink != nil {
 				r.MetricReportSink.Forget(req.Name)
 			}
+			if r.AlertHandler != nil {
+				r.AlertHandler.Forget(req.Name)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get BMC %q: %w", req.Name, err)
@@ -209,6 +218,9 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 		if r.MetricReportSink != nil {
 			r.MetricReportSink.Forget(req.Name)
+		}
+		if r.AlertHandler != nil {
+			r.AlertHandler.Forget(req.Name)
 		}
 		if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, bmc, bmcSubscriptionFinalizer); err != nil {
 			return ctrl.Result{}, fmt.Errorf("remove finalizer on BMC %q: %w", req.Name, err)
@@ -527,15 +539,19 @@ func bmcRefFromObject(bmc *metalv1alpha1.BMC) BMCRef {
 	}
 }
 
-// bmcRefWithServerFallback builds a BMCRef, preferring Server.status fields
-// for Vendor and Model when BMC.status.manufacturer is empty. Dell BMCs, for
-// example, do not populate BMC.status.manufacturer, whereas the associated
-// Server always has status.manufacturer and status.model set by metal-operator.
+// bmcRefWithServerFallback builds a BMCRef using Server.status where it is more
+// authoritative than the BMC object's own status.
+//
+// Vendor: always taken from Server when available. The BMC Manager endpoint may
+// report a different string ("Dell" vs "Dell Inc."); the Server (populated from
+// the Systems endpoint) carries the canonical value.
+//
+// Model: taken from Server only when the BMC has no model of its own. The BMC
+// model often encodes the firmware controller version (e.g., "iLO 6") which is
+// the meaningful discriminator for capability filtering — overriding it with the
+// server hardware model ("ProLiant DL380 Gen11") would break those matches.
 func (r *BMCReconciler) bmcRefWithServerFallback(ctx context.Context, bmc *metalv1alpha1.BMC) BMCRef {
 	ref := bmcRefFromObject(bmc)
-	if ref.Vendor != "" {
-		return ref
-	}
 	serverList := &metalv1alpha1.ServerList{}
 	if err := r.Client.List(ctx, serverList, client.MatchingFields{"spec.bmcRef.name": bmc.Name}); err != nil {
 		r.Log.V(1).Info("Could not list Servers for BMC vendor/model lookup", "bmc", bmc.Name, "err", err.Error())
@@ -545,8 +561,12 @@ func (r *BMCReconciler) bmcRefWithServerFallback(ctx context.Context, bmc *metal
 		return ref
 	}
 	srv := serverList.Items[0]
-	ref.Vendor = srv.Status.Manufacturer
-	ref.Model = srv.Status.Model
+	if srv.Status.Manufacturer != "" {
+		ref.Vendor = srv.Status.Manufacturer
+	}
+	if ref.Model == "" && srv.Status.Model != "" {
+		ref.Model = srv.Status.Model
+	}
 	return ref
 }
 

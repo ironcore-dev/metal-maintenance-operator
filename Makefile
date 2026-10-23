@@ -53,7 +53,7 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: fmt
 fmt: goimports ## Run goimports against code.
-	$(GOIMPORTS) -w .
+	find . -name '*.go' -not -name 'zz_generated*.go' -not -path '*/vendor/*' | xargs $(GOIMPORTS) -w
 
 .PHONY: vet
 vet: ## Run go vet against code.
