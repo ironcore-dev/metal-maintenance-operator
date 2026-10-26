@@ -103,8 +103,8 @@ func main() {
 	var resyncInterval time.Duration
 	var biosSettingsTimeoutExpiry time.Duration
 	var rebootTimeoutExpiry time.Duration
-	var maxRepositoryPasses int
 	var scheduledJobPowerOnTimeout time.Duration
+	var maxRepositoryPasses int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -147,7 +147,7 @@ func main() {
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
 		"Skip TLS certificate validation for BMC connections.")
-	flag.DurationVar(&resyncInterval, "resync-interval", 2*time.Minute,
+	flag.DurationVar(&resyncInterval, "resync-interval", 10*time.Minute,
 		"Resync interval for BMC/BIOS maintenance controllers.")
 	var defaultFailedAutoRetryCountInt int
 	flag.IntVar(&defaultFailedAutoRetryCountInt, "default-failed-auto-retry-count", 3,
@@ -609,7 +609,7 @@ func main() {
 	// +kubebuilder:scaffold:builder
 
 	if enableTelemetry {
-		if err := telemetryruntime.AddTo(mgr, telemetryruntime.Options{
+		telemetryOpts := telemetryruntime.Options{
 			ConfigName:                 telemetryConfigName,
 			ConfigNamespace:            telemetryConfigNamespace,
 			ReceiverURL:                telemetryReceiverURL,
@@ -617,23 +617,39 @@ func main() {
 			InsecureTLS:                telemetryInsecureTLS,
 			SubscriberID:               telemetrySubscriberID,
 			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
-		}); err != nil {
+		}
+		if err := telemetryruntime.AddTo(mgr, &telemetryOpts); err != nil {
 			setupLog.Error(err, "Failed to add telemetry pipeline")
 			os.Exit(1)
 		}
 		setupLog.Info("Enabled telemetry pipeline",
 			"configMap", telemetryConfigNamespace+"/"+telemetryConfigName,
 			"receiverURL", telemetryReceiverURL)
-	}
 
-	// BMC service-discovery endpoint.
-	sdHandler := &discovery.Handler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("discovery"),
-	}
-	if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
-		setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
-		os.Exit(1)
+		// BMC service-discovery endpoint: omit BMCs with active push
+		// subscriptions so the exporter only scrapes what the push pipeline
+		// hasn't claimed.
+		sdHandler := &discovery.Handler{
+			Client:                 mgr.GetClient(),
+			Log:                    ctrl.Log.WithName("discovery"),
+			SubscribedBMCs:         telemetryOpts.ActiveSubscriptions,
+			UnsubscribedBMCReasons: telemetryOpts.UnsubscribedBMCReasons,
+		}
+		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
+			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
+			os.Exit(1)
+		}
+	} else {
+		// Telemetry disabled: register the SD endpoint without subscription
+		// filtering — the exporter scrapes all BMCs.
+		sdHandler := &discovery.Handler{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("discovery"),
+		}
+		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
+			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
+			os.Exit(1)
+		}
 	}
 	if metricsAddr == "0" || metricsAddr == "" {
 		setupLog.Info("BMC service discovery registered but metrics server is disabled",

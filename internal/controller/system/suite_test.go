@@ -225,8 +225,7 @@ func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver
 				PowerPollingTimeout:  200 * time.Millisecond,
 				BasicAuth:            true,
 			},
-			MaxRepositoryPasses:        5,
-			ScheduledJobPowerOnTimeout: 1000 * time.Millisecond,
+			MaxRepositoryPasses: 5,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real

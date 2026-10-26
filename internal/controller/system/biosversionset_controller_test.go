@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/ptr"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
@@ -154,11 +155,9 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSetSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					VersionTemplate: api.VersionTemplate{
-						Version:                 upgradeServerBiosVersion,
-						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
-					},
+					Version:                 upgradeServerBiosVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -250,11 +249,9 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSetSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					VersionTemplate: api.VersionTemplate{
-						Version:                 upgradeServerBiosVersion,
-						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
-					},
+					Version:                 upgradeServerBiosVersion,
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
 				},
 				ServerSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -418,12 +415,10 @@ var _ = Describe("BIOSVersionSet Controller", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSetSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					VersionTemplate: api.VersionTemplate{
-						Version:                 upgradeServerBiosVersion + " fail",
-						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion + " fail"},
-						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
-						RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
-					},
+					Version:                 upgradeServerBiosVersion + " fail",
+					Image:                   api.ImageSpec{URI: upgradeServerBiosVersion + " fail"},
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					RetryPolicy:             &api.RetryPolicy{MaxAttempts: new(int32(failedAutoRetryCount))},
 				},
 				ServerSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{

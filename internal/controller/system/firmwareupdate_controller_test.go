@@ -4,18 +4,10 @@
 package system
 
 import (
-	"context"
-	"fmt"
-	"time"
-
-	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
-	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
-	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
-	"github.com/stmcginnis/gofish/schemas"
 	"k8s.io/utils/ptr"
 
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
@@ -230,7 +222,6 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 		Eventually(Get(fwUpdate)).Should(Satisfy(apierrors.IsNotFound))
 	})
 })
-
 // fakeStuckJobBMC is a minimal bmc.BMC implementation used to unit-test
 // handleStuckScheduledJob in isolation, without spinning up the full mock
 // Redfish HTTP server. Embedding bmc.BMC as a nil interface satisfies the
