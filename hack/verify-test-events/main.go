@@ -73,6 +73,9 @@ func main() {
 	serversPath := flag.String("servers", "", "path to the server list YAML")
 	perServerTimeout := flag.Duration("timeout", 30*time.Second, "per-server connect+submit timeout")
 	insecure := flag.Bool("insecure", true, "skip TLS verification")
+	probe := flag.Bool("probe", false,
+		"auto-discover a TestMessageId via the BMC's Redfish EventService registries "+
+			"when no testEventOverrides row provides one")
 	flag.Parse()
 
 	if *configPath == "" || *serversPath == "" {
@@ -95,7 +98,7 @@ func main() {
 	for _, s := range list.Servers {
 		username := firstNonEmpty(s.Username, list.Username)
 		password := firstNonEmpty(s.Password, list.Password)
-		result := runOne(s, username, password, cfg, *perServerTimeout, *insecure)
+		result := runOne(s, username, password, cfg, *perServerTimeout, *insecure, *probe)
 		fmt.Println(result.String())
 		switch result.outcome {
 		case outcomeOK:
@@ -141,29 +144,32 @@ func (r result) String() string {
 }
 
 // runOne connects to one BMC and calls SubmitTestEvent. It performs no
-// other Redfish calls (no inventory lookup, no subscription management).
+// subscription management. When probe is true and no testEventOverrides row
+// provides a MessageId, it walks the BMC's Redfish event registries to
+// auto-discover one.
 func runOne(s serverEntry, username, password string,
-	cfg *subscriptions.Config, timeout time.Duration, insecure bool,
+	cfg *subscriptions.Config, timeout time.Duration, insecure, probe bool,
 ) result {
-	hw := subscriptions.SubscribeToBMC(subscriptions.BMCRef{
+	ref := subscriptions.BMCRef{
 		Name: s.Endpoint, Vendor: s.Vendor, Model: s.Model, FirmwareVersion: s.Firmware,
-	}, cfg)
-	if hw == nil {
+	}
+
+	if subscriptions.IsExcluded(ref, cfg) {
 		return result{endpoint: s.Endpoint, outcome: outcomeSkip,
 			detail: fmt.Sprintf(
-				"no eventBasedHardware row matches vendor=%q model=%q firmware=%q",
-				s.Vendor,
-				s.Model,
-				s.Firmware,
+				"vendor=%q model=%q matched an excludeHardware rule",
+				s.Vendor, s.Model,
 			)}
 	}
-	if hw.TestMessageId == "" {
-		return result{endpoint: s.Endpoint, outcome: outcomeSkip,
-			detail: fmt.Sprintf(
-				"matched vendor=%q model=%q but row has no testMessageId configured",
-				s.Vendor,
-				s.Model,
-			)}
+
+	override := subscriptions.TestOverrideFor(ref, cfg)
+	msgId := ""
+	severity := ""
+	origin := ""
+	if override != nil {
+		msgId = override.TestMessageId
+		severity = override.TestSeverity
+		origin = override.TestOriginOfCondition
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -185,10 +191,38 @@ func runOne(s serverEntry, username, password string,
 	if err != nil {
 		return result{endpoint: s.Endpoint, outcome: outcomeFail, detail: fmt.Sprintf("wrap client: %v", err)}
 	}
+
+	// Auto-discover a MessageId when probe is requested and none was configured.
+	if msgId == "" && probe {
+		caps, err := client.ProbeEventService(ctx, true)
+		if err != nil {
+			return result{endpoint: s.Endpoint, outcome: outcomeFail,
+				detail: fmt.Sprintf("probe EventService: %v", err)}
+		}
+		if !caps.ServiceEnabled || !caps.HasSubmitTestEvent {
+			return result{endpoint: s.Endpoint, outcome: outcomeSkip,
+				detail: "EventService not enabled or SubmitTestEvent not supported"}
+		}
+		if caps.DiscoveredTestMessageId == "" {
+			return result{endpoint: s.Endpoint, outcome: outcomeSkip,
+				detail: "EventService enabled but no MessageId could be discovered from registries"}
+		}
+		fmt.Printf("  [discovered] %s → %s\n", s.Endpoint, caps.DiscoveredTestMessageId)
+		msgId = caps.DiscoveredTestMessageId
+	}
+
+	if msgId == "" {
+		return result{endpoint: s.Endpoint, outcome: outcomeSkip,
+			detail: fmt.Sprintf(
+				"no testEventOverrides row for vendor=%q model=%q and --probe not set",
+				s.Vendor, s.Model,
+			)}
+	}
+
 	params := subscriptions.TestEventParams{
-		MessageId:         hw.TestMessageId,
-		Severity:          hw.TestSeverity,
-		OriginOfCondition: hw.TestOriginOfCondition,
+		MessageId:         msgId,
+		Severity:          severity,
+		OriginOfCondition: origin,
 	}
 	if err := client.SubmitTestEvent(ctx, params); err != nil {
 		return result{endpoint: s.Endpoint, outcome: outcomeFail,
@@ -196,7 +230,7 @@ func runOne(s serverEntry, username, password string,
 				"SubmitTestEvent(vendor=%q model=%q messageId=%q): %v",
 				s.Vendor,
 				s.Model,
-				hw.TestMessageId,
+				msgId,
 				err,
 			)}
 	}
@@ -205,7 +239,7 @@ func runOne(s serverEntry, username, password string,
 			"SubmitTestEvent accepted (vendor=%q model=%q messageId=%q)",
 			s.Vendor,
 			s.Model,
-			hw.TestMessageId,
+			msgId,
 		)}
 }
 

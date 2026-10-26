@@ -303,12 +303,16 @@ telemetry:
     ## Timeout for the health check round-trip. Bounds: 5s – 5m.
     ##
     testEventTimeout: ""
-    ## Vendor/model rows that opt into event-based subscription.
+    ## Vendor/model rows that opt OUT of event-based subscription (exclusions).
     ## See config/telemetry/configmap.yaml for full field documentation.
     ##
-    eventBasedHardware: []
+    excludeHardware: []
+    ## Test event overrides per vendor/model.
+    ## See config/telemetry/configmap.yaml for full field documentation.
+    ##
+    testEventOverrides: []
     ## Example:
-    # eventBasedHardware:
+    # testEventOverrides:
     #   - vendor: "Dell Inc."
     #     models: ["PowerEdge R760", "PowerEdge R660"]
     #     testMessageId: "FAN0001"
