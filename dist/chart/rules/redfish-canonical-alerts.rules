@@ -1,0 +1,26 @@
+groups:
+  - name: redfish_canonical_alerts
+    rules:
+    - alert: RedfishUnmappedMetricId
+      expr: |
+        count by (metric_id, hostname) (
+          redfish_monitor_reading
+          unless on(metric_id)
+          redfish_monitor_reading{
+            metric_id=~"CPUUtil|CPUUsage|CPUUsagePctReading|AverageCPUUtilization|
+                        MemoryUsage|MemoryUsagePctReading|AverageMemoryUtilization|
+                        MemoryBusUtil|IOBusUtil|IOUsage|IOUsagePctReading|CPUICUtil|
+                        AvgCPU0Freq|AvgCPU1Freq|AggregateCUPSUsage|AggregateUsage|
+                        AverageConsumedWatts|SystemPowerConsumption|SystemInputPower|
+                        MinConsumedWatts|MaxConsumedWatts|Cap|
+                        AveragePowerSupplyInput|AveragePowerSupplyOutput|
+                        CpuWatts|TotalCPUPower|DimmWatts|TotalMemoryPower|GpuWatts|TotalGPUPower|
+                        CPU0Power|CPU1Power|TotalFanPower|
+                        AmbTemp|SystemAvgIntelTempHour|TemperatureReading|RPMReading|
+                        CpuCapLim|CpuMax|CpuPwrSavLim|PrMode|PunCap|UnachCap"
+          }
+        ) > 0
+      annotations:
+        summary: >
+          BMC {{ $labels.hostname }} pushing MetricId '{{ $labels.metric_id }}' with no
+          canonical mapping — update canonical-mapping.yaml and the recording rules.

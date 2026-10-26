@@ -218,6 +218,30 @@ prometheus:
   ##
   # annotations: {}
 
+## Prometheus recording and alerting rules for cross-vendor Redfish metric normalization.
+## When enabled, deploys PrometheusRule CRs from dist/chart/rules/*.rules into the
+## operator namespace. The prometheus label must match the ruleSelector on the target
+## Prometheus instance.
+##
+prometheusRules:
+  enabled: false
+
+  ## Deploy canonical recording rules (redfish-canonical.rules).
+  recording:
+    enabled: true
+
+  ## Deploy unmapped MetricId alert (redfish-canonical-alerts.rules).
+  alerts:
+    enabled: true
+
+  ## Labels applied to all generated PrometheusRule CRs.
+  ## The prometheus label must match the ruleSelector on the target Prometheus instance.
+  # labels:
+  #   prometheus: my-prometheus-instance
+
+  ## Additional labels to apply to all PrometheusRule CRs.
+  # extraLabels: {}
+
 ## Network policies for controlling traffic flow.
 ## Enable to restrict ingress to the controller manager.
 ##
