@@ -524,7 +524,7 @@ var _ = Describe("handleTTL", func() {
 			{Status: systemv1alpha1.FirmwareUpdateStatus{LastProgressTime: &longAgo}},
 		}
 
-		remaining, shouldDelete := handleTTL(newSet(ptr.To(int32(60))), owned)
+		remaining, shouldDelete := handleTTL(newSet(new(int32(60))), owned)
 		Expect(shouldDelete).To(BeTrue())
 		Expect(remaining).To(BeZero())
 	})
@@ -550,7 +550,7 @@ var _ = Describe("handleTTL", func() {
 			},
 		}
 
-		remaining, shouldDelete := handleTTL(newSet(ptr.To(int32(60))), owned)
+		remaining, shouldDelete := handleTTL(newSet(new(int32(60))), owned)
 		Expect(shouldDelete).To(BeFalse())
 		Expect(remaining).To(BeZero())
 	})
@@ -578,7 +578,7 @@ var _ = Describe("handleTTL", func() {
 			},
 		}
 
-		remaining, shouldDelete := handleTTL(newSet(ptr.To(int32(60))), owned)
+		remaining, shouldDelete := handleTTL(newSet(new(int32(60))), owned)
 		Expect(shouldDelete).To(BeTrue())
 		Expect(remaining).To(BeZero())
 	})
