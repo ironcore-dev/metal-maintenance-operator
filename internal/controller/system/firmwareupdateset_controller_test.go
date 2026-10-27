@@ -474,9 +474,33 @@ var _ = Describe("FirmwareUpdateSet Controller", func() {
 		))
 
 		// cleanup
+		// These FirmwareUpdates use a catalog file that always fails, so they
+		// never reach Completed - explicitly delete the
+		// owned ServerMaintenance too, standing in for what GC would do.
+		serverMaintenanceRefs := make([]*metalv1alpha1.ObjectReference, 0, 2)
+		for _, fw := range []*systemv1alpha1.FirmwareUpdate{fwUpdate02, fwUpdate03} {
+			serverMaintenanceRefs = append(serverMaintenanceRefs, fw.Status.ServerMaintenanceRef)
+		}
+
 		Expect(k8sClient.Delete(ctx, fwUpdateSet)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, fwUpdate02)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, fwUpdate03)).To(Succeed())
+
+		for _, ref := range serverMaintenanceRefs {
+			if ref == nil {
+				continue
+			}
+			serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ref.Name,
+					Namespace: ns.Name,
+				},
+			}
+			if err := k8sClient.Delete(ctx, serverMaintenance); err != nil && !apierrors.IsNotFound(err) {
+				Expect(err).NotTo(HaveOccurred())
+			}
+		}
+
 		Eventually(Object(server01)).Should(testutils.ServerNotParked)
 		Eventually(Object(server02)).Should(testutils.ServerNotParked)
 		Eventually(Object(server03)).Should(testutils.ServerNotParked)
