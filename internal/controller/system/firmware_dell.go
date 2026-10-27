@@ -270,6 +270,16 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 	}
 
 	if job.IsFailed() {
+		if wasCompleted {
+			// The periodic recheck job itself failed (e.g. a transient BMC error) - this does
+			// NOT establish drift (we never actually learned whether the live hardware still
+			// matches), so patch Unknown rather than reusing the drift-reset path's False/
+			// CompletionConditionReset, to avoid misreporting an inconclusive check as confirmed
+			// drift.
+			if err := utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionUnknown, ReasonRepositoryCheckFailed, fmt.Sprintf("FirmwareUpdate %s repository recheck failed: %v", fw.Name, job.Message)); err != nil {
+				return false, err
+			}
+		}
 		if err := r.Conditions.Update(
 			condition,
 			conditionutils.UpdateStatus(corev1.ConditionTrue),
