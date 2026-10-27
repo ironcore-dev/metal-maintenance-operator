@@ -6,6 +6,7 @@ package system
 import (
 	"fmt"
 	"net/netip"
+	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
@@ -479,5 +480,92 @@ var _ = Describe("FirmwareUpdateSet Controller", func() {
 		Eventually(Object(server01)).Should(testutils.ServerNotParked)
 		Eventually(Object(server02)).Should(testutils.ServerNotParked)
 		Eventually(Object(server03)).Should(testutils.ServerNotParked)
+	})
+})
+
+var _ = Describe("handleTTL", func() {
+	newSet := func(ttlSeconds *int32) *systemv1alpha1.FirmwareUpdateSet {
+		return &systemv1alpha1.FirmwareUpdateSet{
+			Spec: systemv1alpha1.FirmwareUpdateSetSpec{
+				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+					TTLSecondsAfterFinished: ttlSeconds,
+				},
+			},
+		}
+	}
+
+	It("should delete once TTL has elapsed for a non-Dell FirmwareUpdate", func() {
+		longAgo := metav1.NewTime(time.Now().Add(-time.Hour))
+		owned := []*systemv1alpha1.FirmwareUpdate{
+			{Status: systemv1alpha1.FirmwareUpdateStatus{LastProgressTime: &longAgo}},
+		}
+
+		remaining, shouldDelete := handleTTL(newSet(ptr.To(int32(60))), owned)
+		Expect(shouldDelete).To(BeTrue())
+		Expect(remaining).To(BeZero())
+	})
+
+	It("should NOT delete an intermediate Completed Dell FirmwareUpdate that hasn't re-verified convergence", func() {
+		// Mirrors dellHandler.processInProgress's hand-back-to-Completed transition: State is
+		// already Completed and LastProgressTime is old enough for TTL to have elapsed, but
+		// Conditions were reset to empty pending the dry-run RepositoryCheck re-verification -
+		// i.e. ConditionRepositoryCheckCompleted/ReasonRepositoryCheckCompleted is not yet set.
+		longAgo := metav1.NewTime(time.Now().Add(-time.Hour))
+		owned := []*systemv1alpha1.FirmwareUpdate{
+			{
+				Spec: systemv1alpha1.FirmwareUpdateSpec{
+					FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+						DellRepository: &systemv1alpha1.DellFirmwareRepository{},
+					},
+				},
+				Status: systemv1alpha1.FirmwareUpdateStatus{
+					State:            systemv1alpha1.FirmwareUpdateStateCompleted,
+					LastProgressTime: &longAgo,
+					Conditions:       []metav1.Condition{},
+				},
+			},
+		}
+
+		remaining, shouldDelete := handleTTL(newSet(ptr.To(int32(60))), owned)
+		Expect(shouldDelete).To(BeFalse())
+		Expect(remaining).To(BeZero())
+	})
+
+	It("should delete a Dell FirmwareUpdate once its RepositoryCheck has confirmed convergence and TTL elapsed", func() {
+		longAgo := metav1.NewTime(time.Now().Add(-time.Hour))
+		owned := []*systemv1alpha1.FirmwareUpdate{
+			{
+				Spec: systemv1alpha1.FirmwareUpdateSpec{
+					FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+						DellRepository: &systemv1alpha1.DellFirmwareRepository{},
+					},
+				},
+				Status: systemv1alpha1.FirmwareUpdateStatus{
+					State:            systemv1alpha1.FirmwareUpdateStateCompleted,
+					LastProgressTime: &longAgo,
+					Conditions: []metav1.Condition{
+						{
+							Type:   ConditionRepositoryCheckCompleted,
+							Status: metav1.ConditionTrue,
+							Reason: ReasonRepositoryCheckCompleted,
+						},
+					},
+				},
+			},
+		}
+
+		remaining, shouldDelete := handleTTL(newSet(ptr.To(int32(60))), owned)
+		Expect(shouldDelete).To(BeTrue())
+		Expect(remaining).To(BeZero())
+	})
+
+	It("should do nothing when TTLSecondsAfterFinished is unset", func() {
+		owned := []*systemv1alpha1.FirmwareUpdate{
+			{Status: systemv1alpha1.FirmwareUpdateStatus{LastProgressTime: new(metav1.Now())}},
+		}
+
+		remaining, shouldDelete := handleTTL(newSet(nil), owned)
+		Expect(shouldDelete).To(BeFalse())
+		Expect(remaining).To(BeZero())
 	})
 })

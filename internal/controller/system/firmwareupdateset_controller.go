@@ -277,6 +277,15 @@ func handleTTL(set *systemv1alpha1.FirmwareUpdateSet, owned []*systemv1alpha1.Fi
 		if fw.Status.LastProgressTime == nil {
 			continue
 		}
+		// A Dell-repository FirmwareUpdate's State flips to Completed as soon as an apply
+		// pass's component jobs finish, BEFORE the dry-run RepositoryCheck re-verifies that
+		// no further packages are pending (see dellHandler.processInProgress's hand-back to
+		// Completed). Treat that intermediate window as not-yet-finished for TTL purposes, so
+		// the Set is never deleted (cascading its children) while a Dell child might still
+		// need another repository-update pass.
+		if fw.Spec.DellRepository != nil && !dellRepositoryCheckConverged(fw) {
+			return 0, false
+		}
 		if completedAt == nil || fw.Status.LastProgressTime.After(completedAt.Time) {
 			completedAt = fw.Status.LastProgressTime
 		}
@@ -290,6 +299,19 @@ func handleTTL(set *systemv1alpha1.FirmwareUpdateSet, owned []*systemv1alpha1.Fi
 		return remaining, false
 	}
 	return 0, true
+}
+
+// dellRepositoryCheckConverged reports whether fw's dry-run RepositoryCheck has confirmed no
+// packages are pending installation (ConditionRepositoryCheckCompleted True with
+// ReasonRepositoryCheckCompleted). Returns false for a FirmwareUpdate that just transitioned to
+// Completed from InProgress, whose Conditions are reset to empty pending re-verification.
+func dellRepositoryCheckConverged(fw *systemv1alpha1.FirmwareUpdate) bool {
+	for _, c := range fw.Status.Conditions {
+		if c.Type == ConditionRepositoryCheckCompleted {
+			return c.Status == metav1.ConditionTrue && c.Reason == ReasonRepositoryCheckCompleted
+		}
+	}
+	return false
 }
 
 // toFirmwareUpdateSetStatus maps aggregated utils.ChildCounts onto the FirmwareUpdateSet's
