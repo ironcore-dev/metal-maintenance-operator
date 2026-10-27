@@ -55,7 +55,9 @@ func (v *BMCVersionValidator) ValidateCreate(ctx context.Context, obj *baseboard
 func (v *BMCVersionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon update", "name", newObj.GetName())
 
-	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && len(oldObj.Spec.ServerMaintenanceRefs) > 0 {
+	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && len(oldObj.Spec.ServerMaintenanceRefs) > 0 &&
+		oldObj.Status.State == baseboardv1alpha1.BMCVersionStateInProgress &&
+		!webhookutils.IsSpecUnchanged(oldObj.Spec, newObj.Spec) {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, oldObj.Spec.ServerMaintenanceRefs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
@@ -79,7 +81,8 @@ func (v *BMCVersionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj
 func (v *BMCVersionValidator) ValidateDelete(ctx context.Context, obj *baseboardv1alpha1.BMCVersion) (admission.Warnings, error) {
 	bmcversionlog.Info("Validation for BMCVersion upon deletion", "name", obj.GetName())
 
-	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && len(obj.Spec.ServerMaintenanceRefs) > 0 {
+	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && len(obj.Spec.ServerMaintenanceRefs) > 0 &&
+		obj.Status.State == baseboardv1alpha1.BMCVersionStateInProgress {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, obj.Spec.ServerMaintenanceRefs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
