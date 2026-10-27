@@ -56,7 +56,9 @@ func (v *BIOSVersionValidator) ValidateCreate(ctx context.Context, obj *systemv1
 func (v *BIOSVersionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	versionLog.Info("Validation for BIOSVersion upon update", "name", newObj.GetName())
 
-	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && oldObj.Spec.ServerMaintenanceRef != nil {
+	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && oldObj.Spec.ServerMaintenanceRef != nil &&
+		oldObj.Status.State == systemv1alpha1.BIOSVersionStateInProgress &&
+		!webhookutils.IsSpecUnchanged(oldObj.Spec, newObj.Spec) {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, []metalv1alpha1.ObjectReference{*oldObj.Spec.ServerMaintenanceRef})
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)
@@ -80,7 +82,8 @@ func (v *BIOSVersionValidator) ValidateUpdate(ctx context.Context, oldObj, newOb
 func (v *BIOSVersionValidator) ValidateDelete(ctx context.Context, obj *systemv1alpha1.BIOSVersion) (admission.Warnings, error) {
 	versionLog.Info("Validation for BIOSVersion upon deletion", "name", obj.GetName())
 
-	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && obj.Spec.ServerMaintenanceRef != nil {
+	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && obj.Spec.ServerMaintenanceRef != nil &&
+		obj.Status.State == systemv1alpha1.BIOSVersionStateInProgress {
 		active, err := utils.IsAnyServerMaintenanceActive(ctx, v.Client, []metalv1alpha1.ObjectReference{*obj.Spec.ServerMaintenanceRef})
 		if err != nil {
 			return nil, fmt.Errorf("failed to check maintenance state: %w", err)

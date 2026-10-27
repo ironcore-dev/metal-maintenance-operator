@@ -265,6 +265,49 @@ var _ = Describe("BIOSVersion Webhook", func() {
 		})).Should(Succeed())
 	})
 
+	It("should allow annotation and label only updates while BIOSVersion is in progress", func() {
+		By("Creating a ServerMaintenance in InMaintenance state")
+		sm := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-sm-",
+				Namespace:    metav1.NamespaceDefault,
+			},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+				ServerRef: &v1.LocalObjectReference{Name: "foo"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
+		Eventually(UpdateStatus(sm, func() {
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
+		})).Should(Succeed())
+
+		By("Patching the BIOSVersion V1 to in-progress state")
+		Eventually(UpdateStatus(biosVersionV1, func() {
+			biosVersionV1.Status.State = systemv1alpha1.BIOSVersionStateInProgress
+		})).Should(Succeed())
+
+		By("Adding ServerMaintenance reference")
+		Eventually(Update(biosVersionV1, func() {
+			biosVersionV1.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{Name: sm.Name, Namespace: sm.Namespace}
+		})).Should(Succeed())
+
+		By("Updating only annotations and labels should succeed while maintenance is active")
+		biosVersionV1Updated := biosVersionV1.DeepCopy()
+		biosVersionV1Updated.Annotations = map[string]string{"foo": "bar"}
+		biosVersionV1Updated.Labels = map[string]string{"foo": "bar"}
+		Expect(validator.ValidateUpdate(ctx, biosVersionV1, biosVersionV1Updated)).Error().ToNot(HaveOccurred())
+
+		By("Patching the BIOSVersion V1 to Completed state")
+		Eventually(UpdateStatus(biosVersionV1, func() {
+			biosVersionV1.Status.State = systemv1alpha1.BIOSVersionStateCompleted
+		})).Should(Succeed())
+
+		Eventually(UpdateStatus(sm, func() {
+			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStatePending
+		})).Should(Succeed())
+	})
+
 	It("should refuse to delete while ServerMaintenance is active", func() {
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
@@ -280,6 +323,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 		Expect(k8sClient.Create(ctx, sm)).To(Succeed())
 		Eventually(UpdateStatus(sm, func() {
 			sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
+		})).Should(Succeed())
+
+		By("Patching the BIOSVersion V1 to InProgress state")
+		Eventually(UpdateStatus(biosVersionV1, func() {
+			biosVersionV1.Status.State = systemv1alpha1.BIOSVersionStateInProgress
 		})).Should(Succeed())
 
 		By("Setting ServerMaintenanceRef on BIOSVersion V1")

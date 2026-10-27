@@ -268,6 +268,11 @@ var _ = Describe("BMCVersion Webhook", func() {
 				sm.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
 			})).Should(Succeed())
 
+			By("Patching the BMCVersion V1 to InProgress state")
+			Eventually(UpdateStatus(BMCVersionV1, func() {
+				BMCVersionV1.Status.State = baseboardv1alpha1.BMCVersionStateInProgress
+			})).Should(Succeed())
+
 			By("Setting ServerMaintenance reference on BMCVersion V1")
 			Eventually(Update(BMCVersionV1, func() {
 				BMCVersionV1.Spec.ServerMaintenanceRefs = []metalv1alpha1.ObjectReference{{Name: sm.Name, Namespace: sm.Namespace}}

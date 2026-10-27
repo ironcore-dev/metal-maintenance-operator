@@ -77,6 +77,28 @@ const (
 	ConditionReady                       = "Ready"
 	ConditionRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
 	ConditionProgressDeadlineExceeded    = "ProgressDeadlineExceeded"
+
+	// ConditionRetryResetIssued tracks a BMC reset issued specifically to clear a hung/stuck BMC
+	// before retrying a Failed resource. It is intentionally distinct from ConditionResetIssued
+	// (used for the BMC-stabilization reset performed as part of the normal apply flow) so a stale
+	// True value left over from an earlier, unrelated reset does not short-circuit the retry reset.
+	ConditionRetryResetIssued = "RetryResetIssued"
+	// ConditionServerResetIssued tracks a server reboot/power-on issued before retrying a Failed
+	// resource, to clear a server that may be stuck in a bad state.
+	ConditionServerResetIssued = "ServerResetIssued"
+	// ConditionServerResetPowerOffIssued tracks the power-off stage of ConditionServerResetIssued's
+	// explicit power-off-then-power-on sequence (skipped, and marked done immediately, if the
+	// server was already off when the retry reset was requested).
+	ConditionServerResetPowerOffIssued = "ServerResetPowerOffIssued"
+	// ConditionServerResetForcePowerOffIssued tracks whether a forced power-off was escalated to
+	// after the graceful power-off requested by ConditionServerResetPowerOffIssued did not complete
+	// within the configured PowerOffTimeout.
+	ConditionServerResetForcePowerOffIssued = "ServerResetForcePowerOffIssued"
+	// ConditionServerResetPowerOnIssued tracks the power-on stage of ConditionServerResetIssued's
+	// explicit power-off-then-power-on sequence. It exists purely so its own LastTransitionTime can
+	// anchor the GiveUpTimeout for this stage separately from ConditionServerResetPowerOffIssued's,
+	// so time spent in the power-off stage does not eat into the power-on stage's budget.
+	ConditionServerResetPowerOnIssued = "ServerResetPowerOnIssued"
 )
 
 // Shared reason strings used across baseboard and system controllers.
@@ -104,4 +126,10 @@ const (
 	ReasonMaintenanceApproved         = "ServerMaintenanceApproval"
 	ReasonRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
 	ReasonProgressDeadlineExceeded    = "ProgressDeadlineExceeded"
+	// ReasonForcePowerOffIssued is set when a graceful power-off before a retry did not complete
+	// within PowerOffTimeout, and was escalated to a forced power-off.
+	ReasonForcePowerOffIssued = "ForcePowerOffIssued"
+	// ReasonServerResetGaveUp is set on ConditionServerResetIssued when the server did not recover
+	// within GiveUpTimeout and automatic retrying was given up on with exponential back-off.
+	ReasonServerResetGaveUp = "ServerResetGaveUp"
 )

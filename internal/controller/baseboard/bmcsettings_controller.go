@@ -53,6 +53,9 @@ type BMCSettingsReconciler struct {
 	Conditions                  *conditionutils.Accessor
 	DefaultFailedAutoRetryCount int32
 	HMACKey                     []byte
+	// MinBMCResetInterval is the minimum time that must have passed since a BMC's last
+	// completed reset. Set to 0 to always reset.
+	MinBMCResetInterval time.Duration
 }
 
 const (
@@ -336,7 +339,7 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 	case baseboardv1alpha1.BMCSettingsStateApplied:
 		return ctrl.Result{}, r.handleSettingAppliedState(ctx, settings, bmcObj, bmcClient)
 	case baseboardv1alpha1.BMCSettingsStateFailed:
-		return ctrl.Result{}, r.handleFailedState(ctx, settings, bmcObj)
+		return r.handleFailedState(ctx, bmcClient, settings, bmcObj)
 	}
 	log.V(1).Info("Unknown State found", "BMCSettings state", settings.Status.State)
 	return ctrl.Result{}, nil
@@ -843,77 +846,35 @@ func (r *BMCSettingsReconciler) handleBMCReset(
 
 	log.V(1).Info("Handling BMC reset", "conditionType", conditionType)
 
-	if resetBMC.Status != metav1.ConditionTrue {
-		annotations := bmcObj.GetAnnotations()
-		if resetBMC.Reason != constants.ReasonResetIssued {
-			if annotations != nil {
-				if op, ok := annotations[metalv1alpha1.OperationAnnotation]; ok {
-					if op == metalv1alpha1.GracefulRestartBMC {
-						log.V(1).Info("Waiting for BMC reset as annotation on BMC object is set")
-						if err := r.Conditions.Update(
-							resetBMC,
-							conditionutils.UpdateStatus(corev1.ConditionFalse),
-							conditionutils.UpdateReason(constants.ReasonResetIssued),
-							conditionutils.UpdateMessage("Issued BMC reset to stabilize BMC of the server"),
-						); err != nil {
-							return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
-						}
-						return false, r.updateBMCSettingsStatus(ctx, settings, settings.Status.State, resetBMC)
-					} else {
-						return false, fmt.Errorf("unknown annotation on BMC object for operation annotation %v", op)
-					}
-				}
-			}
-			log.V(1).Info("Setting annotation on BMC resource to trigger with BMC reset")
-
-			bmcObjBase := bmcObj.DeepCopy()
-			if annotations == nil {
-				annotations = map[string]string{}
-			}
-			annotations[metalv1alpha1.OperationAnnotation] = metalv1alpha1.GracefulRestartBMC
-			bmcObj.SetAnnotations(annotations)
-			if err := r.Patch(ctx, bmcObj, client.MergeFrom(bmcObjBase)); err != nil {
-				return false, err
-			}
-
-			if err := r.Conditions.Update(
-				resetBMC,
-				conditionutils.UpdateStatus(corev1.ConditionFalse),
-				conditionutils.UpdateReason(constants.ReasonResetIssued),
-				conditionutils.UpdateMessage("Issued BMC reset to stabilize BMC of the server"),
-			); err != nil {
-				return false, fmt.Errorf("failed to update reset BMC condition: %w", err)
-			}
-			return false, r.updateBMCSettingsStatus(ctx, settings, settings.Status.State, resetBMC)
-		}
-
-		// Wait until the BMC resource annotation is removed
-		if annotations != nil {
-			if op, ok := annotations[metalv1alpha1.OperationAnnotation]; ok {
-				if op == metalv1alpha1.GracefulRestartBMC {
-					log.V(1).Info("Waiting for BMC reset as annotation on BMC object is set")
-					return false, nil
-				}
-			}
-		}
-
-		if err := r.Conditions.Update(
-			resetBMC,
-			conditionutils.UpdateStatus(corev1.ConditionTrue),
-			conditionutils.UpdateReason(constants.ReasonResetIssued),
-			conditionutils.UpdateMessage("BMC reset of the server is completed"),
-		); err != nil {
-			return false, fmt.Errorf("failed to update power on server condition: %w", err)
-		}
-		return false, r.updateBMCSettingsStatus(ctx, settings, settings.Status.State, resetBMC)
-	}
-	return true, nil
+	return utils.HandleBMCReset(ctx, r.Conditions, utils.BMCResetArgs{
+		Condition: resetBMC,
+		Reason:    constants.ReasonResetIssued,
+		// The post-apply reset is required to make the just-applied settings take effect, and the
+		// retry reset is required to recover from a failed state, so neither must be skipped due to
+		// an earlier, unrelated reset falling within the cooldown.
+		SkipRecentlyResetCheck: conditionType == ConditionBMCResetPostSettingApply || conditionType == constants.ConditionRetryResetIssued,
+		RecentlyReset: func(ctx context.Context) (bool, error) {
+			return utils.IsBMCRecentlyReset(bmcObj, r.MinBMCResetInterval), nil
+		},
+		IssueReset: func(ctx context.Context) error {
+			return utils.IssueBMCReset(ctx, r.Client, bmcObj)
+		},
+		ResetPending: func(ctx context.Context) (bool, error) {
+			return utils.BMCHasPendingReset(bmcObj), nil
+		},
+		Persist: func(ctx context.Context) error {
+			return r.updateBMCSettingsStatus(ctx, settings, settings.Status.State, resetBMC)
+		},
+	})
 }
 
-func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC) error {
+func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if utils.ShouldRetryReconciliation(settings) {
-		log.V(1).Info("Retrying BMCSettings as per annotation")
+		log.V(1).Info("Retrying BMCSettings after failure")
+		if ready, err := r.ensureResetBeforeRetry(ctx, bmcClient, settings, bmcObj); err != nil || !ready {
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
+		}
 		settingsBase := settings.DeepCopy()
 		settings.Status.FailedAttempts = 0
 		settings.Status.State = baseboardv1alpha1.BMCSettingsStatePending
@@ -921,7 +882,7 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 		annotations := settings.GetAnnotations()
 		retryCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionRetryOfFailedResourceIssued)
 		if err != nil {
-			return fmt.Errorf("failed to get retry condition for BMCSettings: %w", err)
+			return ctrl.Result{}, fmt.Errorf("failed to get retry condition for BMCSettings: %w", err)
 		}
 		if retryCondition.Status != metav1.ConditionTrue {
 			err := r.Conditions.Update(retryCondition,
@@ -930,14 +891,14 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 				conditionutils.UpdateMessage(annotations[constants.OperationAnnotation]),
 			)
 			if err != nil {
-				return fmt.Errorf("failed to update retry condition for BMCSettings: %w", err)
+				return ctrl.Result{}, fmt.Errorf("failed to update retry condition for BMCSettings: %w", err)
 			}
 		}
 		settings.Status.Conditions = []metav1.Condition{*retryCondition}
 		if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
-			return fmt.Errorf("failed to patch BMCSettings status for retrying: %w", err)
+			return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for retrying: %w", err)
 		}
-		return nil
+		return ctrl.Result{}, nil
 	}
 	var maxAttempts int32
 	if settings.Spec.RetryPolicy != nil && settings.Spec.RetryPolicy.MaxAttempts != nil {
@@ -950,16 +911,25 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 	if maxAttempts > 0 {
 		if settings.Status.ObservedGeneration != settings.Generation {
 			// if the generation has changed, it means the spec has been updated after the failure, we can reset the retry count and retry.
+			// Persist FailedAttempts and ObservedGeneration together, atomically, right away
+			settingsBase := settings.DeepCopy()
 			settings.Status.FailedAttempts = 0
+			settings.Status.ObservedGeneration = settings.Generation
+			if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for retry count reset: %w", err)
+			}
 		}
 		if settings.Status.FailedAttempts < maxAttempts {
 			log.V(1).Info("Retrying BMCSettings automatically", "FailedAttempts", settings.Status.FailedAttempts)
+			if ready, err := r.ensureResetBeforeRetry(ctx, bmcClient, settings, bmcObj); err != nil || !ready {
+				return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
+			}
 			settingsBase := settings.DeepCopy()
 			settings.Status.State = baseboardv1alpha1.BMCSettingsStatePending
 			settings.Status.ObservedGeneration = settings.Generation
 			retryCondition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionRetryOfFailedResourceIssued)
 			if err != nil {
-				return fmt.Errorf("failed to get Retry condition for BMCSettings: %w", err)
+				return ctrl.Result{}, fmt.Errorf("failed to get Retry condition for BMCSettings: %w", err)
 			}
 			if retryCondition.Status == metav1.ConditionTrue {
 				// keep the condition if it's already true,
@@ -970,9 +940,9 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 			}
 			settings.Status.FailedAttempts++
 			if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
-				return fmt.Errorf("failed to patch BMCSettings status for auto-retrying: %w", err)
+				return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for auto-retrying: %w", err)
 			}
-			return nil
+			return ctrl.Result{}, nil
 		}
 	}
 	// Keep status consistent when retries are disabled or exhausted.
@@ -982,12 +952,31 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, settings 
 		settings.Status.FailedAttempts = 0
 		settings.Status.ObservedGeneration = settings.Generation
 		if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
-			return fmt.Errorf("failed to patch BMCSettings status for disabled auto-retry: %w", err)
+			return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for disabled auto-retry: %w", err)
 		}
 	}
 	// todo: revisit this logic to either create maintenance if not present, put server in Error state on failed bmc settings maintenance
 	log.V(1).Info("Failed to update BMC setting", "ctx", ctx, "bmcSetting", settings, "BMC", bmcObj)
-	return nil
+	return ctrl.Result{}, nil
+}
+
+// ensureResetBeforeRetry makes sure all referenced servers' ServerMaintenance is active, then
+// resets the BMC before a Failed BMCSettings is retried
+func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if req, err := r.requestMaintenanceOnServers(ctx, settings, bmcObj, bmcClient); err != nil || req {
+		return false, err
+	}
+	granted, err := r.checkIfMaintenanceGranted(ctx, settings, bmcObj, bmcClient)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if maintenance is granted: %w", err)
+	}
+	if !granted {
+		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC for retry", "BMC", bmcObj.Name)
+		return false, nil
+	}
+	log.V(1).Info("Resetting BMC for retry")
+	return r.handleBMCReset(ctx, settings, bmcObj, constants.ConditionRetryResetIssued)
 }
 
 // getBMCSettingsDifference computes the set of settings keys that need to be applied.
@@ -1461,8 +1450,20 @@ func (r *BMCSettingsReconciler) enqueueBMCSettingsByBMCRefs(ctx context.Context,
 	var requests []ctrl.Request
 	for _, settings := range settingsList.Items {
 		if settings.Spec.BMCRef != nil && settings.Spec.BMCRef.Name == bmcObj.Name {
-			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied || settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
+			// Applied is excluded since there's nothing left to do.
+			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied {
 				continue
+			}
+			if settings.Status.State == baseboardv1alpha1.BMCSettingsStateFailed {
+				retryReset, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, constants.ConditionRetryResetIssued)
+				if err != nil {
+					log.Error(err, "Failed to get retry reset BMC condition")
+					continue
+				}
+				// enqueue only if a retry-before-retry BMC reset is pending for this BMC
+				if retryReset.Status == metav1.ConditionTrue || retryReset.Reason != constants.ReasonResetIssued {
+					continue
+				}
 			}
 			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: settings.Namespace, Name: settings.Name}})
 		}
