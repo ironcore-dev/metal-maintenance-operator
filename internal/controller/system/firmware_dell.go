@@ -330,7 +330,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 
 	if wasCompleted {
 		log.V(1).Info("Firmware drift detected after completion, resetting completion condition", "Server", server.Name)
-		if err := utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonFirmwareUpdateCompletionConditionReset, fmt.Sprintf("FirmwareUpdate %s no longer applied, drift detected", fw.Name)); err != nil {
+		if err := utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionFalse, utils.CompletionConditionReset, fmt.Sprintf("FirmwareUpdate %s no longer applied, drift detected", fw.Name)); err != nil {
 			return false, err
 		}
 	}

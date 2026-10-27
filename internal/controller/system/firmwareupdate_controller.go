@@ -40,7 +40,6 @@ const (
 	ReasonUnsupportedVendor    = "UnsupportedVendor"
 
 	ReasonFirmwareUpdateCompletionConditionApplied     = "FirmwareUpdateApplied"
-	ReasonFirmwareUpdateCompletionConditionReset       = "FirmwareUpdateDriftDetected"
 	ReasonFirmwareUpdateCompletionConditionInitialized = "FirmwareUpdateNotYetApplied"
 	ReasonFirmwareUpdateCompletionConditionInProgress  = "FirmwareUpdateInProgress"
 )
