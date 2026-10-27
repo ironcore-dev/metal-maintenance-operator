@@ -657,6 +657,14 @@ func (r *BIOSVersionReconciler) processFailedState(ctx context.Context, bmcClien
 // ensureResetBeforeRetry makes sure the server has an active ServerMaintenance, then resets the
 // BMC and reboots (or powers on) the server before a Failed BIOSVersion is retried
 func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
+		// Don't touch maintenance/BMC/power state while a gate blocks us - a sibling
+		// resource sharing this Server may still be relying on the current hardware/power
+		// state, and retrying now could fight it.
+		log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+		return false, nil
+	}
 	if biosVersion.Spec.ServerMaintenanceRef == nil {
 		if req, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || req {
 			return false, err

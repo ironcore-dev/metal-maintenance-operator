@@ -1325,6 +1325,13 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, bmcClien
 // BMC and reboots (or powers on) the server before a Failed BIOSSettings is retried
 func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+		// Don't touch maintenance/BMC/power state while a gate blocks us - a sibling
+		// resource sharing this Server may still be relying on the current hardware/power
+		// state, and retrying now could fight it.
+		log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+		return false, nil
+	}
 	if settings.Spec.ServerMaintenanceRef == nil {
 		if req, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || req {
 			return false, err

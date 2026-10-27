@@ -964,6 +964,15 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, bmcClient
 // resets the BMC before a Failed BMCSettings is retried
 func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons, err := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); err != nil || !satisfied {
+		if !satisfied {
+			// Don't touch maintenance/BMC state while a gate blocks us - a sibling resource
+			// sharing one of these Servers may still be relying on the current hardware/power
+			// state, and retrying now could fight it.
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+		}
+		return false, err
+	}
 	if req, err := r.requestMaintenanceOnServers(ctx, settings, bmcObj, bmcClient); err != nil || req {
 		return false, err
 	}
