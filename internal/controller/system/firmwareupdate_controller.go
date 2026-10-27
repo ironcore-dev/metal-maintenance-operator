@@ -717,6 +717,13 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 // BMC and reboots (or powers on) the server before a Failed FirmwareUpdate is retried
 func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
+	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
+		// Don't touch maintenance/BMC/power state while a gate blocks us - a sibling
+		// FirmwareUpdate/BIOSVersion/etc. sharing this Server may still be relying on the
+		// current hardware/power state, and retrying now could fight it.
+		log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+		return false, nil
+	}
 	if fw.Status.ServerMaintenanceRef == nil {
 		if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
 			return false, err
