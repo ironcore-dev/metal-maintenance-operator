@@ -555,6 +555,7 @@ func ApplyVariables(settingsMap map[string]string, resolved map[string]string) (
 	return out, nil
 }
 
+// SubstituteVars replaces $(KEY) placeholders in s using the resolved variable map.
 func SubstituteVars(s string, resolved map[string]string) string {
 	return expansion.Expand(s, expansion.MappingFuncFor(resolved))
 }
@@ -618,6 +619,10 @@ func resolveVariable(
 	}
 }
 
+// ResolveFieldRef extracts the string value at fieldPath from the given object's
+// unstructured JSON representation. fieldPath must use JSON field names (e.g.
+// "spec.bmcRef.name"). An optional map-key lookup is supported via
+// "some.path[mapKey]" syntax.
 func ResolveFieldRef(obj client.Object, fieldPath string) (string, error) {
 	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
@@ -659,6 +664,44 @@ func ResolveFieldRef(obj client.Object, fieldPath string) (string, error) {
 		return "", fmt.Errorf("fieldPath %q not found on object %s", fieldPath, obj.GetName())
 	}
 	return val, nil
+}
+
+// mapContainerSegments are schema fields whose values are string maps — any
+// segment immediately following one is a user-defined map key, not a schema
+// field, and must not be subject to casing validation.
+var mapContainerSegments = map[string]bool{
+	"annotations": true,
+	"labels":      true,
+}
+
+// ValidateFieldPathCasing rejects any dot-separated segment that starts with an
+// uppercase letter. Bracket map-key segments (e.g. "metadata.labels[foo]") and
+// segments immediately following a known string-map container (annotations,
+// labels) are exempt because those keys are user-defined and case-sensitive.
+func ValidateFieldPathCasing(fieldPath string) error {
+	path := fieldPath
+	if idx := strings.Index(path, "["); idx != -1 {
+		path = strings.TrimSuffix(path[:idx], ".")
+	}
+	skipNext := false
+	for seg := range strings.SplitSeq(path, ".") {
+		if seg == "" {
+			continue
+		}
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if mapContainerSegments[seg] {
+			skipNext = true
+			continue
+		}
+		if seg[0] >= 'A' && seg[0] <= 'Z' {
+			return fmt.Errorf("fieldPath %q uses a Go struct field name at segment %q — use the JSON field name instead",
+				fieldPath, seg)
+		}
+	}
+	return nil
 }
 
 // SettingKeys returns only the map keys of a SettingsAttributes map for safe logging.

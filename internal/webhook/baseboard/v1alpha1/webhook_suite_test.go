@@ -115,6 +115,9 @@ var _ = BeforeSuite(func() {
 	err = SetupBMCSettingsWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = SetupBMCSettingsSetWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = SetupBMCVersionWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 

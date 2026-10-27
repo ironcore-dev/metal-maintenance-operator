@@ -791,6 +791,49 @@ var _ = Describe("BMCSettings Controller", func() {
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 	})
 
+	It("should fail to reconcile BMCSettings with a fieldRef that uses Go struct capitalisation (spec.BMCRef.name)", func(ctx SpecContext) {
+		By("Creating a BMCSettings with fieldPath in Go struct capitalisation — bypasses webhook in envtest")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-var-field-caps-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "$(BMC_NAME)"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+						Variables: []api.Variable{
+							{
+								Key: "BMC_NAME",
+								ValueFrom: &api.VariableSourceValueFrom{
+									FieldRef: &api.FieldRefSelector{
+										// Wrong capitalisation — accepted by envtest (no webhook) but
+										// rejected by the webhook in production. The reconciler must
+										// fail with a clear error rather than resolving incorrectly.
+										FieldPath: "spec.BMCRef.name",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring the BMCSettings reaches InProgress but never Applied — the field path is unresolvable")
+		Eventually(Object(settings)).Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateInProgress),
+		)
+		Consistently(Object(settings), "5s", "1s").Should(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateInProgress),
+		)
+
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+
 	It("should apply BMCSettings with a single value composed from multiple variables", func(ctx SpecContext) {
 		By("Creating a ConfigMap containing the domain part")
 		domainCM := &v1.ConfigMap{
