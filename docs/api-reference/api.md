@@ -1257,7 +1257,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
-| `firmwareUpdateTemplate` _[FirmwareUpdateTemplate](#firmwareupdatetemplate)_ | FirmwareUpdateTemplate defines the template for the FirmwareUpdate resource to be applied to the servers. |  |  |
+| `firmwareUpdateTemplate` _[FirmwareUpdateTemplate](#firmwareupdatetemplate)_ | FirmwareUpdateTemplate defines the template for the FirmwareUpdate resource to be applied to the servers.<br />Its ttlSecondsAfterFinished field, if set, causes this FirmwareUpdateSet to be deleted that<br />many seconds after all of its owned FirmwareUpdates have reached the Completed state (it is<br />not propagated to the owned FirmwareUpdates themselves). See FirmwareUpdateTemplate for details. |  |  |
 
 
 #### FirmwareUpdateSetStatus
@@ -1297,9 +1297,9 @@ _Appears in:_
 | `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
-| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
 | `progressDeadlineSeconds` _integer_ | ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward<br />progress before the update is marked Failed. Defaults to 3600 (1 hour). | 3600 |  |
-| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection. |  |  |
+| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection.<br />When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to<br />the owned FirmwareUpdate children themselves (they are never auto-deleted individually);<br />instead the FirmwareUpdateSet reads it directly from its own template to delete itself once<br />all of its owned FirmwareUpdates have reached Completed. |  |  |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
 
 
 #### FirmwareUpdateState
@@ -1361,6 +1361,8 @@ _Appears in:_
 | `dellRepository` _[DellFirmwareRepository](#dellfirmwarerepository)_ | DellRepository describes the network share hosting the Dell update repository/catalog. |  |  |
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be enforced on the server. |  |  |
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
+| `progressDeadlineSeconds` _integer_ | ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward<br />progress before the update is marked Failed. Defaults to 3600 (1 hour). | 3600 |  |
+| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection.<br />When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to<br />the owned FirmwareUpdate children themselves (they are never auto-deleted individually);<br />instead the FirmwareUpdateSet reads it directly from its own template to delete itself once<br />all of its owned FirmwareUpdates have reached Completed. |  |  |
 
 
 #### RepositoryJob

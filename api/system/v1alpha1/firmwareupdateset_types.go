@@ -15,6 +15,9 @@ type FirmwareUpdateSetSpec struct {
 	ServerSelector metav1.LabelSelector `json:"serverSelector"`
 
 	// FirmwareUpdateTemplate defines the template for the FirmwareUpdate resource to be applied to the servers.
+	// Its ttlSecondsAfterFinished field, if set, causes this FirmwareUpdateSet to be deleted that
+	// many seconds after all of its owned FirmwareUpdates have reached the Completed state (it is
+	// not propagated to the owned FirmwareUpdates themselves). See FirmwareUpdateTemplate for details.
 	// +required
 	FirmwareUpdateTemplate FirmwareUpdateTemplate `json:"firmwareUpdateTemplate"`
 }

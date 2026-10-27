@@ -115,13 +115,17 @@ func (m *ChildManager[C]) EnsureForServers(
 }
 
 // DeleteOrphans deletes children whose target Server no longer matches servers, skipping
-// any that are in-progress with an active ServerMaintenance window.
+// only children that are actively InProgress with an active ServerMaintenance window (see
+// IsAnyServerMaintenanceActive for how a deleted target Server is handled). It returns the
+// children that were kept (i.e. not successfully deleted), so callers can avoid passing
+// already-deleted children into subsequent steps like PatchFromTemplate, which would
+// otherwise recreate them via CreateOrPatch.
 func (m *ChildManager[C]) DeleteOrphans(
 	ctx context.Context,
 	adapter ChildAdapter[C],
 	servers []metalv1alpha1.Server,
 	owned []C,
-) error {
+) ([]C, error) {
 	log := ctrl.LoggerFrom(ctx)
 	serverSet := make(map[string]struct{}, len(servers))
 	for _, s := range servers {
@@ -129,32 +133,47 @@ func (m *ChildManager[C]) DeleteOrphans(
 	}
 
 	var errs []error
+	kept := make([]C, 0, len(owned))
 	for _, child := range owned {
 		name := adapter.TargetName(child)
 		if name == "" {
+			kept = append(kept, child)
 			continue
 		}
 		if _, ok := serverSet[name]; ok {
+			kept = append(kept, child)
 			continue
 		}
 
+		// A maintenance window is only requested/held while a child is actively
+		// InProgress (applying a physical change via the BMC); Pending and
+		// Completed never hold an active window by design, and a Failed child is
+		// terminal. So only InProgress needs to wait: deleting any other child
+		// early is safe, since its owned ServerMaintenance (set as a controller
+		// reference) is cascade-deleted once the child is gone, and the
+		// ServerMaintenance controller releases/unparks the Server as part of its
+		// own deletion handling, tolerating the Server already being gone.
 		refs := adapter.MaintenanceRefs(child)
-		if len(refs) > 0 {
+		if len(refs) > 0 && adapter.State(child) == ChildInProgress {
 			active, err := IsAnyServerMaintenanceActive(ctx, m.Client, refs)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("failed to check maintenance state for %s: %w", child.GetName(), err))
+				kept = append(kept, child)
 				continue
 			}
 			if active {
 				log.V(1).Info("Waiting for maintenance to complete before deletion", "Child", child.GetName())
+				kept = append(kept, child)
 				continue
 			}
 		}
 		if err := m.Client.Delete(ctx, child); err != nil {
 			errs = append(errs, err)
+			kept = append(kept, child)
+			continue
 		}
 	}
-	return errors.Join(errs...)
+	return kept, errors.Join(errs...)
 }
 
 // PatchFromTemplate re-applies the owning Set's template onto every non-in-progress child.
@@ -214,10 +233,12 @@ func (m *ChildManager[C]) DeletableCount(ctx context.Context, adapter ChildAdapt
 	deletable := 0
 	for _, child := range owned {
 		refs := adapter.MaintenanceRefs(child)
-		if len(refs) == 0 {
+		// Only an InProgress child can hold an active maintenance window (see DeleteOrphans).
+		if len(refs) == 0 || adapter.State(child) != ChildInProgress {
 			deletable++
 			continue
 		}
+
 		active, err := IsAnyServerMaintenanceActive(ctx, m.Client, refs)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to check maintenance state for %s: %w", child.GetName(), err))

@@ -53,6 +53,8 @@ var _ = Describe("BMCVersion Webhook", func() {
 		Expect(k8sClient.DeleteAllOf(ctx, &baseboardv1alpha1.BMCVersion{})).To(Succeed())
 		By("Deleting ServerMaintenance resources if created")
 		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &maintenancev1alpha1.ServerMaintenance{}))).To(Succeed())
+		By("Deleting Server resources if created")
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &metalv1alpha1.Server{}))).To(Succeed())
 	})
 
 	Context("When creating or updating BMCVersion under Validating Webhook", func() {
@@ -202,6 +204,13 @@ var _ = Describe("BMCVersion Webhook", func() {
 		})
 
 		It("should not allow update when settings are in progress, but should allow forcing it", func() {
+			By("Creating a Server referenced by the ServerMaintenance")
+			server := &metalv1alpha1.Server{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+				Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+			}
+			Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 			By("Creating a ServerMaintenance in InMaintenance state")
 			sm := &maintenancev1alpha1.ServerMaintenance{
 				ObjectMeta: metav1.ObjectMeta{
@@ -252,6 +261,13 @@ var _ = Describe("BMCVersion Webhook", func() {
 		})
 
 		It("should refuse to delete while ServerMaintenance is active", func() {
+			By("Creating a Server referenced by the ServerMaintenance")
+			server := &metalv1alpha1.Server{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+				Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+			}
+			Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 			By("Creating a ServerMaintenance in InMaintenance state")
 			sm := &maintenancev1alpha1.ServerMaintenance{
 				ObjectMeta: metav1.ObjectMeta{

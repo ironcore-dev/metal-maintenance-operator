@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
@@ -47,6 +48,10 @@ var _ = Describe("BIOSVersion Webhook", func() {
 	AfterEach(func() {
 		By("Deleting the BIOSVersion resources")
 		Expect(k8sClient.DeleteAllOf(ctx, &systemv1alpha1.BIOSVersion{})).To(Succeed())
+		By("Deleting Server resources if created")
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &metalv1alpha1.Server{}))).To(Succeed())
+		By("Deleting ServerMaintenance resources if created")
+		Expect(client.IgnoreNotFound(k8sClient.DeleteAllOf(ctx, &maintenancev1alpha1.ServerMaintenance{}, client.InNamespace(metav1.NamespaceDefault)))).To(Succeed())
 	})
 
 	It("should deny creation if an existing sibling referring to the same server has no ReadinessGates", func(ctx SpecContext) {
@@ -220,6 +225,13 @@ var _ = Describe("BIOSVersion Webhook", func() {
 	})
 
 	It("should not allow update when BIOSVersion is in progress, but should allow force update", func() {
+		By("Creating a Server referenced by the ServerMaintenance")
+		server := &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -266,6 +278,13 @@ var _ = Describe("BIOSVersion Webhook", func() {
 	})
 
 	It("should refuse to delete while ServerMaintenance is active", func() {
+		By("Creating a Server referenced by the ServerMaintenance")
+		server := &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{

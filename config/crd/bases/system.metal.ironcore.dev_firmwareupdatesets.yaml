@@ -64,8 +64,11 @@ spec:
             description: FirmwareUpdateSetSpec defines the desired state of FirmwareUpdateSet.
             properties:
               firmwareUpdateTemplate:
-                description: FirmwareUpdateTemplate defines the template for the FirmwareUpdate
-                  resource to be applied to the servers.
+                description: |-
+                  FirmwareUpdateTemplate defines the template for the FirmwareUpdate resource to be applied to the servers.
+                  Its ttlSecondsAfterFinished field, if set, causes this FirmwareUpdateSet to be deleted that
+                  many seconds after all of its owned FirmwareUpdates have reached the Completed state (it is
+                  not propagated to the owned FirmwareUpdates themselves). See FirmwareUpdateTemplate for details.
                 properties:
                   dellRepository:
                     description: DellRepository describes the network share hosting
@@ -87,6 +90,15 @@ spec:
                       catalogFile:
                         description: CatalogFile is the catalog file name within the
                           share. Defaults to "Catalog.xml".
+                        type: string
+                      certificateVerification:
+                        description: |-
+                          CertificateVerification controls whether iDRAC verifies the TLS certificate presented by
+                          the repository share, or ignores certificate warnings (e.g. self-signed/untrusted
+                          certificates). If unset, certificates are verified.
+                        enum:
+                        - Verify
+                        - Ignore
                         type: string
                       credentialsRef:
                         description: |-
@@ -123,6 +135,13 @@ spec:
                     required:
                     - shareType
                     type: object
+                  progressDeadlineSeconds:
+                    default: 3600
+                    description: |-
+                      ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward
+                      progress before the update is marked Failed. Defaults to 3600 (1 hour).
+                    format: int32
+                    type: integer
                   retryPolicy:
                     description: RetryPolicy defines the retry behavior for automatic
                       retries on transient failures.
@@ -141,6 +160,17 @@ spec:
                     description: ServerMaintenancePolicy is a maintenance policy to
                       be enforced on the server.
                     type: string
+                  ttlSecondsAfterFinished:
+                    description: |-
+                      TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds
+                      after it reaches Completed state. Failed objects are retained for operator inspection.
+
+                      When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to
+                      the owned FirmwareUpdate children themselves (they are never auto-deleted individually);
+                      instead the FirmwareUpdateSet reads it directly from its own template to delete itself once
+                      all of its owned FirmwareUpdates have reached Completed.
+                    format: int32
+                    type: integer
                 type: object
               serverSelector:
                 description: ServerSelector specifies a label selector to identify

@@ -61,7 +61,13 @@ func firmwareUpdateAdapter(set *systemv1alpha1.FirmwareUpdateSet) utils.ChildAda
 			c.Spec.ServerRef = &corev1.LocalObjectReference{Name: serverName}
 		},
 		ApplyTemplate: func(c *systemv1alpha1.FirmwareUpdate) {
-			c.Spec.FirmwareUpdateTemplate = *set.Spec.FirmwareUpdateTemplate.DeepCopy()
+			template := *set.Spec.FirmwareUpdateTemplate.DeepCopy()
+			// TTLSecondsAfterFinished must never reach owned children: the FirmwareUpdateSet
+			// itself uses this value to decide when to delete itself (see handleTTL), and if a
+			// child self-deleted individually it would just be recreated by EnsureForServers on
+			// the next reconcile since its Server is still selected, looping forever.
+			template.TTLSecondsAfterFinished = nil
+			c.Spec.FirmwareUpdateTemplate = template
 		},
 		IsInProgress: func(c *systemv1alpha1.FirmwareUpdate) bool {
 			return c.Status.State == systemv1alpha1.FirmwareUpdateStateInProgress
@@ -215,7 +221,8 @@ func (r *FirmwareUpdateSetReconciler) reconcile(ctx context.Context, set *system
 		return ctrl.Result{}, fmt.Errorf("failed to create FirmwareUpdates: %w", err)
 	}
 
-	if err := childManager.DeleteOrphans(ctx, adapter, servers.Items, owned); err != nil {
+	owned, err = childManager.DeleteOrphans(ctx, adapter, servers.Items, owned)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to delete orphaned FirmwareUpdates: %w", err)
 	}
 
@@ -242,8 +249,47 @@ func (r *FirmwareUpdateSetReconciler) reconcile(ctx context.Context, set *system
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 
+	allCompleted := status.FullyLabeledServers > 0 && status.FullyLabeledServers == status.CompletedFirmwareUpdate
+	if allCompleted {
+		if remaining, shouldDelete := handleTTL(set, owned); shouldDelete {
+			log.Info("Deleting FirmwareUpdateSet after TTL since all FirmwareUpdates completed")
+			if err := r.Delete(ctx, set); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete FirmwareUpdateSet after TTL: %w", err)
+			}
+			return ctrl.Result{}, nil
+		} else if remaining > 0 {
+			return ctrl.Result{RequeueAfter: remaining}, nil
+		}
+	}
+
 	log.V(1).Info("Reconciled FirmwareUpdateSet")
 	return ctrl.Result{}, nil
+}
+
+// handleTTL returns the remaining wait duration (zero once elapsed) and whether the
+// FirmwareUpdateSet should now be deleted, based on spec.firmwareUpdateTemplate.ttlSecondsAfterFinished.
+func handleTTL(set *systemv1alpha1.FirmwareUpdateSet, owned []*systemv1alpha1.FirmwareUpdate) (time.Duration, bool) {
+	if set.Spec.FirmwareUpdateTemplate.TTLSecondsAfterFinished == nil {
+		return 0, false
+	}
+	var completedAt *metav1.Time
+	for _, fw := range owned {
+		if fw.Status.LastProgressTime == nil {
+			continue
+		}
+		if completedAt == nil || fw.Status.LastProgressTime.After(completedAt.Time) {
+			completedAt = fw.Status.LastProgressTime
+		}
+	}
+	if completedAt == nil {
+		return 0, false
+	}
+	ttl := time.Duration(*set.Spec.FirmwareUpdateTemplate.TTLSecondsAfterFinished) * time.Second
+	remaining := ttl - time.Since(completedAt.Time)
+	if remaining > 0 {
+		return remaining, false
+	}
+	return 0, true
 }
 
 // toFirmwareUpdateSetStatus maps aggregated utils.ChildCounts onto the FirmwareUpdateSet's

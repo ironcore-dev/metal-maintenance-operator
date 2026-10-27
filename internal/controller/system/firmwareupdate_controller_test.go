@@ -428,8 +428,10 @@ var _ = Describe("checkProgressDeadline", func() {
 				Namespace:    ns.Name,
 			},
 			Spec: systemv1alpha1.FirmwareUpdateSpec{
-				ServerRef:               &v1.LocalObjectReference{Name: "does-not-matter"},
-				ProgressDeadlineSeconds: progressDeadlineSeconds,
+				ServerRef: &v1.LocalObjectReference{Name: "does-not-matter"},
+				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+					ProgressDeadlineSeconds: progressDeadlineSeconds,
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, fw)).To(Succeed())
