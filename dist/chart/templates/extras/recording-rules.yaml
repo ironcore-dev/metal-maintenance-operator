@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+{{- if .Values.prometheusRules.enabled }}
+{{- $labels := required ".Values.prometheusRules.labels.prometheus is required when prometheusRules.enabled=true" .Values.prometheusRules.labels }}
+{{- $commonMeta := dict "service" .Release.Service "name" (include "metal-maintenance-operator.name" .) "chart" (printf "%s-%s" .Chart.Name (.Chart.Version | replace "+" "_")) "prometheus" $labels.prometheus }}
+{{- if .Values.prometheusRules.recording.enabled }}
+{{- range $path, $bytes := .Files.Glob "rules/redfish-canonical.rules" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ printf "mmo-%s" $path | replace "/" "-" | replace ".rules" "" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ $commonMeta.service }}
+    app.kubernetes.io/name: {{ $commonMeta.name }}
+    helm.sh/chart: {{ $commonMeta.chart }}
+    prometheus: {{ $commonMeta.prometheus }}
+    {{- with $.Values.prometheusRules.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+{{ printf "%s" $bytes | indent 2 }}
+{{- end }}
+{{- end }}
+{{- if .Values.prometheusRules.alerts.enabled }}
+{{- range $path, $bytes := .Files.Glob "rules/redfish-canonical-alerts.rules" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ printf "mmo-%s" $path | replace "/" "-" | replace ".rules" "" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ $commonMeta.service }}
+    app.kubernetes.io/name: {{ $commonMeta.name }}
+    helm.sh/chart: {{ $commonMeta.chart }}
+    prometheus: {{ $commonMeta.prometheus }}
+    {{- with $.Values.prometheusRules.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+{{ printf "%s" $bytes | indent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

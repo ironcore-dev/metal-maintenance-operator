@@ -56,7 +56,9 @@ func (v *BMCSettingsValidator) ValidateCreate(ctx context.Context, obj *baseboar
 func (v *BMCSettingsValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	bmcsettingslog.Info("Validation for BMCSettings upon update", "name", newObj.GetName())
 
-	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && len(oldObj.Spec.ServerMaintenanceRefs) > 0 {
+	if !webhookutils.ShouldAllowForceUpdateInProgress(newObj) && len(oldObj.Spec.ServerMaintenanceRefs) > 0 &&
+		oldObj.Status.State == baseboardv1alpha1.BMCSettingsStateInProgress &&
+		!webhookutils.IsSpecUnchanged(oldObj.Spec, newObj.Spec) {
 		refs := make([]metalv1alpha1.ObjectReference, 0, len(oldObj.Spec.ServerMaintenanceRefs))
 		for _, item := range oldObj.Spec.ServerMaintenanceRefs {
 			if item.ServerMaintenanceRef != nil {
@@ -86,7 +88,8 @@ func (v *BMCSettingsValidator) ValidateUpdate(ctx context.Context, oldObj, newOb
 func (v *BMCSettingsValidator) ValidateDelete(ctx context.Context, obj *baseboardv1alpha1.BMCSettings) (admission.Warnings, error) {
 	bmcsettingslog.Info("Validation for BMCSettings upon deletion", "name", obj.GetName())
 
-	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && len(obj.Spec.ServerMaintenanceRefs) > 0 {
+	if !webhookutils.ShouldAllowForceDeleteInProgress(obj) && len(obj.Spec.ServerMaintenanceRefs) > 0 &&
+		obj.Status.State == baseboardv1alpha1.BMCSettingsStateInProgress {
 		refs := make([]metalv1alpha1.ObjectReference, 0, len(obj.Spec.ServerMaintenanceRefs))
 		for _, item := range obj.Spec.ServerMaintenanceRefs {
 			if item.ServerMaintenanceRef != nil {

@@ -1,0 +1,104 @@
+groups:
+  - name: redfish_canonical
+    interval: 60s
+    rules:
+
+    - record: redfish_canonical:cpu_utilization_pct
+      expr: |
+        redfish_monitor_reading{
+          metric_id=~"CPUUtil|CPUUsage|CPUUsagePctReading|AverageCPUUtilization"
+        }
+
+    - record: redfish_canonical:memory_util_pct
+      expr: |
+        redfish_monitor_reading{metric_id=~"MemoryUsage|MemoryUsagePctReading|AverageMemoryUtilization"}
+
+    - record: redfish_canonical:memory_bus_util_pct
+      expr: |
+        redfish_monitor_reading{metric_id="MemoryBusUtil"}
+
+    - record: redfish_canonical:io_bus_util_pct
+      expr: |
+        redfish_monitor_reading{metric_id=~"IOBusUtil|IOUsage|IOUsagePctReading"}
+
+    - record: redfish_canonical:cpu_interconnect_util_pct
+      expr: |
+        redfish_monitor_reading{metric_id="CPUICUtil"}
+
+    - record: redfish_canonical:cpu_avg_freq_mhz
+      expr: |
+        redfish_monitor_reading{metric_id=~"AvgCPU0Freq|AvgCPU1Freq"}
+
+    - record: redfish_canonical:cpu_cups_util_pct
+      expr: |
+        redfish_monitor_reading{metric_id=~"AggregateCUPSUsage|AggregateUsage"}
+
+    - record: redfish_canonical:power_consumed_watts
+      expr: |
+        redfish_monitor_reading{
+          metric_id=~"AverageConsumedWatts|SystemPowerConsumption|SystemInputPower"
+        }
+
+    - record: redfish_canonical:power_min_watts
+      expr: |
+        redfish_monitor_reading{metric_id="MinConsumedWatts"}
+
+    - record: redfish_canonical:power_max_watts
+      expr: |
+        redfish_monitor_reading{metric_id="MaxConsumedWatts"}
+
+    - record: redfish_canonical:power_cap_watts
+      expr: |
+        redfish_monitor_reading{metric_id="Cap"}
+
+    - record: redfish_canonical:psu_input_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id="AveragePowerSupplyInput"}
+
+    - record: redfish_canonical:psu_output_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id="AveragePowerSupplyOutput"}
+
+    - record: redfish_canonical:cpu_total_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id=~"CpuWatts|TotalCPUPower"}
+
+    - record: redfish_canonical:memory_total_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id=~"DimmWatts|TotalMemoryPower"}
+
+    - record: redfish_canonical:gpu_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id=~"GpuWatts|TotalGPUPower"}
+
+    - record: redfish_canonical:cpu0_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id="CPU0Power"}
+
+    - record: redfish_canonical:cpu1_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id="CPU1Power"}
+
+    - record: redfish_canonical:fan_total_power_watts
+      expr: |
+        redfish_monitor_reading{metric_id="TotalFanPower"}
+
+    - record: redfish_canonical:inlet_temperature_celsius
+      expr: |
+        redfish_monitor_reading{metric_id=~"AmbTemp|SystemAvgIntelTempHour"}
+
+    - record: redfish_canonical:temperature_reading_celsius
+      expr: |
+        label_replace(
+          redfish_monitor_reading{metric_id="TemperatureReading"},
+          "sensor_id", "$1", "origin_context",
+          ".*/Sensors/([^/]+).*"
+        )
+
+    - record: redfish_canonical:fan_speed_rpm
+      expr: |
+        label_replace(
+          redfish_monitor_reading{metric_id="RPMReading"},
+          "sensor_id", "$1", "origin_context",
+          ".*/Fans/([^/]+).*|.*/Sensors/([^/]+).*"
+        )
