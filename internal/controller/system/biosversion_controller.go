@@ -338,10 +338,8 @@ func (r *BIOSVersionReconciler) handleCompletedState(ctx context.Context, bmcCli
 
 func (r *BIOSVersionReconciler) handleServerMaintenance(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if biosVersion.Spec.ServerMaintenanceRef == nil {
-		if requeue, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || requeue {
-			return false, err
-		}
+	if requeue, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || requeue {
+		return false, err
 	}
 
 	condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionServerMaintenanceWaiting)
@@ -657,10 +655,8 @@ func (r *BIOSVersionReconciler) processFailedState(ctx context.Context, bmcClien
 // ensureResetBeforeRetry makes sure the server has an active ServerMaintenance, then resets the
 // BMC and reboots (or powers on) the server before a Failed BIOSVersion is retried
 func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
-	if biosVersion.Spec.ServerMaintenanceRef == nil {
-		if req, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || req {
-			return false, err
-		}
+	if req, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || req {
+		return false, err
 	}
 	active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*biosVersion.Spec.ServerMaintenanceRef})
 	if err != nil {
