@@ -255,7 +255,9 @@ func main() {
 				panel.AddQuery(
 					mmo.PromQL(
 						`count(`+
-							`(time() - `+bbJoin(cfg, `redfish_event_pipeline_test_timestamp{result="success"}`)+`) > 900`+
+							`label_replace(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)") `+
+							`unless on(hostname) `+
+							`(redfish_event_pipeline_test_timestamp{result="success"} > (time() - 900))`+
 							`) or vector(0)`,
 						"$datasource",
 					),

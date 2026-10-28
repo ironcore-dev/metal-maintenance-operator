@@ -144,6 +144,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	bb, _, _ := mmo.TopologyMetricLabels(cfg)
+
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("firmware-version-compliance",
 		dashboard.Name("Firmware Version Compliance"),
@@ -168,10 +170,7 @@ func main() {
 		),
 		dashboard.AddVariable("bb",
 			listvariable.List(
-				labelvalues.PrometheusLabelValues(func() string {
-					bb, _, _ := mmo.TopologyMetricLabels(cfg)
-					return bb
-				}(),
+				labelvalues.PrometheusLabelValues(bb,
 					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region"}`),
 				),
@@ -209,7 +208,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`metal_maintenance_bmcversion_info{manufacturer=~"$manufacturer"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -228,7 +227,7 @@ func main() {
 				panel.Description("Servers whose observed BIOS version matches the desired version (state=Completed). When this equals Total Tracked Servers, the upgrade campaign for the selected hardware is complete."),
 				panel.AddQuery(
 					mmo.PromQL(
-						mmo.BMCInfoCompliantCount(cfg, biosExprForBMCJoin(`metal_maintenance_biosversion_info{state="Completed"}`), "bmc"),
+						mmo.BMCInfoCompliantCount(cfg, biosExprForBMCJoin(`metal_maintenance_biosversion_info{state="Completed"}`), biosExprForBMCJoin(`metal_maintenance_biosversion_info{state!="Completed"}`), "bmc"),
 						"$datasource",
 					),
 				),
@@ -267,7 +266,7 @@ func main() {
 				panel.Description("All tracked servers. Servers with a BIOS firmware CR show observed and desired versions with compliance status. Servers without a CR appear as Non-Compliant with blank version columns. Use the Model (BIOS) filter to scope to a specific hardware family."),
 				panel.AddQuery(
 					mmo.PromQL(
-						mmo.BMCInfoFullTableJoin(cfg, biosExprForBMCJoin(`metal_maintenance_biosversion_info{model=~"$bios_model"}`), biosExprForBMCJoin(`metal_maintenance_biosversion_info`), "bmc"),
+						mmo.BMCInfoFullTableJoin(cfg, biosExprForBMCJoin(`metal_maintenance_biosversion_info{model=~"$bios_model"}`), biosExprForBMCJoin(`metal_maintenance_biosversion_info`), "bmc", ""),
 						"$datasource",
 					),
 				),
@@ -284,7 +283,7 @@ func main() {
 				panel.Description("Servers whose observed BMC firmware version matches the desired version (state=Completed). A rising count during an upgrade campaign confirms the operator is successfully cycling through the fleet."),
 				panel.AddQuery(
 					mmo.PromQL(
-						mmo.BMCInfoCompliantCount(cfg, `metal_maintenance_bmcversion_info{state="Completed",manufacturer=~"$manufacturer"}`, "bmc"),
+						mmo.BMCInfoCompliantCount(cfg, `metal_maintenance_bmcversion_info{state="Completed",manufacturer=~"$manufacturer"}`, `metal_maintenance_bmcversion_info{state!="Completed",manufacturer=~"$manufacturer"}`, "bmc"),
 						"$datasource",
 					),
 				),
@@ -323,7 +322,7 @@ func main() {
 				panel.Description("All tracked servers. Servers with a BMC firmware CR show observed and desired versions with compliance status. Servers without a CR appear as Non-Compliant with blank version columns. Use the Model (BMC) filter to scope to a specific hardware family."),
 				panel.AddQuery(
 					mmo.PromQL(
-						mmo.BMCInfoFullTableJoin(cfg, `metal_maintenance_bmcversion_info{manufacturer=~"$manufacturer",model=~"$bmc_model"}`, `metal_maintenance_bmcversion_info`, "bmc"),
+						mmo.BMCInfoFullTableJoin(cfg, `metal_maintenance_bmcversion_info{manufacturer=~"$manufacturer",model=~"$bmc_model"}`, `metal_maintenance_bmcversion_info`, "bmc", `model=~"$bmc_model"`),
 						"$datasource",
 					),
 				),

@@ -111,7 +111,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("manufacturer",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer!=""}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer!=""}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -123,7 +123,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer",model!=""}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model!=""}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -380,7 +380,7 @@ func main() {
 				),
 				panel.AddQuery(
 					mmo.PromQL(
-						`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer",model=~"$model"}`,
+						`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`,
 						"$datasource",
 					),
 				),

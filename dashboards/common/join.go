@@ -98,24 +98,35 @@ func withComplianceLabels(expr string) string {
 		` "compliance", "Compliant", "state", "Completed")`
 }
 
-// BMCInfoCompliantCount counts BMCs that have a firmware CR matching compliantExpr.
+// BMCInfoCompliantCount counts BMCs that have a firmware CR matching compliantExpr
+// and NO series matching nonCompliantExpr. Non-compliant takes precedence: a BMC
+// with both completed and non-completed change requests (e.g. multi-indexed BIOS CRs)
+// is excluded from the compliant count.
 // kube_ironcore_bmc_info is on the left so region/bb/manufacturer filters apply correctly.
-// compliantExpr should include state="Completed" and a manufacturer filter but NOT a
-// region filter (firmware metrics carry no region label).
-func BMCInfoCompliantCount(cfg DashboardConfig, compliantExpr, joinKey string) string {
+// compliantExpr should include state="Completed"; nonCompliantExpr should match the same
+// base metric with state!="Completed". Neither should include a region filter (firmware
+// metrics carry no region label).
+// group by(name) deduplicates both sides so at most one series per BMC name participates
+// in the unless and the join, regardless of how many indexed systems exist per BMC.
+func BMCInfoCompliantCount(cfg DashboardConfig, compliantExpr, nonCompliantExpr, joinKey string) string {
 	bb, _, _ := TopologyMetricLabels(cfg)
 	base := `kube_ironcore_bmc_info{region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
-	return `count(` + base + ` * on(name) group_left() label_replace(` + compliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)")) or vector(0)`
+	compliantRHS := `group by(name)(label_replace(` + compliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)"))`
+	nonCompliantRHS := `group by(name)(label_replace(` + nonCompliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)"))`
+	return `count(` + base + ` * on(name) group_left() ` + compliantRHS + ` unless on(name) ` + nonCompliantRHS + `) or vector(0)`
 }
 
 // BMCInfoNonCompliantCount counts BMCs that are non-compliant:
 // servers with a non-Completed firmware CR (nonCompliantExpr) plus servers with
 // no firmware CR at all (detected via anyFirmwareBaseExpr, which should be the
 // bare metric with no filters so the unless check is exhaustive).
+// group by(name) deduplicates the managed-non-compliant RHS: if any indexed system
+// for a BMC is non-compliant, that BMC is counted once.
 func BMCInfoNonCompliantCount(cfg DashboardConfig, nonCompliantExpr, anyFirmwareBaseExpr, joinKey string) string {
 	bb, _, _ := TopologyMetricLabels(cfg)
 	base := `kube_ironcore_bmc_info{region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
-	managedNonCompliant := base + ` * on(name) group_left() label_replace(` + nonCompliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)")`
+	managedNonCompliantRHS := `group by(name)(label_replace(` + nonCompliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)"))`
+	managedNonCompliant := base + ` * on(name) group_left() ` + managedNonCompliantRHS
 	unmanaged := base + ` unless on(name) label_replace(` + anyFirmwareBaseExpr + `, "name", "$1", "` + joinKey + `", "(.*)")`
 	return `count(` + managedNonCompliant + ` or ` + unmanaged + `) or vector(0)`
 }
@@ -128,7 +139,7 @@ func BMCInfoNonCompliantCount(cfg DashboardConfig, nonCompliantExpr, anyFirmware
 //   with kube_ironcore_bmc_info handles region and bb scoping).
 // anyFirmwareBaseExpr: bare metric name (no filters) for the `unless` membership check.
 // joinKey: label on the firmware metric that holds the BMC resource name.
-func BMCInfoFullTableJoin(cfg DashboardConfig, firmwareExpr, anyFirmwareBaseExpr, joinKey string) string {
+func BMCInfoFullTableJoin(cfg DashboardConfig, firmwareExpr, anyFirmwareBaseExpr, joinKey, inventoryExtraFilters string) string {
 	bb, nodename, zone := TopologyMetricLabels(cfg)
 
 	// Managed rows: firmware metric enriched with topology from kube_ironcore_bmc_info.
@@ -138,7 +149,11 @@ func BMCInfoFullTableJoin(cfg DashboardConfig, firmwareExpr, anyFirmwareBaseExpr
 	managedNormalized := NormaliseTopologyLabels(cfg, withComplianceLabels(managed))
 
 	// Unmanaged rows: in kube_ironcore_bmc_info but absent from any firmware CR.
-	base := `kube_ironcore_bmc_info{region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
+	inventoryFilters := `region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"`
+	if inventoryExtraFilters != "" {
+		inventoryFilters += "," + inventoryExtraFilters
+	}
+	base := `kube_ironcore_bmc_info{` + inventoryFilters + `}`
 	unmanaged := base + ` unless on(name) label_replace(` + anyFirmwareBaseExpr + `, "name", "$1", "` + joinKey + `", "(.*)")`
 	unmanagedNormalized := NormaliseTopologyLabels(cfg, `label_replace(`+unmanaged+`, "compliance", "Non-Compliant", "name", ".+")`)
 
@@ -195,7 +210,7 @@ func BBJoin(cfg DashboardConfig, expr string) string {
 	bb, _, _ := TopologyMetricLabels(cfg)
 	// Filter on "name" (BMC resource name, e.g. "node001-bb098") not the short nodename label,
 	// because $node is always populated from the "name" label on kube_ironcore_bmc_info.
-	ksmJoin := `label_replace(kube_ironcore_bmc_info{` +
+	ksmJoin := `label_replace(kube_ironcore_bmc_info{region=~"$region",` +
 		bb + `=~"$bb",name=~"$node",` +
 		`manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)")`
 	return expr + ` * on(hostname) group_left() ` + ksmJoin

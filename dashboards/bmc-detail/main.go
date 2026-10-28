@@ -120,9 +120,9 @@ func main() {
 				panel.Description("Current average power draw per selected host. High sustained values relative to the server's rated TDP may indicate thermal events forcing fan power overhead, or unexpectedly compute-intensive workloads.\n\n**Vendor support:** Dell, HPE (metrics: AverageConsumedWatts, SystemInputPower, SystemPowerConsumption). Lenovo not observed in current fleet."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`avg by(hostname)(`+mmo.BBJoinNode(cfg, `redfish_canonical:power_consumed_watts`)+`)`,
+						`avg by(hostname, metric_id)(`+mmo.BBJoinNode(cfg, `redfish_canonical:power_consumed_watts`)+`)`,
 						"$datasource",
-						"{{hostname}}",
+						"{{hostname}} ({{metric_id}})",
 					),
 				),
 			),
