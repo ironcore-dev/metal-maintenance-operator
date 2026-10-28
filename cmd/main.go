@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/discovery"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/registry"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
 	telemetryruntime "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/runtime"
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
@@ -40,11 +42,13 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	vendorconsolev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/vendorconsole/v1alpha1"
 	baseboardctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
+	discoveryctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/discovery"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	readinessctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/readiness"
 	systemctrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
@@ -74,6 +78,7 @@ func init() {
 	utilruntime.Must(metalv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(maintenancev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(systemv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(discoveryv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -94,6 +99,14 @@ func main() {
 	var sanitizationNamespace string
 	var sanitizationImage string
 	var sanitizationTolerations []metalv1alpha1.Toleration
+	var enableDiscovery bool
+	var discoveryNamespace string
+	var probeImage string
+	var probeOSImage string
+	var registryURL string
+	var registryBindAddress string
+	var registryDataMaxAge time.Duration
+	var registryResyncInterval time.Duration
 	var reportBaseURL string
 	var sanitizedServerAddress string
 	var managerNamespace string
@@ -131,6 +144,22 @@ func main() {
 	flag.StringVar(&sanitizationImage, "sanitization-image", "", "OS image for the sanitization job.")
 	cli.TolerationsVar(&sanitizationTolerations, "sanitization-tolerations", sanitizationTolerations,
 		"Tolerations on the sanitization claim. Formatted key=[value]:effect.")
+	flag.BoolVar(&enableDiscovery, "enable-discovery", false,
+		"Enable the server discovery flow: claim Servers tainted with the Undiscovered taint, "+
+			"boot metalprobe on them and record the reported data in Metadata objects.")
+	flag.StringVar(&discoveryNamespace, "discovery-namespace", "",
+		"Namespace where discovery ServerClaims, ignition secrets and Metadata objects are created. "+
+			"Defaults to --manager-namespace.")
+	flag.StringVar(&probeImage, "probe-image", "", "Image of the metalprobe agent run during discovery.")
+	flag.StringVar(&probeOSImage, "probe-os-image", "", "OS image for the discovery boot of a Server.")
+	flag.StringVar(&registryURL, "registry-url", "", "Externally reachable URL of the discovery registry. "+
+		"Falls back to the REGISTRY_ADDRESS env var and --registry-bind-address port.")
+	flag.StringVar(&registryBindAddress, "registry-bind-address", ":10000",
+		"Address the discovery registry HTTP server binds to.")
+	flag.DurationVar(&registryDataMaxAge, "registry-data-max-age", 2*time.Minute,
+		"Maximum age of registry data to accept for discovery completion.")
+	flag.DurationVar(&registryResyncInterval, "registry-resync-interval", 10*time.Second,
+		"Interval at which the registry is polled for new server discovery data.")
 	flag.StringVar(&reportBaseURL, "report-base-url", "",
 		"Base URL of the sanitization callback server "+
 			"(e.g. http://metal-maintenance-operator.my-ns.svc.cluster.local:8082). "+
@@ -246,6 +275,28 @@ func main() {
 	if managerNamespace == "" {
 		setupLog.Error(nil, "Manager configuration omitted --manager-namespace and POD_NAMESPACE is not set")
 		os.Exit(1)
+	}
+
+	if enableDiscovery {
+		if probeImage == "" {
+			setupLog.Error(nil, "Must specify --probe-image when discovery is enabled")
+			os.Exit(1)
+		}
+		if probeOSImage == "" {
+			setupLog.Error(nil, "Must specify --probe-os-image when discovery is enabled")
+			os.Exit(1)
+		}
+		if discoveryNamespace == "" {
+			discoveryNamespace = managerNamespace
+		}
+		if registryURL == "" {
+			registryAddr := os.Getenv("REGISTRY_ADDRESS")
+			if registryAddr == "" {
+				setupLog.Error(nil, "Must specify --registry-url or REGISTRY_ADDRESS when discovery is enabled")
+				os.Exit(1)
+			}
+			registryURL = fmt.Sprintf("http://%s%s", registryAddr, registryBindAddress)
+		}
 	}
 
 	if enableTelemetry && telemetryConfigNamespace == "" {
@@ -368,6 +419,32 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create Console controller")
 		os.Exit(1)
+	}
+
+	if enableDiscovery {
+		registryServer := registry.NewServer(ctrl.Log.WithName("registry"), registryBindAddress)
+		if err := mgr.Add(registryServer); err != nil {
+			setupLog.Error(err, "Unable to add registry server runnable")
+			os.Exit(1)
+		}
+
+		if err = (&discoveryctrl.ServerDiscoveryReconciler{
+			Client:             mgr.GetClient(),
+			Scheme:             mgr.GetScheme(),
+			DiscoveryNamespace: discoveryNamespace,
+			ProbeOSImage:       probeOSImage,
+			IgnitionProvider: (&ignition.DiscoveryProvider{
+				ProbeImage:  probeImage,
+				RegistryURL: registryURL,
+			}).Ignition,
+			Registry:           registryServer,
+			RegistryDataMaxAge: registryDataMaxAge,
+			ResyncInterval:     registryResyncInterval,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Unable to create ServerDiscovery controller")
+			os.Exit(1)
+		}
+		setupLog.Info("Enabled server discovery", "registryURL", registryURL)
 	}
 
 	if err = (&maintenancectrl.ServerSanitizationReconciler{

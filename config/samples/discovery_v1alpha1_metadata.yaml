@@ -1,0 +1,19 @@
+apiVersion: discovery.metal.ironcore.dev/v1alpha1
+kind: Metadata
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  # by convention named exactly like the Server it describes
+  name: node-0
+timestamp: "2026-01-01T00:00:00Z"
+systemInfo:
+  systemInformation:
+    manufacturer: ExampleCorp
+    productName: EX-1000
+    uuid: 550e8400-e29b-41d4-a716-446655440000
+networkInterfaces:
+  - name: eth0
+    macAddress: 00:11:22:33:44:55
+    ipAddresses:
+      - 10.0.0.1

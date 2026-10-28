@@ -6,6 +6,19 @@ package constants
 
 const SanitizedLabel = "maintenance.metal.ironcore.dev/sanitized"
 
+// Discovery-related keys.
+const (
+	// ConditionDiscovered is the Server status condition type set to True once
+	// the discovery data of a Server has been received.
+	ConditionDiscovered = "Discovered"
+	// UndiscoveredTaintKey is the taint key (effect NoBind) marking a Server
+	// as not yet discovered, blocking regular claims from binding to it.
+	UndiscoveredTaintKey = "metal.ironcore.dev/Undiscovered"
+	// DiscoveryForUIDLabel labels discovery ServerClaims and their ignition
+	// secrets with the UID of the Server they discover.
+	DiscoveryForUIDLabel = "discovery.metal.ironcore.dev/server-uid"
+)
+
 // Index field keys for controller-runtime field indexers.
 const (
 	ServerRefField = "spec.serverRef.name"

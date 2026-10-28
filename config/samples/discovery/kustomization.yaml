@@ -1,0 +1,3 @@
+resources:
+  - server-undiscovered.yaml
+  - serverreadinessrule-discovery.yaml
