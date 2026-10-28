@@ -16,7 +16,9 @@ import (
 	"github.com/ironcore-dev/controller-utils/modutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	fwconfig "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/testutil/simcontrollers"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -212,21 +214,30 @@ func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver
 			ResyncInterval: 10 * time.Millisecond,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		firmwareUpdateResyncInterval := 10 * time.Millisecond
+		firmwareUpdateScheduledJobPowerOnTimeout := 1000 * time.Millisecond
+		firmwareUpdateDefaultFailedAutoRetryCount := int32(0)
+		firmwareUpdateMinBMCResetInterval := time.Duration(0)
+		firmwareUpdateConfigLoader := &configloader.Loader[fwconfig.FirmwareUpdateConfig]{}
+		firmwareUpdateConfigLoader.Set(&fwconfig.FirmwareUpdateConfig{
+			ResyncInterval:              &firmwareUpdateResyncInterval,
+			ScheduledJobPowerOnTimeout:  &firmwareUpdateScheduledJobPowerOnTimeout,
+			DefaultFailedAutoRetryCount: &firmwareUpdateDefaultFailedAutoRetryCount,
+			MinBMCResetInterval:         &firmwareUpdateMinBMCResetInterval,
+		})
 		Expect((&FirmwareUpdateReconciler{
 			Client:             k8sManager.GetClient(),
 			ManagerNamespace:   ns.Name,
 			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
 			SkipCertValidation: true,
 			Scheme:             k8sManager.GetScheme(),
-			ResyncInterval:     10 * time.Millisecond,
 			Conditions:         accessor,
 			BMCOptions: bmc.Options{
 				PowerPollingInterval: 50 * time.Millisecond,
 				PowerPollingTimeout:  200 * time.Millisecond,
 				BasicAuth:            true,
 			},
-			MaxRepositoryPasses:        5,
-			ScheduledJobPowerOnTimeout: 1000 * time.Millisecond,
+			ConfigLoader: firmwareUpdateConfigLoader,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real
