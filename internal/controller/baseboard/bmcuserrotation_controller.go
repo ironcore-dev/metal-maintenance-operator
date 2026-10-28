@@ -170,6 +170,15 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 		if fallback <= 0 {
 			fallback = 20
 		}
+		// Guard against firmware-reported limits that are impossible to satisfy:
+		// fail terminally rather than retrying forever.
+		minLength := max(uint(8), accountService.MinPasswordLength)
+		if accountService.MaxPasswordLength > 0 && accountService.MaxPasswordLength < minLength {
+			return ctrl.Result{}, r.setFailed(ctx, rotation, fmt.Sprintf(
+				"BMC MaxPasswordLength %d is below the minimum required length %d",
+				accountService.MaxPasswordLength, minLength,
+			))
+		}
 		newPassword, err = utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to generate new password: %w", err)

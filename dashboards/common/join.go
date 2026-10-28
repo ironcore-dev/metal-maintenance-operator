@@ -125,7 +125,9 @@ func BMCInfoNonCompliantCount(cfg DashboardConfig, nonCompliantExpr, anyFirmware
 // desired_version, observed_version, state and a compliance label derived from state.
 // Unmanaged rows carry only topology/hardware labels and compliance="Non-Compliant".
 // firmwareExpr: firmware metric with manufacturer/model filters (no region — the join
-//   with kube_ironcore_bmc_info handles region and bb scoping).
+//
+//	with kube_ironcore_bmc_info handles region and bb scoping).
+//
 // anyFirmwareBaseExpr: bare metric name (no filters) for the `unless` membership check.
 // joinKey: label on the firmware metric that holds the BMC resource name.
 func BMCInfoFullTableJoin(cfg DashboardConfig, firmwareExpr, anyFirmwareBaseExpr, joinKey string) string {

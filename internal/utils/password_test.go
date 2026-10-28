@@ -85,29 +85,36 @@ func TestGenerateHTMLSafePasswordMinExceedsMax(t *testing.T) {
 
 func TestValidatePasswordLength(t *testing.T) {
 	cases := []struct {
-		name    string
-		pw      string
-		maxLen  uint
-		minLen  uint
-		wantErr bool
+		name         string
+		pw           string
+		maxLen       uint
+		minLen       uint
+		manufacturer bmc.Manufacturer
+		wantErr      bool
 	}{
-		{"within bounds", "abcdefgh", 30, 8, false},
-		{"too short", "abc", 30, 8, true},
-		{"too long raw", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 20, 8, true}, // 32 chars > 20
-		{"escaped overflow", "aaaaaaaaaaaaaaaaaa&", 20, 8, true},          // 18 + "&"(6) = 24 > 20
-		{"escaped within", "aaaaaaaaaaaa&", 20, 8, false},                 // 12 + 6 = 18 <= 20
-		{"no max skips max check", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0, 8, false},
-		{"no min skips min check", "ab", 30, 0, false},
-		{"both zero", "anything", 0, 0, false},
+		// Dell uses HTML-escaped length for max check.
+		{"dell within bounds", "abcdefgh", 30, 8, bmc.ManufacturerDell, false},
+		{"dell too short", "abc", 30, 8, bmc.ManufacturerDell, true},
+		{"dell too long raw", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 20, 8, bmc.ManufacturerDell, true}, // 32 chars > 20
+		{"dell escaped overflow", "aaaaaaaaaaaaaaaaaa&", 20, 8, bmc.ManufacturerDell, true},          // 18 + "&"(6) = 24 > 20
+		{"dell escaped within", "aaaaaaaaaaaa&", 20, 8, bmc.ManufacturerDell, false},                 // 12 + 6 = 18 <= 20
+		// Non-Dell uses raw rune count for max check — '&' does not inflate.
+		{"lenovo escaped no overflow", "aaaaaaaaaaaaaaaaaa&", 20, 8, bmc.ManufacturerLenovo, false}, // 19 runes <= 20
+		{"lenovo too long raw", "aaaaaaaaaaaaaaaaaaaaaaa", 20, 8, bmc.ManufacturerLenovo, true},     // 23 runes > 20
+		{"hpe escaped no overflow", "aaaaaaaaaaaaaaaaaa&", 20, 8, bmc.ManufacturerHPE, false},       // 19 runes <= 20
+		// Common cases (using Dell for backward-compatibility defaults).
+		{"no max skips max check", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0, 8, bmc.ManufacturerDell, false},
+		{"no min skips min check", "ab", 30, 0, bmc.ManufacturerDell, false},
+		{"both zero", "anything", 0, 0, bmc.ManufacturerDell, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidatePasswordLength(tc.pw, tc.maxLen, tc.minLen)
+			err := ValidatePasswordLength(tc.pw, tc.maxLen, tc.minLen, tc.manufacturer)
 			if tc.wantErr && err == nil {
-				t.Fatalf("ValidatePasswordLength(%q, %d, %d) = nil, want error", tc.pw, tc.maxLen, tc.minLen)
+				t.Fatalf("ValidatePasswordLength(%q, %d, %d, %s) = nil, want error", tc.pw, tc.maxLen, tc.minLen, tc.manufacturer)
 			}
 			if !tc.wantErr && err != nil {
-				t.Fatalf("ValidatePasswordLength(%q, %d, %d) = %v, want nil", tc.pw, tc.maxLen, tc.minLen, err)
+				t.Fatalf("ValidatePasswordLength(%q, %d, %d, %s) = %v, want nil", tc.pw, tc.maxLen, tc.minLen, tc.manufacturer, err)
 			}
 		})
 	}

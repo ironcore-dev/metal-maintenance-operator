@@ -204,13 +204,13 @@ func main() {
 				// Critical alerts per BMC: join hostname→name, propagate bmc_info labels; 0 for BMCs with no alerts
 				panel.AddQuery(
 					mmo.PromQL(
-						`sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(` +
-							`label_replace(round(increase(redfish_event_alert_total{severity="Critical"}[1h])), "name", "$1", "hostname", "(.*)")` +
-							` * on(name) group_left(manufacturer, model, firmware_version, region, `+bb+`)` +
-							` kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}` +
-							`)` +
-							` or sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(` +
-							`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}` +
+						`sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
+							`label_replace(round(increase(redfish_event_alert_total{severity="Critical"}[1h])), "name", "$1", "hostname", "(.*)")`+
+							` * on(name) group_left(manufacturer, model, firmware_version, region, `+bb+`)`+
+							` kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							`)`+
+							` or sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
+							`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
 							`) * 0`,
 						"$datasource",
 					),
@@ -218,13 +218,13 @@ func main() {
 				// Warning alerts per BMC: same pattern for severity="Warning"
 				panel.AddQuery(
 					mmo.PromQL(
-						`sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(` +
-							`label_replace(round(increase(redfish_event_alert_total{severity="Warning"}[1h])), "name", "$1", "hostname", "(.*)")` +
-							` * on(name) group_left(manufacturer, model, firmware_version, region, `+bb+`)` +
-							` kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}` +
-							`)` +
-							` or sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(` +
-							`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}` +
+						`sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
+							`label_replace(round(increase(redfish_event_alert_total{severity="Warning"}[1h])), "name", "$1", "hostname", "(.*)")`+
+							` * on(name) group_left(manufacturer, model, firmware_version, region, `+bb+`)`+
+							` kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							`)`+
+							` or sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
+							`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
 							`) * 0`,
 						"$datasource",
 					),

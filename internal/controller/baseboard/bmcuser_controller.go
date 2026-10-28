@@ -173,12 +173,12 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
 		}
-		if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength); err != nil {
+		if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
 			log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
 			if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
 				return ctrl.Result{}, condErr
 			}
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		if err := r.setPasswordValidCondition(ctx, user, true, ""); err != nil {
 			return ctrl.Result{}, err
@@ -190,12 +190,8 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 			return ctrl.Result{}, fmt.Errorf("failed to update User status after creating BMC account: %w", err)
 		}
 	}
-	if user.Status.EffectiveBMCSecretRef != nil &&
-		user.Spec.BMCSecretRef.Name != user.Status.EffectiveBMCSecretRef.Name {
-
-		if err := r.handleUpdatedSecretRef(ctx, user, bmcSecret, bmcClient); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to handle updated BMCSecret reference: %w", err)
-		}
+	if err := r.reconcileSecretRef(ctx, user, bmcSecret, bmcClient, bmcObj); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to reconcile BMCSecret reference: %w", err)
 	}
 	if err := r.pruneOldSecrets(ctx, user, bmcObj); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to prune old BMCSecrets: %w", err)
@@ -437,13 +433,28 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	return nil
 }
 
+// reconcileSecretRef handles the desired-vs-effective BMCSecret reconciliation.
+// When the desired secret (Spec.BMCSecretRef) differs from the effective one, it
+// delegates to handleUpdatedSecretRef. When they are the same and the effective
+// secret is already known, it clears any stale PasswordValid=False condition.
+func (r *BMCUserReconciler) reconcileSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcSecret *metalv1alpha1.BMCSecret, bmcClient bmc.BMC, bmcObj *metalv1alpha1.BMC) error {
+	if user.Status.EffectiveBMCSecretRef == nil {
+		return nil
+	}
+	if user.Spec.BMCSecretRef.Name != user.Status.EffectiveBMCSecretRef.Name {
+		return r.handleUpdatedSecretRef(ctx, user, bmcSecret, bmcClient, bmcObj)
+	}
+	// Spec.BMCSecretRef matches the effective secret — clear any stale PasswordValid=False.
+	return r.setPasswordValidCondition(ctx, user, true, "")
+}
+
 // handleUpdatedSecretRef applies the credentials from a newly referenced
 // BMCSecret to the BMC account and records the secret as the effective one.
 // It validates the new password against the BMC's reported length limits first;
 // on violation it records PasswordValid=False and returns without touching the
 // account, so an over-length password is surfaced instead of being silently
 // rejected by the BMC (see the create path in reconcile).
-func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcSecret *metalv1alpha1.BMCSecret, bmcClient bmc.BMC) error {
+func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcSecret *metalv1alpha1.BMCSecret, bmcClient bmc.BMC, bmcObj *metalv1alpha1.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 	log.V(1).Info("BMCSecret credentials have changed, updating BMC user")
 	_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
@@ -454,7 +465,7 @@ func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *ba
 	if err != nil {
 		return fmt.Errorf("failed to get account service: %w", err)
 	}
-	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength); err != nil {
+	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
 		log.Info("Updated password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
 		return r.setPasswordValidCondition(ctx, user, false, err.Error())
 	}
@@ -773,11 +784,28 @@ func (r *BMCUserReconciler) delete(ctx context.Context, user *baseboardv1alpha1.
 	defer bmcClient.Logout()
 
 	log.V(1).Info("Deleting BMC account for User")
-	if user.Status.ID == "" {
+	accountID := user.Status.ID
+	accountFound := accountID != ""
+	if !accountFound {
+		// Status.ID may be empty if patchUserStatus failed after CreateOrUpdateAccount
+		// succeeded. Fall back to a lookup by username to avoid orphaning the account.
+		accounts, err := bmcClient.GetAccounts()
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get BMC accounts: %w", err)
+		}
+		for _, account := range accounts {
+			if account.UserName == user.Spec.UserName {
+				accountID = account.ID
+				accountFound = true
+				break
+			}
+		}
+	}
+	if !accountFound {
 		// The account was never created on the BMC (e.g. the password was rejected
 		// before it could be applied), so there is nothing to delete.
 		log.V(1).Info("No BMC account recorded for User, skipping BMC account deletion")
-	} else if err := bmcClient.DeleteAccount(ctx, user.Spec.UserName, user.Status.ID); err != nil {
+	} else if err := bmcClient.DeleteAccount(ctx, user.Spec.UserName, accountID); err != nil {
 		var httpErr *schemas.Error
 		if errors.As(err, &httpErr) && httpErr.HTTPReturnedStatusCode == 404 {
 			log.V(1).Info("BMC account not found, continuing finalizer removal")
@@ -980,6 +1008,7 @@ func (r *BMCUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&baseboardv1alpha1.BMCUserRotation{}).
 		Watches(&metalv1alpha1.BMC{}, handler.EnqueueRequestsFromMapFunc(r.findBMCUsersForBMC)).
 		Watches(&baseboardv1alpha1.BMCUserSet{}, handler.EnqueueRequestsFromMapFunc(r.findBMCUsersForBMCUserSet)).
+		Watches(&metalv1alpha1.BMCSecret{}, handler.EnqueueRequestsFromMapFunc(r.findBMCUsersForBMCSecret)).
 		Named("bmcuser").
 		Complete(r)
 }
@@ -1013,6 +1042,26 @@ func (r *BMCUserReconciler) findBMCUsersForBMCUserSet(ctx context.Context, obj c
 	for _, u := range userList.Items {
 		ownerRef := metav1.GetControllerOf(&u)
 		if ownerRef != nil && ownerRef.Kind == "BMCUserSet" && ownerRef.Name == obj.GetName() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: u.Name},
+			})
+		}
+	}
+	return requests
+}
+
+// findBMCUsersForBMCSecret enqueues all BMCUser objects whose Spec.BMCSecretRef.Name
+// matches the changed BMCSecret. This ensures that when an operator corrects a
+// user-supplied BMCSecret that was previously rejected (PasswordValid=False), the
+// BMCUser is reconciled without waiting for a periodic requeue.
+func (r *BMCUserReconciler) findBMCUsersForBMCSecret(ctx context.Context, obj client.Object) []reconcile.Request {
+	userList := &baseboardv1alpha1.BMCUserList{}
+	if err := r.List(ctx, userList); err != nil {
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, u := range userList.Items {
+		if u.Spec.BMCSecretRef != nil && u.Spec.BMCSecretRef.Name == obj.GetName() {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: u.Name},
 			})
