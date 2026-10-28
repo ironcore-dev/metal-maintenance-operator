@@ -4,10 +4,18 @@
 package system
 
 import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	"github.com/ironcore-dev/metal-operator/bmc"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
+	"github.com/stmcginnis/gofish/schemas"
+	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	"k8s.io/utils/ptr"
 
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"

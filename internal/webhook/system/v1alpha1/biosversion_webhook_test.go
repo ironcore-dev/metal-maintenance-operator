@@ -8,7 +8,6 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
@@ -34,9 +33,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   api.ImageSpec{URI: "one"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "one"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -61,9 +62,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   api.ImageSpec{URI: "two"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "two"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "foo"},
 			},
@@ -79,9 +82,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   api.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "asd"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -97,9 +102,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   api.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "asd"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -120,9 +127,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   api.ImageSpec{URI: "two"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "two"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
@@ -143,9 +152,11 @@ var _ = Describe("BIOSVersion Webhook", func() {
 			},
 			Spec: systemv1alpha1.BIOSVersionSpec{
 				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
-					Version:                 "P71 v1.45 (12/06/2017)",
-					Image:                   api.ImageSpec{URI: "asd"},
-					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+					VersionTemplate: api.VersionTemplate{
+						Version:                 "P71 v1.45 (12/06/2017)",
+						Image:                   api.ImageSpec{URI: "asd"},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyEnforced,
+					},
 				},
 				ServerRef: &v1.LocalObjectReference{Name: "bar"},
 			},
