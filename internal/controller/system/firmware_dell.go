@@ -126,15 +126,29 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 		repositoryCheckInterval := r.repositoryCheckInterval()
 		if checkCompleted.Status == metav1.ConditionTrue &&
 			checkCompleted.Reason == ReasonRepositoryCheckCompleted &&
-			repositoryCheckInterval > 0 {
+			repositoryCheckInterval > 0 &&
+			fw.Status.ObservedGeneration == fw.Generation {
 			age := time.Since(checkCompleted.LastTransitionTime.Time)
 			if age < repositoryCheckInterval {
 				log.V(1).Info("RepositoryCheck recently completed, deferring next periodic check",
 					"Server", server.Name, "Age", age, "RepositoryCheckInterval", repositoryCheckInterval)
+				// This deferral is the intended, healthy steady-state for a Completed update
+				// waiting out its periodic recheck cadence, not a stuck condition - refresh
+				// LastProgressTime so checkProgressDeadline doesn't mistake it for one.
+				fwBase := fw.DeepCopy()
+				fw.Status.LastProgressTime = new(metav1.Now())
+				if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
+					return false, fmt.Errorf("failed to refresh LastProgressTime while deferring periodic check: %w", err)
+				}
 				return true, nil
 			}
 			log.V(1).Info("RepositoryCheck stale, issuing periodic drift-detection check",
 				"Server", server.Name, "Age", age, "RepositoryCheckInterval", repositoryCheckInterval)
+		} else if checkCompleted.Status == metav1.ConditionTrue &&
+			checkCompleted.Reason == ReasonRepositoryCheckCompleted &&
+			fw.Status.ObservedGeneration != fw.Generation {
+			log.V(1).Info("FirmwareUpdate spec changed since last RepositoryCheck, bypassing periodic check interval",
+				"Server", server.Name)
 		} else {
 			log.V(1).Info("RepositoryCheck not yet issued, issuing dry-run check", "Server", server.Name)
 		}
