@@ -98,6 +98,11 @@ const (
 	ConditionRetryOfFailedResourceIssued = "RetryOfFailedResourceIssued"
 	ConditionProgressDeadlineExceeded    = "ProgressDeadlineExceeded"
 
+	// ConditionUpgradeTaskNotFound is True while the BMC cannot find the upgrade task recorded in
+	// status.upgradeTask (or none was recorded). It is only added once that happens, and set back to
+	// False when the task is found again or the upgrade is verified without it.
+	ConditionUpgradeTaskNotFound = "UpgradeTaskNotFound"
+
 	// ConditionRetryResetIssued tracks a BMC reset issued specifically to clear a hung/stuck BMC
 	// before retrying a Failed resource. It is intentionally distinct from ConditionResetIssued
 	// (used for the BMC-stabilization reset performed as part of the normal apply flow) so a stale
@@ -127,6 +132,9 @@ const (
 	ReasonUpgradeTaskFailed           = "UpgradeTaskFailed"
 	ReasonUpgradeIssueFailed          = "UpgradeIssueFailed"
 	ReasonUpgradeTaskCompleted        = "UpgradeTaskCompleted"
+	ReasonUpgradeTaskNotFound         = "UpgradeTaskNotFound"
+	ReasonUpgradeTaskFound            = "UpgradeTaskFound"
+	ReasonUpgradeTaskNotRequired      = "UpgradeTaskNotRequired"
 	ReasonVersionUpdateVerified       = "VersionUpdateVerified"
 	ReasonVersionVerificationFailed   = "VersionVerificationFailed"
 	ReasonVersionUpgradePending       = "VersionUpgradePending"
