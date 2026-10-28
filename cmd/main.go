@@ -96,6 +96,7 @@ func main() {
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var reportBaseURL string
 	var sanitizedServerAddress string
+	var sanitizationTokenExpiry time.Duration
 	var managerNamespace string
 	var configMapCacheNamespaces string
 	var defaultProtocol string
@@ -138,6 +139,9 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
+	flag.DurationVar(&sanitizationTokenExpiry, "sanitization-token-expiry", time.Hour,
+		"How long a sanitization JWT token is valid. "+
+			"Should be longer than the maximum expected sanitization duration.")
 	flag.StringVar(&managerNamespace, "manager-namespace", "",
 		"Namespace the manager runs in (used for BMC/BIOS controller secrets and boot configs).")
 	flag.StringVar(&configMapCacheNamespaces, "configmap-cache-namespaces", "",
@@ -362,6 +366,32 @@ func main() {
 		os.Exit(1)
 	}
 
+	accessor := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
+	bmcOpts := metalv1alpha1bmc.Options{
+		BasicAuth:            true,
+		PowerPollingInterval: 5 * time.Second,
+		PowerPollingTimeout:  2 * time.Minute,
+	}
+	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
+
+	const hmacKeyName = "metal-maintenance-operator-hmac-key"
+	const sanitizationSigningKeyName = "metal-maintenance-operator-sanitization-signing-key"
+	bootstrapClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		setupLog.Error(err, "Failed to create bootstrap client for HMAC signing key")
+		os.Exit(1)
+	}
+	hmacKey, err := utils.EnsureHMACKey(context.Background(), bootstrapClient, managerNamespace, hmacKeyName)
+	if err != nil {
+		setupLog.Error(err, "Failed to ensure HMAC signing key")
+		os.Exit(1)
+	}
+	sanitizationSigningKey, err := utils.EnsureSigningKey(context.Background(), bootstrapClient, managerNamespace, sanitizationSigningKeyName)
+	if err != nil {
+		setupLog.Error(err, "Failed to ensure sanitization signing key")
+		os.Exit(1)
+	}
+
 	if err = (&vendorconsolectrl.ConsoleReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -378,6 +408,8 @@ func main() {
 		SanitizationTolerations: sanitizationTolerations,
 		SanitizationIgnitionProvider: (&ignition.SanitizationProvider{
 			ReportBaseURL: reportBaseURL,
+			SigningKey:    sanitizationSigningKey,
+			TokenExpiry:   sanitizationTokenExpiry,
 		}).Ignition,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerSanitization controller")
@@ -388,6 +420,7 @@ func main() {
 		Client:                mgr.GetClient(),
 		SanitizationNamespace: sanitizationNamespace,
 		Address:               sanitizedServerAddress,
+		SigningKey:             sanitizationSigningKey,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create Sanitized handler")
 		os.Exit(1)
@@ -415,26 +448,6 @@ func main() {
 		ResyncInterval: resyncInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerMaintenance controller")
-		os.Exit(1)
-	}
-
-	accessor := conditionutils.NewAccessor(conditionutils.AccessorOptions{})
-	bmcOpts := metalv1alpha1bmc.Options{
-		BasicAuth:            true,
-		PowerPollingInterval: 5 * time.Second,
-		PowerPollingTimeout:  2 * time.Minute,
-	}
-	protocol := metalv1alpha1.ProtocolScheme(defaultProtocol)
-
-	const hmacKeyName = "metal-maintenance-operator-hmac-key"
-	bootstrapClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
-	if err != nil {
-		setupLog.Error(err, "Failed to create bootstrap client for HMAC signing key")
-		os.Exit(1)
-	}
-	hmacKey, err := utils.EnsureHMACKey(context.Background(), bootstrapClient, managerNamespace, hmacKeyName)
-	if err != nil {
-		setupLog.Error(err, "Failed to ensure HMAC signing key")
 		os.Exit(1)
 	}
 
