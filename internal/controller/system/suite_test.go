@@ -219,6 +219,7 @@ func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver
 			SkipCertValidation: true,
 			Scheme:             k8sManager.GetScheme(),
 			ResyncInterval:     10 * time.Millisecond,
+			PollingInterval:    10 * time.Millisecond,
 			Conditions:         accessor,
 			BMCOptions: bmc.Options{
 				PowerPollingInterval: 50 * time.Millisecond,

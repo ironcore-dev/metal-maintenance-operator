@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
@@ -58,12 +59,16 @@ var vendorHandlers = map[string]vendorHandler{
 
 type FirmwareUpdateReconciler struct {
 	client.Client
-	ManagerNamespace            string
-	DefaultProtocol             metalv1alpha1.ProtocolScheme
-	SkipCertValidation          bool
-	Scheme                      *runtime.Scheme
-	BMCOptions                  bmc.Options
-	ResyncInterval              time.Duration
+	ManagerNamespace   string
+	DefaultProtocol    metalv1alpha1.ProtocolScheme
+	SkipCertValidation bool
+	Scheme             *runtime.Scheme
+	BMCOptions         bmc.Options
+	ResyncInterval     time.Duration
+	// PollingInterval is the requeue delay used while a firmware update is
+	// actively in progress (pending job polls, component tracking, etc.).
+	// Defaults to 2 minutes when unset or zero.
+	PollingInterval             time.Duration
 	Conditions                  *conditionutils.Accessor
 	DefaultFailedAutoRetryCount int32
 	// MaxRepositoryPasses bounds how many times a dry-run repository check may
@@ -88,6 +93,15 @@ type FirmwareUpdateReconciler struct {
 	// before giving up on the retry. Giving up stops further automatic retries but does not
 	// release maintenance. A value <= 0 disables the give-up check.
 	ServerResetGiveUpTimeout time.Duration
+}
+
+const defaultFirmwarePollingInterval = 2 * time.Minute
+
+func (r *FirmwareUpdateReconciler) pollingInterval() time.Duration {
+	if r.PollingInterval > 0 {
+		return r.PollingInterval
+	}
+	return defaultFirmwarePollingInterval
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates,verbs=get;list;watch;create;update;patch;delete
@@ -211,7 +225,7 @@ func (r *FirmwareUpdateReconciler) reconcile(ctx context.Context, fw *systemv1al
 		return ctrl.Result{}, err
 	}
 	if requeue {
-		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		return ctrl.Result{RequeueAfter: r.pollingInterval()}, nil
 	}
 
 	log.V(1).Info("Reconciled FirmwareUpdate")
@@ -668,6 +682,8 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 // the conditions slice (preserving all other conditions), and applies mutate
 // to update vendor-specific job-tracking fields (e.g. DellStatus.CheckJob/
 // UpdateJob/ComponentJobs/BaselineJobIDs) - all in a single status patch.
+// LastProgressTime advances only when actual progress occurs: a state
+// transition, a condition update, or a change in job-tracking fields.
 func (r *FirmwareUpdateReconciler) patchProgress(
 	ctx context.Context,
 	fw *systemv1alpha1.FirmwareUpdate,
@@ -676,6 +692,9 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 	mutate func(*systemv1alpha1.FirmwareUpdateStatus),
 ) error {
 	fwBase := fw.DeepCopy()
+	prevState := fw.Status.State
+	prevDellStatus := fw.Status.DellStatus.DeepCopy()
+
 	fw.Status.State = state
 	fw.Status.ObservedGeneration = fw.Generation
 
@@ -695,8 +714,13 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 		mutate(&fw.Status)
 	}
 
-	now := metav1.Now()
-	fw.Status.LastProgressTime = &now
+	progressed := condition != nil ||
+		state != prevState ||
+		!reflect.DeepEqual(prevDellStatus, fw.Status.DellStatus)
+	if progressed || fw.Status.LastProgressTime == nil {
+		now := metav1.Now()
+		fw.Status.LastProgressTime = &now
+	}
 
 	if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
 		return fmt.Errorf("failed to patch FirmwareUpdate status: %w", err)
