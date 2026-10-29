@@ -89,7 +89,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "metal-maintenance-operator.fullname" . }}-bmc-crs
+  name: {{ include "metal-maintenance-operator.fullname" . }}-ironcore-crs
   namespace: {{ include "metal-maintenance-operator.namespaceName" . }}
   {{- with .Values.kubeStateMetrics.sidecarDiscovery.labels }}
   labels:
@@ -100,6 +100,24 @@ data:
     kind: CustomResourceStateMetrics
     spec:
       resources:
+        {{- range $group := .Values.kubeStateMetrics.sidecarDiscovery.groups }}
+        - groupVersionKind:
+            group: {{ $group }}
+            version: "*"
+            kind: "*"
+          metricNamePrefix: kube_ironcore
+          labelsFromPath:
+            name: [metadata, name]
+            namespace: [metadata, namespace]
+          metrics:
+            - name: info
+              help: "Information and labels for {{ $group }} resources"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    "*": [metadata, labels]
+        {{- end }}
         # BMC hardware identity: exposes status/spec fields not in metadata labels.
         # Separate metric name (kube_ironcore_bmc_info) avoids polluting other ironcore
         # CRDs (Server, Machine, etc.) with empty manufacturer/model labels.
