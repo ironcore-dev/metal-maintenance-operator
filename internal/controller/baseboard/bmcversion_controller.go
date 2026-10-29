@@ -726,6 +726,9 @@ func (r *BMCVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcCl
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
 			return false, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, bmcVersion.Status.State, reasons)
 		}
+		if err := r.markBMCVersionReadinessGatesSatisfied(ctx, bmcVersion, bmcVersion.Status.State); err != nil {
+			return false, err
+		}
 	}
 	if requeue, err := r.requestMaintenanceOnServers(ctx, bmcClient, bmcVersion); err != nil || requeue {
 		return false, err

@@ -1346,6 +1346,9 @@ func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmc
 			}
 			return false, r.updateStatus(ctx, settings, settings.Status.State, condition)
 		}
+		if err := r.markBIOSSettingsReadinessGatesSatisfied(ctx, settings, settings.Status.State); err != nil {
+			return false, err
+		}
 	}
 	if req, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || req {
 		return false, err

@@ -688,6 +688,9 @@ func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 			}
 			return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, biosVersion.Status.UpgradeTask, condition)
 		}
+		if err := r.markBIOSVersionReadinessGatesSatisfied(ctx, biosVersion, biosVersion.Status.State); err != nil {
+			return false, err
+		}
 	}
 	if req, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || req {
 		return false, err

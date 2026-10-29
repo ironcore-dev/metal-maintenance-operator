@@ -1000,6 +1000,9 @@ func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 			}
 			return false, r.updateBMCSettingsStatus(ctx, settings, settings.Status.State, condition)
 		}
+		if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, settings.Status.State); err != nil {
+			return false, err
+		}
 	}
 	if req, err := r.requestMaintenanceOnServers(ctx, settings, bmcObj, bmcClient); err != nil || req {
 		return false, err
