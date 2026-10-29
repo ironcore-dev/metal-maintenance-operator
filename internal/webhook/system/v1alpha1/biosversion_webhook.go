@@ -106,11 +106,8 @@ func checkForDuplicateBIOSVersionRefToServer(versions *systemv1alpha1.BIOSVersio
 		if bv.Spec.ServerRef == nil {
 			continue
 		}
-		if version.Spec.ServerRef.Name != bv.Spec.ServerRef.Name {
-			continue
-		}
-		if len(version.Spec.ReadinessGates) == 0 && len(bv.Spec.ReadinessGates) == 0 {
-			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s without readinessGates",
+		if version.Spec.ServerRef.Name == bv.Spec.ServerRef.Name {
+			err := fmt.Errorf("server (%s) referred in %s is duplicate of server (%s) referred in %s",
 				version.Spec.ServerRef.Name, version.Name, bv.Spec.ServerRef.Name, bv.Name)
 			return nil, apierrors.NewInvalid(
 				schema.GroupKind{Group: version.GroupVersionKind().Group, Kind: version.Kind},

@@ -219,14 +219,14 @@ func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver
 			SkipCertValidation: true,
 			Scheme:             k8sManager.GetScheme(),
 			ResyncInterval:     10 * time.Millisecond,
+			PollingInterval:    10 * time.Millisecond,
 			Conditions:         accessor,
 			BMCOptions: bmc.Options{
 				PowerPollingInterval: 50 * time.Millisecond,
 				PowerPollingTimeout:  200 * time.Millisecond,
 				BasicAuth:            true,
 			},
-			MaxRepositoryPasses:        5,
-			ScheduledJobPowerOnTimeout: 1000 * time.Millisecond,
+			MaxRepositoryPasses: 5,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real

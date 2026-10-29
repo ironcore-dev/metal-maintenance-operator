@@ -76,40 +76,69 @@ func TestValidate_PerBMCTimeoutRange(t *testing.T) {
 	}
 }
 
-func TestValidate_EventBasedHardware_MissingVendor(t *testing.T) {
-	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{{Models: []string{"*"}}}
-	errs := Validate(cfg)
-	assertFieldError(t, errs, "eventBasedHardware[0].vendor")
+// TestValidate_OldEventBasedHardwareRejected pins the hard-break requirement:
+// a ConfigMap that still uses the old "eventBasedHardware" key must be
+// rejected immediately via strict YAML parsing (unknown field).
+func TestValidate_OldEventBasedHardwareRejected(t *testing.T) {
+	raw := []byte(`
+apiVersion: telemetry.metal.ironcore.dev/v1alpha1
+subscriptionReconcileInterval: 30s
+eventBasedHardware:
+  - vendor: Dell Inc.
+    models: ["*"]
+    testMessageId: FAN.1.0.FAN0001
+`)
+	_, errs := Parse(raw)
+	if len(errs) == 0 {
+		t.Fatal("expected strict-YAML error for unknown field 'eventBasedHardware', got none")
+	}
 }
 
-// TestValidate_EventBasedHardware_NonCanonicalVendor pins the contract:
-// short forms ("Dell", "dell", "Hewlett Packard Enterprise") are
-// rejected because metal-operator only ever writes the canonical
-// bmc.Manufacturer constants ("Dell Inc.", "HPE", "Lenovo",
-// "Supermicro") to BMC.Status.Manufacturer. Accepting other variants
-// here would silently leave those rows un-matchable at runtime.
-func TestValidate_EventBasedHardware_NonCanonicalVendor(t *testing.T) {
+// -- excludeHardware --
+
+func TestValidate_ExcludeHardware_MissingVendor(t *testing.T) {
+	cfg := minimalValid()
+	cfg.ExcludeHardware = []ExcludeRule{{Models: []string{"*"}}}
+	errs := Validate(cfg)
+	assertFieldError(t, errs, "excludeHardware[0].vendor")
+}
+
+func TestValidate_ExcludeHardware_NonCanonicalVendor(t *testing.T) {
 	for _, vendor := range []string{"Dell", "dell", "DELL", "Hewlett Packard Enterprise", "lenovo", " Dell Inc. ", "HPE "} {
 		t.Run(vendor, func(t *testing.T) {
 			cfg := minimalValid()
-			cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendor, Models: []string{"*"}}}
+			cfg.ExcludeHardware = []ExcludeRule{{Vendor: vendor, Models: []string{"*"}}}
 			errs := Validate(cfg)
-			assertFieldError(t, errs, "eventBasedHardware[0].vendor")
+			assertFieldError(t, errs, "excludeHardware[0].vendor")
 		})
 	}
 }
 
-func TestValidate_EventBasedHardware_EmptyModels(t *testing.T) {
+func TestValidate_ExcludeHardware_EmptyModels(t *testing.T) {
 	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{}}}
+	cfg.ExcludeHardware = []ExcludeRule{{Vendor: vendorDellInc, Models: []string{}}}
 	errs := Validate(cfg)
-	assertFieldError(t, errs, "eventBasedHardware[0].models")
+	assertFieldError(t, errs, "excludeHardware[0].models")
 }
 
-func TestValidate_EventBasedHardware_MultipleRowsSameVendor(t *testing.T) {
+func TestValidate_ExcludeHardware_BadSemver(t *testing.T) {
 	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{
+	cfg.ExcludeHardware = []ExcludeRule{{Vendor: vendorDellInc, Models: []string{"*"}, MinFirmware: "not-semver"}}
+	errs := Validate(cfg)
+	assertFieldError(t, errs, "excludeHardware[0].minFirmware")
+}
+
+func TestValidate_ExcludeHardware_ValidSemver(t *testing.T) {
+	cfg := minimalValid()
+	cfg.ExcludeHardware = []ExcludeRule{{Vendor: vendorDellInc, Models: []string{"*"}, MinFirmware: firmware5_10_0}}
+	if errs := Validate(cfg); len(errs) != 0 {
+		t.Fatalf("unexpected errors with valid semver: %v", errs)
+	}
+}
+
+func TestValidate_ExcludeHardware_MultipleRowsSameVendor(t *testing.T) {
+	cfg := minimalValid()
+	cfg.ExcludeHardware = []ExcludeRule{
 		{Vendor: vendorDellInc, Models: []string{"PowerEdge R750"}},
 		{Vendor: vendorDellInc, Models: []string{"PowerEdge R640"}},
 	}
@@ -118,36 +147,61 @@ func TestValidate_EventBasedHardware_MultipleRowsSameVendor(t *testing.T) {
 	}
 }
 
-func TestValidate_EventBasedHardware_BadSemver(t *testing.T) {
+// -- testEventOverrides --
+
+func TestValidate_TestEventOverrides_MissingVendor(t *testing.T) {
 	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, MinFirmware: "not-semver"}}
+	cfg.TestEventOverrides = []TestOverride{{Models: []string{"*"}}}
 	errs := Validate(cfg)
-	assertFieldError(t, errs, "eventBasedHardware[0].minFirmware")
+	assertFieldError(t, errs, "testEventOverrides[0].vendor")
 }
 
-func TestValidate_EventBasedHardware_ValidSemver(t *testing.T) {
-	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, MinFirmware: firmware5_10_0}}
-	if errs := Validate(cfg); len(errs) != 0 {
-		t.Fatalf("unexpected errors with valid semver: %v", errs)
+func TestValidate_TestEventOverrides_NonCanonicalVendor(t *testing.T) {
+	for _, vendor := range []string{"Dell", "dell", "DELL", " Dell Inc. ", "HPE "} {
+		t.Run(vendor, func(t *testing.T) {
+			cfg := minimalValid()
+			cfg.TestEventOverrides = []TestOverride{{Vendor: vendor, Models: []string{"*"}}}
+			errs := Validate(cfg)
+			assertFieldError(t, errs, "testEventOverrides[0].vendor")
+		})
 	}
 }
 
-func TestValidate_EventBasedHardware_TestMessageIdRequiredWhenIntervalSet(t *testing.T) {
+func TestValidate_TestEventOverrides_EmptyModels(t *testing.T) {
 	cfg := minimalValid()
-	cfg.TestEventInterval = time.Minute
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	cfg.TestEventOverrides = []TestOverride{{Vendor: vendorDellInc, Models: []string{}}}
 	errs := Validate(cfg)
-	assertFieldError(t, errs, "testMessageId")
+	assertFieldError(t, errs, "testEventOverrides[0].models")
 }
 
-func TestValidate_EventBasedHardware_TestMessageIdNotRequiredWithoutInterval(t *testing.T) {
+func TestValidate_TestEventOverrides_TestMessageIdOptional(t *testing.T) {
+	// TestMessageId is now optional — the operator auto-discovers it.
 	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
+	cfg.TestEventInterval = time.Hour
+	cfg.TestEventOverrides = []TestOverride{{Vendor: vendorDellInc, Models: []string{"*"}}}
 	if errs := Validate(cfg); len(errs) != 0 {
-		t.Fatalf("unexpected errors without testEventInterval: %v", errs)
+		t.Errorf("testMessageId should be optional in testEventOverrides, got: %v", errs)
 	}
 }
+
+func TestValidate_TestEventOverrides_AllFieldsValid(t *testing.T) {
+	cfg := minimalValid()
+	cfg.TestEventInterval = time.Hour
+	cfg.TestEventOverrides = []TestOverride{
+		{
+			Vendor:                vendorDellInc,
+			Models:                []string{"*"},
+			TestMessageId:         "FAN.1.0.FAN0001",
+			TestSeverity:          "Informational",
+			TestOriginOfCondition: "/redfish/v1/Managers/1",
+		},
+	}
+	if errs := Validate(cfg); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+}
+
+// -- testEventInterval / testEventTimeout --
 
 func TestValidate_TestEventInterval_Range(t *testing.T) {
 	cases := []struct {
@@ -171,38 +225,6 @@ func TestValidate_TestEventInterval_Range(t *testing.T) {
 				assertFieldError(t, errs, "testEventInterval")
 			} else if len(errs) != 0 {
 				t.Errorf("unexpected errors: %v", errs)
-			}
-		})
-	}
-}
-
-func TestValidate_TestMessageId_RequiredWhenIntervalSet(t *testing.T) {
-	cfg := minimalValid()
-	cfg.TestEventInterval = time.Hour
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
-	errs := Validate(cfg)
-	assertFieldError(t, errs, "testMessageId")
-}
-
-func TestValidate_TestMessageId_NotRequiredWhenIntervalZero(t *testing.T) {
-	cfg := minimalValid()
-	cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}}}
-	if errs := Validate(cfg); len(errs) != 0 {
-		t.Errorf("testMessageId should not be required when interval is zero, got: %v", errs)
-	}
-}
-
-func TestValidate_TestMessageId_AnyNonEmptyAccepted(t *testing.T) {
-	// Format validation is deliberately omitted: vendors use different
-	// conventions (e.g. iDRAC accepts "SYS1000", HPE uses full registry
-	// paths). The BMC will reject a bad value at runtime.
-	for _, id := range []string{"SYS1000", "SYS.1.0.SYS1000", "iDRAC.2.9.RAC0182", "Base.1.12.GeneralError", "anything"} {
-		t.Run(id, func(t *testing.T) {
-			cfg := minimalValid()
-			cfg.TestEventInterval = time.Hour
-			cfg.EventBasedHardware = []HardwareMatch{{Vendor: vendorDellInc, Models: []string{"*"}, TestMessageId: id}}
-			if errs := Validate(cfg); len(errs) != 0 {
-				t.Errorf("non-empty testMessageId %q should be accepted, got: %v", id, errs)
 			}
 		})
 	}
@@ -235,6 +257,8 @@ func TestValidate_TestEventTimeout_Range(t *testing.T) {
 	}
 }
 
+// -- Parse strict YAML --
+
 func TestParse_UnknownField(t *testing.T) {
 	raw := []byte(`
 apiVersion: telemetry.metal.ironcore.dev/v1alpha1
@@ -252,10 +276,14 @@ func TestParse_RoundTrip(t *testing.T) {
 apiVersion: telemetry.metal.ironcore.dev/v1alpha1
 subscriptionReconcileInterval: 1m
 perBMCTimeout: 25s
-eventBasedHardware:
+excludeHardware:
   - vendor: Dell Inc.
     models: ["*"]
     minFirmware: 5.10.0
+testEventOverrides:
+  - vendor: HPE
+    models: ["*"]
+    testMessageId: iLO.1.0.TestAlert
 `)
 	cfg, errs := Parse(raw)
 	if len(errs) != 0 {
@@ -267,8 +295,11 @@ eventBasedHardware:
 	if cfg.PerBMCTimeout != 25*time.Second {
 		t.Errorf("perBMCTimeout: got %v, want 25s", cfg.PerBMCTimeout)
 	}
-	if len(cfg.EventBasedHardware) != 1 {
-		t.Errorf("eventBasedHardware: got %d, want 1", len(cfg.EventBasedHardware))
+	if len(cfg.ExcludeHardware) != 1 {
+		t.Errorf("excludeHardware: got %d, want 1", len(cfg.ExcludeHardware))
+	}
+	if len(cfg.TestEventOverrides) != 1 {
+		t.Errorf("testEventOverrides: got %d, want 1", len(cfg.TestEventOverrides))
 	}
 }
 

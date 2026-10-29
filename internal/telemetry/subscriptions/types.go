@@ -59,6 +59,19 @@ type Subscription struct {
 	EventFormat string // "MetricReport" or "Event".
 }
 
+// EventServiceCapabilities holds the result of a live EventService probe.
+type EventServiceCapabilities struct {
+	// ServiceEnabled is true when the BMC's EventService is present and enabled.
+	ServiceEnabled bool
+	// HasSubmitTestEvent is true when the EventService advertises a
+	// SubmitTestEvent action target.
+	HasSubmitTestEvent bool
+	// DiscoveredTestMessageId is the first viable MessageId found by walking
+	// the BMC's RegistryPrefixes. Empty when the walk was skipped (an override
+	// was provided) or when no registry entry could be found.
+	DiscoveredTestMessageId string
+}
+
 // Client is the reconciler's contract with a BMC over Redfish. It's the
 // bmc.BMC surface for Create/Delete/Logout, augmented with the list
 // operation that upstream bmc.BMC does not expose today. The production
@@ -79,6 +92,11 @@ type Client interface {
 	// caller can match it when the event arrives at the receiver to
 	// confirm round-trip.
 	SubmitTestEvent(ctx context.Context, params TestEventParams) error
+	// ProbeEventService interrogates the BMC's EventService to determine
+	// whether it supports event-push subscriptions. When needsDiscovery is
+	// true and the service is capable, it also walks the BMC's Redfish
+	// message registries to find a suitable SubmitTestEvent MessageId.
+	ProbeEventService(ctx context.Context, needsDiscovery bool) (*EventServiceCapabilities, error)
 	Logout()
 }
 

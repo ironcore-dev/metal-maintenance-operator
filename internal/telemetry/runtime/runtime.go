@@ -18,9 +18,12 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/stmcginnis/gofish"
+	redfishschemas "github.com/stmcginnis/gofish/schemas"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -58,6 +61,18 @@ type Options struct {
 	// Warning-severity Redfish alerts. Can be enabled independently of
 	// EnableCriticalEventHandler.
 	EnableWarningEventHandler bool
+
+	// ActiveSubscriptions is populated by AddTo with a function that
+	// returns the current set of BMC names with active push subscriptions.
+	// Callers can pass this to discovery.Handler.SubscribedBMCs so the
+	// Prometheus SD endpoint omits subscribed BMCs.
+	// This field is an output; callers must not set it before calling AddTo.
+	ActiveSubscriptions func() map[string]struct{}
+
+	// UnsubscribedBMCReasons is populated by AddTo with a function that
+	// returns a map of bmcName → reason for BMCs not push-subscribed.
+	// This field is an output; callers must not set it before calling AddTo.
+	UnsubscribedBMCReasons func() map[string]string
 }
 
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;patch;watch
@@ -68,8 +83,13 @@ type Options struct {
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // AddTo registers the event-push pipeline on the given manager.
-func AddTo(mgr manager.Manager, opts Options) error {
-	if err := validateOptions(&opts); err != nil {
+// opts must be non-nil. On return, opts.ActiveSubscriptions and
+// opts.UnsubscribedBMCReasons are populated with live callbacks.
+func AddTo(mgr manager.Manager, opts *Options) error {
+	if opts == nil {
+		return fmt.Errorf("options are required")
+	}
+	if err := validateOptions(opts); err != nil {
 		return err
 	}
 	if err := validateReceiverURL(opts.ReceiverURL); err != nil {
@@ -93,6 +113,10 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	testSink, err := promsink.NewTestEventSink(ctrlmetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("init test-event sink: %w", err)
+	}
+	statusSink, err := promsink.NewSubscriptionStatusSink(ctrlmetrics.Registry)
+	if err != nil {
+		return fmt.Errorf("init subscription status sink: %w", err)
 	}
 
 	var criticalHandler *criticalevent.ConditionHandler
@@ -183,6 +207,7 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		MetricReportSink: metricSink,
 		AlertHandler:     criticalHandler,
 		TestRecorder:     testSink,
+		StatusRecorder:   statusSink,
 		ReceiverURL:      opts.ReceiverURL,
 		SubscriberID:     opts.SubscriberID,
 		// ReconcileInterval and PerBMCTimeout intentionally unset:
@@ -194,6 +219,11 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	if err := subReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup subscription reconciler: %w", err)
 	}
+
+	// Expose the live set of subscribed BMC names so callers can wire it into
+	// the discovery endpoint to omit push-subscribed BMCs from scrape targets.
+	opts.ActiveSubscriptions = subReconciler.ActiveSubscriptions
+	opts.UnsubscribedBMCReasons = subReconciler.UnsubscribedBMCReasons
 
 	// Wire the receiver's test notifier to the reconciler so round-trip
 	// confirmations update the health-check metric.
@@ -335,6 +365,84 @@ func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions
 		_ = resp.Body.Close()
 	}
 	return err
+}
+
+func (c *extendedClient) ProbeEventService(_ context.Context, needsDiscovery bool) (*subscriptions.EventServiceCapabilities, error) {
+	svc := c.api.GetService()
+	if svc == nil {
+		return nil, fmt.Errorf("probe event service: no service root")
+	}
+	es, err := svc.EventService()
+	if err != nil {
+		return nil, fmt.Errorf("probe event service: %w", err)
+	}
+	caps := &subscriptions.EventServiceCapabilities{
+		ServiceEnabled:     es.ServiceEnabled,
+		HasSubmitTestEvent: es.SubmitTestEventTarget != "",
+	}
+	if !caps.ServiceEnabled || !caps.HasSubmitTestEvent || !needsDiscovery {
+		return caps, nil
+	}
+	caps.DiscoveredTestMessageId = discoverTestMessageId(svc, es.RegistryPrefixes)
+	return caps, nil
+}
+
+// discoverTestMessageId walks the BMC's MessageRegistryFile collection and
+// returns the first viable MessageId in the form
+// "{RegistryPrefix}.{RegistryVersion}.{Key}" for a registry whose prefix
+// appears in the advertised prefixes list. Returns an empty string when no
+// usable entry is found.
+func discoverTestMessageId(svc *gofish.Service, prefixes []string) string {
+	if len(prefixes) == 0 {
+		return ""
+	}
+	// Build a set for O(1) prefix lookups.
+	want := make(map[string]struct{}, len(prefixes))
+	for _, p := range prefixes {
+		want[p] = struct{}{}
+	}
+
+	files, err := svc.Registries()
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+
+	gofishClient := svc.GetClient()
+	for _, f := range files {
+		// f.Registry is e.g. "iLO.1.0" or "Base.1.15"; the prefix is the
+		// part before the first dot.
+		prefix := registryPrefix(f.Registry)
+		if _, ok := want[prefix]; !ok {
+			continue
+		}
+		for _, loc := range f.Location {
+			if loc.URI == "" {
+				continue
+			}
+			mr, err := redfishschemas.GetMessageRegistry(gofishClient, loc.URI)
+			if err != nil || mr == nil || len(mr.Messages) == 0 {
+				continue
+			}
+			keys := make([]string, 0, len(mr.Messages))
+			for key := range mr.Messages {
+				keys = append(keys, key)
+			}
+			slices.Sort(keys)
+			ver := mr.RegistryVersion
+			if parts := strings.SplitN(ver, ".", 3); len(parts) >= 2 {
+				ver = parts[0] + "." + parts[1]
+			}
+			return mr.RegistryPrefix + "." + ver + "." + keys[0]
+		}
+	}
+	return ""
+}
+
+// registryPrefix returns the registry name prefix (the part before the first
+// dot) from a MessageRegistryFile.Registry value like "iLO.1.0" or "Base.1.15".
+func registryPrefix(registry string) string {
+	prefix, _, _ := strings.Cut(registry, ".")
+	return prefix
 }
 
 func (f *subscriptionClientFactory) NewClient(ctx context.Context, r *subscriptions.Resolved) (subscriptions.Client, error) {

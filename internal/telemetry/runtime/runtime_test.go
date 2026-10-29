@@ -22,7 +22,7 @@ const (
 // either mention or don't mention specific option names.
 
 func TestAddTo_RequiresConfigName(t *testing.T) {
-	err := telemetryruntime.AddTo(nil, telemetryruntime.Options{
+	err := telemetryruntime.AddTo(nil, &telemetryruntime.Options{
 		ConfigNamespace: "ns",
 		ReceiverURL:     testReceiverURL,
 		EventsAddr:      testEventsAddr,
@@ -36,7 +36,7 @@ func TestAddTo_RequiresConfigName(t *testing.T) {
 }
 
 func TestAddTo_RequiresConfigNamespace(t *testing.T) {
-	err := telemetryruntime.AddTo(nil, telemetryruntime.Options{
+	err := telemetryruntime.AddTo(nil, &telemetryruntime.Options{
 		ConfigName:  "cm",
 		ReceiverURL: testReceiverURL,
 		EventsAddr:  testEventsAddr,
@@ -50,7 +50,7 @@ func TestAddTo_RequiresConfigNamespace(t *testing.T) {
 }
 
 func TestAddTo_RequiresReceiverURL(t *testing.T) {
-	err := telemetryruntime.AddTo(nil, telemetryruntime.Options{
+	err := telemetryruntime.AddTo(nil, &telemetryruntime.Options{
 		ConfigName:      "cm",
 		ConfigNamespace: "ns",
 		EventsAddr:      testEventsAddr,
@@ -64,7 +64,7 @@ func TestAddTo_RequiresReceiverURL(t *testing.T) {
 }
 
 func TestAddTo_RequiresEventsAddr(t *testing.T) {
-	err := telemetryruntime.AddTo(nil, telemetryruntime.Options{
+	err := telemetryruntime.AddTo(nil, &telemetryruntime.Options{
 		ConfigName:      "cm",
 		ConfigNamespace: "ns",
 		ReceiverURL:     testReceiverURL,
@@ -123,7 +123,7 @@ func TestAddTo_OptionsCarryThrough(t *testing.T) {
 // mutated; from here we can only check that a missing SubscriberID
 // doesn't itself surface as a validation error.
 func TestAddTo_MissingSubscriberIDIsNotAValidationError(t *testing.T) {
-	err := telemetryruntime.AddTo(nil, telemetryruntime.Options{
+	err := telemetryruntime.AddTo(nil, &telemetryruntime.Options{
 		ConfigName:      "cm",
 		ConfigNamespace: "ns",
 		ReceiverURL:     testReceiverURL,

@@ -122,7 +122,8 @@ func (l *ConfigLoader) reload(ctx context.Context) error {
 		l.Log.Info("Initial telemetry config loaded",
 			"subscriptionReconcileInterval", cfg.SubscriptionReconcileInterval,
 			"perBMCTimeout", cfg.PerBMCTimeout,
-			"eventBasedRows", len(cfg.EventBasedHardware))
+			"excludeRows", len(cfg.ExcludeHardware),
+			"testOverrideRows", len(cfg.TestEventOverrides))
 	} else {
 		l.Log.V(1).Info("Telemetry config reloaded")
 	}
