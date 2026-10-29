@@ -276,19 +276,12 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 // InProgress state
 func (r *BMCVersionReconciler) handleBMCVersionInProgressState(ctx context.Context, bmcVersion *baseboardv1alpha1.BMCVersion, bmcClient bmc.BMC, bmcObj *metalv1alpha1.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-	servers, err := r.getServersForBMCVersion(ctx, bmcClient, bmcVersion)
+	requeue, err := r.requestMaintenanceOnServers(ctx, bmcClient, bmcVersion)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to request maintenance on servers: %w", err)
 	}
-
-	if len(bmcVersion.Spec.ServerMaintenanceRefs) != len(servers) {
-		requeue, err := r.requestMaintenanceOnServers(ctx, bmcClient, bmcVersion)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to request maintenance on servers: %w", err)
-		}
-		if requeue {
-			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-		}
+	if requeue {
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 	condition, err := utils.GetCondition(r.Conditions, bmcVersion.Status.Conditions, constants.ConditionServerMaintenanceWaiting)
 	if err != nil {
@@ -722,14 +715,8 @@ func (r *BMCVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcCl
 		}
 		return false, err
 	}
-	servers, err := r.getServersForBMCVersion(ctx, bmcClient, bmcVersion)
-	if err != nil {
-		return false, fmt.Errorf("failed to get referred servers to request maintenance for retry: %w", err)
-	}
-	if len(bmcVersion.Spec.ServerMaintenanceRefs) != len(servers) {
-		if requeue, err := r.requestMaintenanceOnServers(ctx, bmcClient, bmcVersion); err != nil || requeue {
-			return false, err
-		}
+	if requeue, err := r.requestMaintenanceOnServers(ctx, bmcClient, bmcVersion); err != nil || requeue {
+		return false, err
 	}
 	if !r.checkIfMaintenanceGranted(ctx, bmcClient, bmcVersion) {
 		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC for retry", "BMC", bmcObj.Name)

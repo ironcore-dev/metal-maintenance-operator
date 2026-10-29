@@ -163,6 +163,11 @@ spec:
                 description: |-
                   TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds
                   after it reaches Completed state. Failed objects are retained for operator inspection.
+
+                  When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to
+                  the owned FirmwareUpdate children themselves (they are never auto-deleted individually);
+                  instead the FirmwareUpdateSet reads it directly from its own template to delete itself once
+                  all of its owned FirmwareUpdates have reached Completed.
                 format: int32
                 type: integer
             required:

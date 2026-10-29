@@ -324,10 +324,8 @@ func (r *FirmwareUpdateReconciler) failUnsupportedVendor(ctx context.Context, fw
 
 func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if fw.Status.ServerMaintenanceRef == nil {
-		if requeue, err := r.requestServerMaintenance(ctx, fw, server); err != nil || requeue {
-			return false, err
-		}
+	if requeue, err := r.requestServerMaintenance(ctx, fw, server); err != nil || requeue {
+		return false, err
 	}
 
 	condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionServerMaintenanceWaiting)
@@ -569,10 +567,8 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 // BMC and reboots (or powers on) the server before a Failed FirmwareUpdate is retried
 func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if fw.Status.ServerMaintenanceRef == nil {
-		if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
-			return false, err
-		}
+	if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
+		return false, err
 	}
 	active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*fw.Status.ServerMaintenanceRef})
 	if err != nil {

@@ -27,7 +27,7 @@ groups:
 
     - record: redfish_canonical:cpu_avg_freq_mhz
       expr: |
-        redfish_monitor_reading{metric_id=~"AvgCPU0Freq|AvgCPU1Freq"}
+        redfish_monitor_reading{metric_id=~"AvgCPU[0-9]+Freq|AvgFrequencyAcrossCores"}
 
     - record: redfish_canonical:cpu_cups_util_pct
       expr: |
