@@ -966,13 +966,18 @@ func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 	log := ctrl.LoggerFrom(ctx)
 	maintenanceActive, err := r.checkIfMaintenanceGranted(ctx, settings, bmcObj, bmcClient)
 	if err != nil {
-		return false, fmt.Errorf("failed to check if maintenance is granted: %w", err)
+		if !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("failed to check if maintenance is granted: %w", err)
+		}
+		// A referenced ServerMaintenance is gone (stale ref) - treat maintenance as not
+		// active and fall through to the readiness-gate check and requestMaintenanceOnServers,
+		// which detects the missing reference and clears/recreates it.
+		maintenanceActive = false
 	}
 	if !maintenanceActive {
 		// Only gate while maintenance hasn't been granted yet (i.e. before/while
 		// requesting it). Once ServerMaintenance is active, this resource already
-		// holds exclusive access to these Servers, so a sibling resource sharing one
-		// is blocked behind that very ServerMaintenance - continuing to gate here
+		// holds exclusive access to these Servers - continuing to gate here
 		// could deadlock against that sibling (it waits for us to release
 		// ServerMaintenance, we'd wait for its condition).
 		satisfied, reasons, err := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings)
