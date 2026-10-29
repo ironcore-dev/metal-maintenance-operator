@@ -964,25 +964,50 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, bmcClient
 // resets the BMC before a Failed BMCSettings is retried
 func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if satisfied, reasons, err := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings); err != nil || !satisfied {
-		if !satisfied {
-			// Don't touch maintenance/BMC state while a gate blocks us - a sibling resource
-			// sharing one of these Servers may still be relying on the current hardware/power
-			// state, and retrying now could fight it.
-			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+	maintenanceActive, err := r.checkIfMaintenanceGranted(ctx, settings, bmcObj, bmcClient)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if maintenance is granted: %w", err)
+	}
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to these Servers, so a sibling resource sharing one
+		// is blocked behind that very ServerMaintenance - continuing to gate here
+		// could deadlock against that sibling (it waits for us to release
+		// ServerMaintenance, we'd wait for its condition).
+		satisfied, reasons, err := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings)
+		if err != nil {
+			return false, err
 		}
-		return false, err
+		if !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateBMCSettingsStatus(ctx, settings, settings.Status.State, condition)
+		}
 	}
 	if req, err := r.requestMaintenanceOnServers(ctx, settings, bmcObj, bmcClient); err != nil || req {
 		return false, err
 	}
-	granted, err := r.checkIfMaintenanceGranted(ctx, settings, bmcObj, bmcClient)
-	if err != nil {
-		return false, fmt.Errorf("failed to check if maintenance is granted: %w", err)
-	}
-	if !granted {
-		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC for retry", "BMC", bmcObj.Name)
-		return false, nil
+	if !maintenanceActive {
+		granted, err := r.checkIfMaintenanceGranted(ctx, settings, bmcObj, bmcClient)
+		if err != nil {
+			return false, fmt.Errorf("failed to check if maintenance is granted: %w", err)
+		}
+		if !granted {
+			log.V(1).Info("Waiting for ServerMaintenance before resetting BMC for retry", "BMC", bmcObj.Name)
+			return false, nil
+		}
 	}
 	log.V(1).Info("Resetting BMC for retry")
 	return r.handleBMCReset(ctx, settings, bmcObj, constants.ConditionRetryResetIssued)

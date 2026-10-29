@@ -1321,17 +1321,36 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, bmcClien
 // BMC and reboots (or powers on) the server before a Failed BIOSSettings is retried
 func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
-		// Don't touch maintenance/BMC/power state while a gate blocks us - a sibling
-		// resource sharing this Server may still be relying on the current hardware/power
-		// state, and retrying now could fight it.
-		log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
-		return false, nil
+	maintenanceActive := r.isServerInMaintenance(ctx, settings, server)
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to the Server, so a sibling resource sharing it is
+		// blocked behind that very ServerMaintenance - continuing to gate here could
+		// deadlock against that sibling (it waits for us to release ServerMaintenance,
+		// we'd wait for its condition). This mirrors handleServerMaintenance's
+		// InProgress-state gate handling.
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, settings, settings.Status.State, condition)
+		}
 	}
 	if req, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || req {
 		return false, err
 	}
-	if !r.isServerInMaintenance(ctx, settings, server) {
+	if !maintenanceActive {
 		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
 		return false, nil
 	}
