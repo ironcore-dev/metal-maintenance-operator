@@ -130,17 +130,9 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 			fw.Status.ObservedGeneration == fw.Generation {
 			age := time.Since(checkCompleted.LastTransitionTime.Time)
 			if age < repositoryCheckInterval {
-				log.V(1).Info("RepositoryCheck recently completed, deferring next periodic check",
+				log.V(1).Info("RepositoryCheck recently completed, deferring check",
 					"Server", server.Name, "Age", age, "RepositoryCheckInterval", repositoryCheckInterval)
-				// This deferral is the intended, healthy steady-state for a Completed update
-				// waiting out its periodic recheck cadence, not a stuck condition - refresh
-				// LastProgressTime so checkProgressDeadline doesn't mistake it for one.
-				fwBase := fw.DeepCopy()
-				fw.Status.LastProgressTime = new(metav1.Now())
-				if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
-					return false, fmt.Errorf("failed to refresh LastProgressTime while deferring periodic check: %w", err)
-				}
-				return true, nil
+				return false, nil
 			}
 			log.V(1).Info("RepositoryCheck stale, issuing periodic drift-detection check",
 				"Server", server.Name, "Age", age, "RepositoryCheckInterval", repositoryCheckInterval)
@@ -153,6 +145,12 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 			log.V(1).Info("RepositoryCheck not yet issued, issuing dry-run check", "Server", server.Name)
 		}
 		return dh.issueRepositoryCheck(ctx, updater, fw, r, server, checkIssued)
+	}
+
+	// A RepositoryCheck job is actually in flight: this is the only phase of
+	// the periodic-check cycle need to enforce ProgressDeadlineSeconds.
+	if exceeded, err := r.checkProgressDeadline(ctx, fw); err != nil || exceeded {
+		return false, err
 	}
 
 	checkCompleted, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryCheckCompleted)
