@@ -410,6 +410,19 @@ kubeStateMetrics:
   ## `additionalResources` key in Greenhouse's kube-state-metrics-shoots.yaml.
   extraResources: []
 
+  ## Sidecar-discovery mode: creates a separate labeled ConfigMap containing
+  ## the BMC hardware-identity CustomResourceState spec for the ksm-crs-sidecar
+  ## (cobaltcore-dev/ksm-crs-sidecar) or compatible k8s-sidecar to pick up and
+  ## merge into a pre-existing KSM instance's config file.
+  ##
+  ## Independent of `enabled` above — use this when Greenhouse (or another
+  ## platform) already runs KSM and discovers operator ConfigMaps by label.
+  ## The label/labelValue must match the sidecar's LABEL / LABEL_VALUE env vars.
+  sidecarDiscovery:
+    enabled: false
+    labels:
+      dev.custom.kube-state-metrics: "true"
+
 ## Additional Kubernetes objects to deploy alongside the operator.
 ## Accepts any valid Kubernetes manifest as a list entry.
 extraObjects: []
