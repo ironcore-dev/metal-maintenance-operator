@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
@@ -65,7 +66,26 @@ type FirmwareUpdateReconciler struct {
 	SkipCertValidation bool
 	Scheme             *runtime.Scheme
 	BMCOptions         bmc.Options
-	Conditions         *conditionutils.Accessor
+	ResyncInterval     time.Duration
+	// PollingInterval is the requeue delay used while a firmware update is
+	// actively in progress (pending job polls, component tracking, etc.).
+	// Defaults to 2 minutes when unset or zero.
+	PollingInterval             time.Duration
+	Conditions                  *conditionutils.Accessor
+	DefaultFailedAutoRetryCount int32
+	// MaxRepositoryPasses bounds how many times a dry-run repository check may
+	// find further packages pending (and thus re-enter InProgress) before the
+	// FirmwareUpdate is marked Failed instead.
+	MaxRepositoryPasses int32
+	// MinBMCResetInterval is the minimum time that must have passed since a BMC's last
+	// completed reset. Set to 0 to always reset.
+	//  Has no effect for servers using an inline Spec.BMC (no managed BMC object to check).
+	MinBMCResetInterval time.Duration
+	// ScheduledJobPowerOnTimeout bounds how long a job may remain in the "Scheduled" state (queued, awaiting a reboot/power
+	// cycle to execute) with the server powered off and no observed progress,
+	// before the controller powers the server back on to let the job proceed.
+	// A value <= 0 disables this check.
+	ScheduledJobPowerOnTimeout time.Duration
 	// ServerPowerOffTimeout bounds how long to wait for a graceful power-off to complete, before
 	// retrying a Failed resource, before escalating to a forced power-off. A value <= 0 disables
 	// escalation.
@@ -153,6 +173,15 @@ func (r *FirmwareUpdateReconciler) repositoryCheckInterval() time.Duration {
 		}
 	}
 	return config.DefaultRepositoryCheckInterval
+}
+
+const defaultFirmwarePollingInterval = 2 * time.Minute
+
+func (r *FirmwareUpdateReconciler) pollingInterval() time.Duration {
+	if r.PollingInterval > 0 {
+		return r.PollingInterval
+	}
+	return defaultFirmwarePollingInterval
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates,verbs=get;list;watch;create;update;patch;delete
@@ -276,7 +305,7 @@ func (r *FirmwareUpdateReconciler) reconcile(ctx context.Context, fw *systemv1al
 		return ctrl.Result{}, err
 	}
 	if requeue {
-		return ctrl.Result{RequeueAfter: r.resyncInterval()}, nil
+		return ctrl.Result{RequeueAfter: r.pollingInterval()}, nil
 	}
 
 	log.V(1).Info("Reconciled FirmwareUpdate")
@@ -712,6 +741,8 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 // the conditions slice (preserving all other conditions), and applies mutate
 // to update vendor-specific job-tracking fields (e.g. DellStatus.CheckJob/
 // UpdateJob/ComponentJobs/BaselineJobIDs) - all in a single status patch.
+// LastProgressTime advances only when actual progress occurs: a state
+// transition, a condition update, or a change in job-tracking fields.
 func (r *FirmwareUpdateReconciler) patchProgress(
 	ctx context.Context,
 	fw *systemv1alpha1.FirmwareUpdate,
@@ -721,6 +752,9 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 	extraConditions ...*metav1.Condition,
 ) error {
 	fwBase := fw.DeepCopy()
+	prevState := fw.Status.State
+	prevDellStatus := fw.Status.DellStatus.DeepCopy()
+
 	fw.Status.State = state
 	fw.Status.ObservedGeneration = fw.Generation
 
@@ -755,8 +789,13 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 		mutate(&fw.Status)
 	}
 
-	now := metav1.Now()
-	fw.Status.LastProgressTime = &now
+	progressed := condition != nil ||
+		state != prevState ||
+		!reflect.DeepEqual(prevDellStatus, fw.Status.DellStatus)
+	if progressed || fw.Status.LastProgressTime == nil {
+		now := metav1.Now()
+		fw.Status.LastProgressTime = &now
+	}
 
 	if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
 		return fmt.Errorf("failed to patch FirmwareUpdate status: %w", err)
