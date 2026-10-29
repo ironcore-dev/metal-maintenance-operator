@@ -107,14 +107,25 @@ var _ = BeforeSuite(func() {
 		ObjectMeta: metav1.ObjectMeta{Name: sanitizationNamespace},
 	})).To(Succeed())
 
-	// Mock server binds a fixed port so it is started once for the whole suite.
-	mockServer := mock.NewMockServer(GinkgoLogr, ":8002")
+	// Hardware-manager mock server binds a fixed port; started once for the whole suite.
+	hwMockServer := mock.NewMockServer(GinkgoLogr, ":8002")
 	mockCtx, cancel := context.WithCancel(context.Background())
 	DeferCleanup(cancel)
 
 	go func() {
 		defer GinkgoRecover()
-		Expect(mockServer.Start(mockCtx)).To(Succeed(), "failed to start mock server")
+		Expect(hwMockServer.Start(mockCtx)).To(Succeed(), "failed to start mock server")
+	}()
+
+	// Redfish mock server also binds a fixed port; started once here so each test's
+	// BeforeEach never races on port re-bind after the previous test's shutdown.
+	mockServer = mockserver.NewMockServer(GinkgoLogr, fmt.Sprintf(":%d", BMCMockServerPort), mockserver.WithAuth())
+	redfishCtx, redfishCancel := context.WithCancel(context.Background())
+	DeferCleanup(redfishCancel)
+
+	go func() {
+		defer GinkgoRecover()
+		Expect(mockServer.Start(redfishCtx)).To(Succeed(), "failed to start Redfish mock server")
 	}()
 })
 
@@ -222,13 +233,8 @@ func SetupTest(opts ...Option) *corev1.Namespace {
 			},
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
-		By("Starting the mock Redfish server")
-		ms := mockserver.NewMockServer(GinkgoLogr, fmt.Sprintf(":%d", BMCMockServerPort), mockserver.WithAuth())
-		mockServer = ms
+		By("Attaching the suite-level mock Redfish server to this test's manager")
 		Expect(k8sManager.Add(manager.RunnableFunc(func(ctx context.Context) error {
-			if err := ms.Start(ctx); err != nil {
-				return fmt.Errorf("failed to start mock Redfish server: %w", err)
-			}
 			<-ctx.Done()
 			return nil
 		}))).To(Succeed())
