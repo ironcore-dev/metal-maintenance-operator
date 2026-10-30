@@ -48,7 +48,7 @@ const (
 	// because the repository-update apply job remained in Dell's "Scheduled"
 	// state (queued, awaiting a reboot/power cycle to execute) with the
 	// server powered off and no observed progress for longer than
-	// FirmwareUpdateReconciler.ScheduledJobPowerOnTimeout.
+	// FirmwareUpdateReconciler.scheduledJobPowerOnTimeout().
 	ConditionScheduledJobStuckPowerOnIssued = "ScheduledJobStuckPowerOnIssued"
 
 	ReasonRepositoryCheckIssued          = "RepositoryCheckIssuedToBMC"
@@ -118,8 +118,39 @@ func (dh *dellHandler) processRepositoryCheck(ctx context.Context, updater bmc.F
 		return false, err
 	}
 	if checkIssued.Status != metav1.ConditionTrue {
-		log.V(1).Info("RepositoryCheck not yet issued, issuing dry-run check", "Server", server.Name)
+
+		checkCompleted, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryCheckCompleted)
+		if err != nil {
+			return false, err
+		}
+		repositoryCheckInterval := r.repositoryCheckInterval()
+		if checkCompleted.Status == metav1.ConditionTrue &&
+			checkCompleted.Reason == ReasonRepositoryCheckCompleted &&
+			repositoryCheckInterval > 0 &&
+			fw.Status.ObservedGeneration == fw.Generation {
+			age := time.Since(checkCompleted.LastTransitionTime.Time)
+			if age < repositoryCheckInterval {
+				log.V(1).Info("RepositoryCheck recently completed, deferring check",
+					"Server", server.Name, "Age", age, "RepositoryCheckInterval", repositoryCheckInterval)
+				return false, nil
+			}
+			log.V(1).Info("RepositoryCheck stale, issuing periodic drift-detection check",
+				"Server", server.Name, "Age", age, "RepositoryCheckInterval", repositoryCheckInterval)
+		} else if checkCompleted.Status == metav1.ConditionTrue &&
+			checkCompleted.Reason == ReasonRepositoryCheckCompleted &&
+			fw.Status.ObservedGeneration != fw.Generation {
+			log.V(1).Info("FirmwareUpdate spec changed since last RepositoryCheck, bypassing periodic check interval",
+				"Server", server.Name)
+		} else {
+			log.V(1).Info("RepositoryCheck not yet issued, issuing dry-run check", "Server", server.Name)
+		}
 		return dh.issueRepositoryCheck(ctx, updater, fw, r, server, checkIssued)
+	}
+
+	// A RepositoryCheck job is actually in flight: this is the only phase of
+	// the periodic-check cycle need to enforce ProgressDeadlineSeconds.
+	if exceeded, err := r.checkProgressDeadline(ctx, fw); err != nil || exceeded {
+		return false, err
 	}
 
 	checkCompleted, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryCheckCompleted)
@@ -239,9 +270,25 @@ func (dh *dellHandler) issueRepositoryCheck(ctx context.Context, updater bmc.Fir
 		return false, fmt.Errorf("failed to update RepositoryCheckIssued condition: %w", err)
 	}
 
+	// Explicitly flip RepositoryCheckCompleted to False while a check is
+	// in flight. This makes its eventual False->True flip (on confirmed
+	// convergence)
+	checkCompleted, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionRepositoryCheckCompleted)
+	if err != nil {
+		return false, err
+	}
+	if err := r.Conditions.Update(
+		checkCompleted,
+		conditionutils.UpdateStatus(corev1.ConditionFalse),
+		conditionutils.UpdateReason(ReasonRepositoryCheckIssued),
+		conditionutils.UpdateMessage("Repository check in progress"),
+	); err != nil {
+		return false, fmt.Errorf("failed to update RepositoryCheckCompleted condition: %w", err)
+	}
+
 	return false, r.patchProgress(ctx, fw, fw.Status.State, condition, func(status *systemv1alpha1.FirmwareUpdateStatus) {
 		dellStatus(status).CheckJob = &systemv1alpha1.RepositoryJob{JobID: jobID}
-	})
+	}, checkCompleted)
 }
 
 func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.FirmwareUpdaterDell, fw *systemv1alpha1.FirmwareUpdate, r *FirmwareUpdateReconciler, server *metalv1alpha1.Server, condition *metav1.Condition) (bool, error) {
@@ -301,15 +348,36 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 		); err != nil {
 			return false, fmt.Errorf("failed to update RepositoryCheckCompleted condition: %w", err)
 		}
+		wasCompleted := fw.Status.State == systemv1alpha1.FirmwareUpdateStateCompleted
 		fwBase := fw.DeepCopy()
 		fw.Status.State = systemv1alpha1.FirmwareUpdateStateCompleted
 		fw.Status.ObservedGeneration = fw.Generation
-		// Conditions are reset to only this one (rather than merged via
-		// patchProgress) because the stale RepositoryCheckIssued condition
-		// must not survive: processRepositoryCheck keys off it to decide
-		// whether to issue a fresh check on the next periodic drift-check
-		// reconcile of the Completed state.
-		fw.Status.Conditions = []metav1.Condition{*condition}
+		if wasCompleted {
+			// Merge the Completed condition in place and explicitly clear RepositoryCheckIssued.
+			if err := r.Conditions.UpdateSlice(
+				&fw.Status.Conditions,
+				ConditionRepositoryCheckCompleted,
+				conditionutils.UpdateStatus(condition.Status),
+				conditionutils.UpdateReason(condition.Reason),
+				conditionutils.UpdateMessage(condition.Message),
+			); err != nil {
+				return false, fmt.Errorf("failed to merge RepositoryCheckCompleted condition: %w", err)
+			}
+			if err := r.Conditions.UpdateSlice(
+				&fw.Status.Conditions,
+				ConditionRepositoryCheckIssued,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonRepositoryCheckCompleted),
+				conditionutils.UpdateMessage("Repository check concluded"),
+			); err != nil {
+				return false, fmt.Errorf("failed to clear RepositoryCheckIssued condition: %w", err)
+			}
+		} else {
+			// First-ever convergence (State was Pending): reset to only this
+			// condition, matching processInProgress's hand-back-to-Completed
+			// wipe, which also only wipes at a genuine state transition.
+			fw.Status.Conditions = []metav1.Condition{*condition}
+		}
 		fw.Status.DellStatus = nil
 		fw.Status.PassCount = 0
 		fw.Status.LastProgressTime = new(metav1.Now())
@@ -319,13 +387,13 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 	// Packages are pending installation: bound how many times we allow a
 	// check to (re-)discover pending packages before giving up.
 	passCount := fw.Status.PassCount + 1
-	if r.MaxRepositoryPasses > 0 && passCount > r.MaxRepositoryPasses {
-		log.Info("Exceeded maximum repository update passes, marking as Failed", "PassCount", passCount, "MaxRepositoryPasses", r.MaxRepositoryPasses)
+	if maxRepositoryPasses := r.maxRepositoryPasses(); maxRepositoryPasses > 0 && passCount > maxRepositoryPasses {
+		log.Info("Exceeded maximum repository update passes, marking as Failed", "PassCount", passCount, "MaxRepositoryPasses", maxRepositoryPasses)
 		if err := r.Conditions.Update(
 			condition,
 			conditionutils.UpdateStatus(corev1.ConditionTrue),
 			conditionutils.UpdateReason(ReasonRepositoryCheckFailed),
-			conditionutils.UpdateMessage(fmt.Sprintf("Exceeded maximum of %d repository update passes", r.MaxRepositoryPasses)),
+			conditionutils.UpdateMessage(fmt.Sprintf("Exceeded maximum of %d repository update passes", maxRepositoryPasses)),
 		); err != nil {
 			return false, fmt.Errorf("failed to update RepositoryCheckCompleted condition: %w", err)
 		}
@@ -358,7 +426,7 @@ func (dh *dellHandler) pollRepositoryCheck(ctx context.Context, updater bmc.Firm
 // more component firmware jobs are stuck in Dell's "Scheduled" state
 // (queued, awaiting a reboot/power cycle to execute), the server is
 // currently powered off, and no progress has been observed for longer than
-// r.ScheduledJobPowerOnTimeout.
+// r.scheduledJobPowerOnTimeout().
 func (dh *dellHandler) handleStuckScheduledJob(
 	ctx context.Context,
 	bmcClient bmc.BMC,
@@ -368,7 +436,8 @@ func (dh *dellHandler) handleStuckScheduledJob(
 	scheduledJobIDs []string,
 ) (*metav1.Condition, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if r.ScheduledJobPowerOnTimeout <= 0 {
+	scheduledJobPowerOnTimeout := r.scheduledJobPowerOnTimeout()
+	if scheduledJobPowerOnTimeout <= 0 {
 		return nil, nil
 	}
 
@@ -442,7 +511,7 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		return nil, nil
 	}
 
-	if fw.Status.LastProgressTime == nil || time.Since(fw.Status.LastProgressTime.Time) < r.ScheduledJobPowerOnTimeout {
+	if fw.Status.LastProgressTime == nil || time.Since(fw.Status.LastProgressTime.Time) < scheduledJobPowerOnTimeout {
 		return nil, nil
 	}
 
@@ -458,7 +527,7 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		conditionutils.UpdateReason(ReasonScheduledJobStuckPowerOnIssued),
 		conditionutils.UpdateMessage(fmt.Sprintf(
 			"Job(s) %v remained Scheduled with server powered off for over %v with no progress; issued PowerOn",
-			scheduledJobIDs, r.ScheduledJobPowerOnTimeout)),
+			scheduledJobIDs, scheduledJobPowerOnTimeout)),
 	); err != nil {
 		return nil, fmt.Errorf("failed to update ScheduledJobStuckPowerOnIssued condition: %w", err)
 	}

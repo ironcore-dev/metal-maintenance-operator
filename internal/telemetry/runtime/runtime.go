@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/criticalevent"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/events"
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
@@ -136,11 +137,12 @@ func AddTo(mgr manager.Manager, opts Options) error {
 		eventSink.OnWarning = handler.HandleWarning
 	}
 
-	loader := &ConfigLoader{
+	loader := &configloader.Loader[subscriptions.Config]{
 		Cache:     mgr.GetCache(),
 		Client:    mgr.GetClient(),
 		Namespace: opts.ConfigNamespace,
 		Name:      opts.ConfigName,
+		Parse:     parseSubscriptionsConfig,
 		Log:       ctrl.Log.WithName("telemetry").WithName("config"),
 	}
 	if err := mgr.Add(loader); err != nil {
@@ -200,6 +202,23 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	receiver.SetTestNotifier(subReconciler)
 
 	return nil
+}
+
+// ConfigKey is the ConfigMap data key holding the telemetry config.yaml
+// payload. Kept as a package-level const (rather than requiring callers to
+// depend on internal/configloader.DefaultKey directly) for backward
+// compatibility with existing external references (e.g. hack/verify-test-events).
+const ConfigKey = configloader.DefaultKey
+
+// parseSubscriptionsConfig adapts subscriptions.Parse (which returns a
+// field.ErrorList) to the plain `func([]byte) (*T, error)` signature
+// internal/configloader.Loader[T] requires.
+func parseSubscriptionsConfig(raw []byte) (*subscriptions.Config, error) {
+	cfg, errs := subscriptions.Parse(raw)
+	if len(errs) > 0 {
+		return nil, errs.ToAggregate()
+	}
+	return cfg, nil
 }
 
 // prewarmAlertGauge lists all Servers and sets the alert gauge to 1 for any
