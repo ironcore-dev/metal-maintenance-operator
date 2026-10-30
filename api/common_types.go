@@ -59,10 +59,11 @@ type VersionTemplate struct {
 }
 
 // ReadinessGating defines the readiness-gate and completion-condition fields shared by the
-// BIOS/BMC settings and version templates. It is embedded (inline) in each template so both
-// the single-object resource (e.g. BIOSSettingsSpec) and the corresponding Set resource's
-// template (e.g. BIOSSettingsSetSpec.BIOSSettingsTemplate) expose it identically, and Set
-// controllers propagate it to owned objects for free by copying the whole template.
+// BIOS/BMC settings, version, and firmware update templates. It is embedded (inline) in each
+// template so both the single-object resource (e.g. BIOSSettingsSpec, FirmwareUpdateSpec) and
+// the corresponding Set resource's template (e.g. BIOSSettingsSetSpec.BIOSSettingsTemplate)
+// expose it identically, and Set controllers propagate it to owned objects for free by
+// copying the whole template.
 type ReadinessGating struct {
 	// ReadinessGates is a list of Server conditions that must be satisfied before the
 	// controller starts applying this resource. Semantics mirror Kubernetes

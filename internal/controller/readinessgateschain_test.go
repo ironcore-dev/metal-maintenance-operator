@@ -12,6 +12,7 @@ import (
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	testutils "github.com/ironcore-dev/metal-maintenance-operator/internal/testutil"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -21,6 +22,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
@@ -37,6 +39,13 @@ func serverConditionTrue(conditionType string) types.GomegaMatcher {
 func serverConditionNotTrue(conditionType string) types.GomegaMatcher {
 	return Not(serverConditionTrue(conditionType))
 }
+
+// dellSystemID is the mock server's System resource folder name (see
+// metal-operator/bmc/mock/server/data/Systems/437XR1138R2), used by the chain test above to flip
+// the shared BMC's Manufacturer to "Dell Inc." partway through (for step 6), so BMC vendor
+// detection resolves to bmc.DellRedfishBMC instead of the vendor-neutral RedfishBaseBMC once the
+// BMC's Protocol is switched to ProtocolRedfish.
+const dellSystemID = "437XR1138R2"
 
 // This test replicates, end-to-end, the 5-step readiness-gate chain
 //
@@ -57,7 +66,7 @@ func serverConditionNotTrue(conditionType string) types.GomegaMatcher {
 // was the original bug fixed by internal/utils.GatesSatisfied's
 // CompletionConditionReset check.
 var _ = Describe("Readiness-gate chain", func() {
-	SetupTest(nil)
+	ns := SetupTest(nil)
 
 	var (
 		server    *metalv1alpha1.Server
@@ -127,6 +136,7 @@ var _ = Describe("Readiness-gate chain", func() {
 		EnsureCleanState()
 		mockServers[0].ResetUpgradeTask("/redfish/v1/Managers/BMC")
 		mockServers[0].ResetBMCSettings("BMC")
+		mockServers[0].ResetDellRepositoryUpdate()
 	})
 
 	It("completes the full BMCSettings->BMCVersion x2->BIOSVersion->BMCSettings->BIOSSettings chain in the "+
@@ -139,6 +149,7 @@ var _ = Describe("Readiness-gate chain", func() {
 				step3Done  = "e2e-gate/step3-biosversion-done"
 				step4Done  = "e2e-gate/step4-bmcsettings-done"
 				step5Done  = "e2e-gate/step5-biossettings-done"
+				step6Done  = "e2e-gate/step6-firmwareupdate-done"
 
 				bmcVersionV1       = "1.46.0"
 				bmcVersionV2       = "1.60.0"
@@ -402,8 +413,106 @@ var _ = Describe("Readiness-gate chain", func() {
 				HaveField("Status.State", baseboardv1alpha1.BMCVersionStateCompleted),
 			)
 
+			// because the firmware upgrade is vendor specific, we now switch the BMC protocol to ProtocolRedfish and re-point the mock data to Dell's vendor path,
+			// so the next steps can go through.
+
+			// ------- Start: MockData Override for Dell vendor path ------- //
+			By("Switching the BMC to the Dell-repository vendor path for step 6 - re-pointing the existing " +
+				"mock attribute data (registry + the Manager's own Attributes field) rather than adding new " +
+				"fixtures, so steps 1-5 keep behaving identically afterward")
+			// The registry Id is renamed (not re-authored) so Dell's ID-substring scan over
+			// Service.Registries() matches it. The Local vendor path (used by steps 1-5) looks this
+			// registry up by its fixed URL path, not by Id, so the rename is invisible to them.
+			mockserver.WithResourceOverride(
+				"Registries/BMCAttributeRegistry/index.json",
+				map[string]any{"Id": "Dell.1.0.0.ManagerAttributeRegistry"},
+			)(mockServers[0])
+			// The Manager's own resource already carries the "abc"/"fooreboot"/"composite" attribute
+			// values steps 1/4 manage; pointing Dell's OEM DellAttributes link back at the Manager itself
+			// lets DellRedfishBMC read the exact same data instead of requiring a separate Dell-specific
+			// attributes document. The rest of Links is repeated as-is since WithResourceOverride replaces
+			// nested fields wholesale rather than deep-merging them.
+			mockserver.WithResourceOverride(
+				"Managers/BMC/index.json",
+				map[string]any{
+					"Links": map[string]any{
+						"ManagerForServers": []map[string]any{{"@odata.id": "/redfish/v1/Systems/" + dellSystemID}},
+						"ManagerForChassis": []map[string]any{{"@odata.id": "/redfish/v1/Chassis/1U"}},
+						"ManagerInChassis":  map[string]any{"@odata.id": "/redfish/v1/Chassis/1U"},
+						"Oem": map[string]any{
+							"Dell": map[string]any{
+								"DellAttributes":             []map[string]any{{"@odata.id": "/redfish/v1/Managers/BMC"}},
+								"DellAttributes@odata.count": 1,
+							},
+						},
+					},
+				},
+			)(mockServers[0])
+			mockserver.WithSystemOverride(dellSystemID, map[string]any{"Manufacturer": "Dell Inc."})(mockServers[0])
+
+			By("Switching the BMC's protocol so vendor detection dispatches to bmc.DellRedfishBMC")
+			Eventually(Update(bmcObj, func() {
+				bmcObj.Spec.Protocol.Name = metalv1alpha1.ProtocolRedfish
+			})).Should(Succeed())
+
+			// server.Status.Manufacturer is only refreshed by the Server controller's periodic
+			// discovery resync, not live on every reconcile - wait for it to pick up the override
+			// before creating step 6, otherwise FirmwareUpdate's vendor check can race the resync
+			// and see the stale "Contoso" manufacturer, failing with UnsupportedVendor.
+			By("Waiting for the Server's discovered Manufacturer to pick up the mock override")
+			Eventually(Object(server)).Should(HaveField("Status.Manufacturer", "Dell Inc."))
+
+			// ------- END: MockData Override for Dell vendor path ------- //
+
+			By("Creating step 6 (Dell-repository FirmwareUpdate, gated on step 5)")
+			step6 := &systemv1alpha1.FirmwareUpdate{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "step6-", Namespace: ns.Name},
+				Spec: systemv1alpha1.FirmwareUpdateSpec{
+					ServerRef: &v1.LocalObjectReference{Name: server.Name},
+					FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+						DellRepository: &systemv1alpha1.DellFirmwareRepository{
+							ShareType:   systemv1alpha1.DellShareTypeHTTPS,
+							Address:     "downloads.dell.com",
+							CatalogFile: "Catalog.xml",
+						},
+						ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyEnforced),
+						ReadinessGating: api.ReadinessGating{
+							ReadinessGates: []metalv1alpha1.ConditionRequirement{
+								{Type: step5Done, RequiredStatus: metav1.ConditionTrue},
+							},
+							CompletionConditionType: step6Done,
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, step6)).To(Succeed())
+
+			By("Step 6 (FirmwareUpdate, gated on step 5) completes; steps 1-5 stay settled with no Dell " +
+				"attribute-path errors, proving the re-pointed mock data works for both the vendor-neutral and " +
+				"Dell-dispatched reconciles against the same BMC")
+			Eventually(Object(step6)).Should(
+				HaveField("Status.State", systemv1alpha1.FirmwareUpdateStateCompleted),
+			)
+			Eventually(Object(server)).Should(serverConditionTrue(step6Done))
+			Consistently(Object(step1)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+			Consistently(Object(step4)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied))
+			Consistently(Object(server)).Should(SatisfyAll(
+				serverConditionTrue(step1Done),
+				serverConditionTrue(step21Done),
+				serverConditionTrue(step22Done),
+				serverConditionTrue(step3Done),
+				serverConditionTrue(step4Done),
+				serverConditionTrue(step5Done),
+				serverConditionTrue(step6Done),
+			))
+
+			By("Verifying step 6 completed no earlier than step 5 via LastTransitionTime")
+			Expect(Get(server)()).To(Succeed())
+			t6 := conditionTime(step6Done)
+			Expect(t5.Time).To(BeTemporally("<=", t6.Time), "step5 must complete no later than step6")
+
 			By("Cleaning up all chain objects")
-			for _, obj := range []client.Object{step5, step4, step3, step22, step21, step1} {
+			for _, obj := range []client.Object{step6, step5, step4, step3, step22, step21, step1} {
 				Expect(k8sClient.Delete(ctx, obj)).To(Succeed())
 			}
 			Eventually(Object(server)).Should(testutils.ServerNotParked)

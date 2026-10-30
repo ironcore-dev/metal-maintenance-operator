@@ -798,6 +798,7 @@ func (in *FirmwareUpdateTemplate) DeepCopyInto(out *FirmwareUpdateTemplate) {
 		*out = new(api.RetryPolicy)
 		(*in).DeepCopyInto(*out)
 	}
+	in.ReadinessGating.DeepCopyInto(&out.ReadinessGating)
 	if in.ProgressDeadlineSeconds != nil {
 		in, out := &in.ProgressDeadlineSeconds, &out.ProgressDeadlineSeconds
 		*out = new(int32)
