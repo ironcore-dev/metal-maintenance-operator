@@ -138,12 +138,13 @@ func AddTo(mgr manager.Manager, opts Options) error {
 	}
 
 	loader := &configloader.Loader[subscriptions.Config]{
-		Cache:     mgr.GetCache(),
-		Client:    mgr.GetClient(),
-		Namespace: opts.ConfigNamespace,
-		Name:      opts.ConfigName,
-		Parse:     parseSubscriptionsConfig,
-		Log:       ctrl.Log.WithName("telemetry").WithName("config"),
+		Cache:         mgr.GetCache(),
+		Client:        mgr.GetClient(),
+		Namespace:     opts.ConfigNamespace,
+		Name:          opts.ConfigName,
+		Parse:         parseSubscriptionsConfig,
+		Log:           ctrl.Log.WithName("telemetry").WithName("config"),
+		EventRecorder: mgr.GetEventRecorder("metal-maintenance-operator"),
 	}
 	if err := mgr.Add(loader); err != nil {
 		return fmt.Errorf("add config loader: %w", err)

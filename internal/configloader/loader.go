@@ -22,13 +22,30 @@ import (
 	"sync/atomic"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/recorder"
 )
+
+// reloadFailuresTotal counts failed ConfigMap reload attempts (missing
+// ConfigMap, missing key, or parse/validation error), labelled by the
+// ConfigMap's namespace and name. This gives operators a metric-based signal
+// for config load problems instead of relying solely on logs.
+var reloadFailuresTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "metal_maintenance_operator_configloader_reload_failures_total",
+	Help: "Total number of failed ConfigMap reload attempts, labelled by configmap namespace and name.",
+}, []string{"namespace", "name"})
+
+func init() {
+	ctrlmetrics.Registry.MustRegister(reloadFailuresTotal)
+}
 
 // DefaultKey is the well-known ConfigMap data key loaders read by default.
 const DefaultKey = "config.yaml"
@@ -52,6 +69,11 @@ type Loader[T any] struct {
 	// validation before returning, mirroring subscriptions.Parse.
 	Parse func(raw []byte) (*T, error)
 	Log   logr.Logger
+	// EventRecorder is optional. When set, a Warning Kubernetes Event is
+	// emitted on the ConfigMap for every reload failure, in addition to
+	// incrementing the configloader_reload_failures_total metric. Without
+	// it, failures are only visible via logs/metrics.
+	EventRecorder recorder.EventRecorder
 
 	current atomic.Pointer[T]
 }
@@ -138,22 +160,25 @@ func (l *Loader[T]) handler(ctx context.Context, key string) toolscache.Resource
 }
 
 // reload fetches the ConfigMap, parses+validates the data[key] field via
-// l.Parse, and atomic-swaps l.current on success.
+// l.Parse, and atomic-swaps l.current on success. Every failure path goes
+// through recordFailure so it is reflected in both the
+// configloader_reload_failures_total metric and (if configured) a
+// Kubernetes Event, not just the error returned to the caller.
 func (l *Loader[T]) reload(ctx context.Context, key string) error {
 	cm := &corev1.ConfigMap{}
 	if err := l.Client.Get(ctx, types.NamespacedName{Name: l.Name, Namespace: l.Namespace}, cm); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("ConfigMap %s/%s not found", l.Namespace, l.Name)
+			return l.recordFailure(fmt.Errorf("ConfigMap %s/%s not found", l.Namespace, l.Name))
 		}
-		return fmt.Errorf("get ConfigMap %s/%s: %w", l.Namespace, l.Name, err)
+		return l.recordFailure(fmt.Errorf("get ConfigMap %s/%s: %w", l.Namespace, l.Name, err))
 	}
 	raw, ok := cm.Data[key]
 	if !ok {
-		return fmt.Errorf("ConfigMap %s/%s is missing key %q", l.Namespace, l.Name, key)
+		return l.recordFailure(fmt.Errorf("ConfigMap %s/%s is missing key %q", l.Namespace, l.Name, key))
 	}
 	cfg, err := l.Parse([]byte(raw))
 	if err != nil {
-		return fmt.Errorf("invalid config in ConfigMap %s/%s: %w", l.Namespace, l.Name, err)
+		return l.recordFailure(fmt.Errorf("invalid config in ConfigMap %s/%s: %w", l.Namespace, l.Name, err))
 	}
 	previous := l.current.Swap(cfg)
 	if previous == nil {
@@ -162,4 +187,18 @@ func (l *Loader[T]) reload(ctx context.Context, key string) error {
 		l.Log.V(1).Info("Config reloaded", "name", l.Name, "namespace", l.Namespace)
 	}
 	return nil
+}
+
+// recordFailure increments reloadFailuresTotal and, if l.EventRecorder is
+// set, emits a Warning Event on the ConfigMap so the failure is visible via
+// `kubectl get events`/`kubectl describe configmap` and not just the
+// operator's logs. It returns err unchanged so call sites can
+// `return l.recordFailure(err)`.
+func (l *Loader[T]) recordFailure(err error) error {
+	reloadFailuresTotal.WithLabelValues(l.Namespace, l.Name).Inc()
+	if l.EventRecorder != nil {
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: l.Namespace, Name: l.Name}}
+		l.EventRecorder.Eventf(cm, nil, corev1.EventTypeWarning, "ConfigLoadFailed", "ConfigMapReload", "%s", err.Error())
+	}
+	return err
 }
