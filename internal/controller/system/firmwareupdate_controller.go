@@ -449,10 +449,8 @@ func (r *FirmwareUpdateReconciler) patchFirmwareUpdateReadinessGatesNotSatisfied
 
 func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if fw.Status.ServerMaintenanceRef == nil {
-		if requeue, err := r.requestServerMaintenance(ctx, fw, server); err != nil || requeue {
-			return false, err
-		}
+	if requeue, err := r.requestServerMaintenance(ctx, fw, server); err != nil || requeue {
+		return false, err
 	}
 
 	condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, constants.ConditionServerMaintenanceWaiting)
@@ -717,23 +715,45 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 // BMC and reboots (or powers on) the server before a Failed FirmwareUpdate is retried
 func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
-		// Don't touch maintenance/BMC/power state while a gate blocks us - a sibling
-		// FirmwareUpdate/BIOSVersion/etc. sharing this Server may still be relying on the
-		// current hardware/power state, and retrying now could fight it.
-		log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
-		return false, nil
+	maintenanceActive := false
+	if fw.Status.ServerMaintenanceRef != nil {
+		active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*fw.Status.ServerMaintenanceRef})
+		if err != nil {
+			return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
+		}
+		maintenanceActive = active
 	}
-	if fw.Status.ServerMaintenanceRef == nil {
-		if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to the Server, so a sibling resource sharing it is
+		// blocked behind that very ServerMaintenance - continuing to gate here could
+		// deadlock against that sibling (it waits for us to release ServerMaintenance,
+		// we'd wait for its condition).
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, fw, fw.Status.State, condition)
+		}
+		if err := r.markFirmwareUpdateReadinessGatesSatisfied(ctx, fw, fw.Status.State); err != nil {
 			return false, err
 		}
 	}
-	active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*fw.Status.ServerMaintenanceRef})
-	if err != nil {
-		return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
+	if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
+		return false, err
 	}
-	if !active {
+	if !maintenanceActive {
 		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
 		return false, nil
 	}

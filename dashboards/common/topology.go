@@ -28,6 +28,7 @@ type TopologyConfig struct {
 	BB       TopologyField `yaml:"bb"`
 	Nodename TopologyField `yaml:"nodename"`
 	Zone     TopologyField `yaml:"zone"`
+	Type     TopologyField `yaml:"type"` // optional — server chassis type label
 }
 
 // DashboardConfig is the root of the config.yaml schema shared across MMO dashboards.

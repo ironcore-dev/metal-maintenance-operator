@@ -338,10 +338,8 @@ func (r *BIOSVersionReconciler) handleCompletedState(ctx context.Context, bmcCli
 
 func (r *BIOSVersionReconciler) handleServerMaintenance(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if biosVersion.Spec.ServerMaintenanceRef == nil {
-		if requeue, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || requeue {
-			return false, err
-		}
+	if requeue, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || requeue {
+		return false, err
 	}
 
 	condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, constants.ConditionServerMaintenanceWaiting)
@@ -657,16 +655,48 @@ func (r *BIOSVersionReconciler) processFailedState(ctx context.Context, bmcClien
 // ensureResetBeforeRetry makes sure the server has an active ServerMaintenance, then resets the
 // BMC and reboots (or powers on) the server before a Failed BIOSVersion is retried
 func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, biosVersion *systemv1alpha1.BIOSVersion, server *metalv1alpha1.Server) (bool, error) {
-	if biosVersion.Spec.ServerMaintenanceRef == nil {
-		if req, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || req {
+	log := ctrl.LoggerFrom(ctx)
+	maintenanceActive := false
+	if biosVersion.Spec.ServerMaintenanceRef != nil {
+		active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*biosVersion.Spec.ServerMaintenanceRef})
+		if err != nil {
+			return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
+		}
+		maintenanceActive = active
+	}
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to the Server, so a sibling resource sharing it is
+		// blocked behind that very ServerMaintenance - continuing to gate here could
+		// deadlock against that sibling (it waits for us to release ServerMaintenance,
+		// we'd wait for its condition). This mirrors handleServerMaintenance's
+		// InProgress-state gate handling.
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, biosVersion.Status.UpgradeTask, condition)
+		}
+		if err := r.markBIOSVersionReadinessGatesSatisfied(ctx, biosVersion, biosVersion.Status.State); err != nil {
 			return false, err
 		}
 	}
-	active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*biosVersion.Spec.ServerMaintenanceRef})
-	if err != nil {
-		return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
+	if req, err := r.requestServerMaintenance(ctx, biosVersion, server); err != nil || req {
+		return false, err
 	}
-	if !active {
+	if !maintenanceActive {
+		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
 		return false, nil
 	}
 	if ok, err := r.handleBMCReset(ctx, bmcClient, biosVersion, server, constants.ConditionRetryResetIssued); !ok || err != nil {

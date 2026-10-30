@@ -36,7 +36,9 @@ rules:
   resources:
   - bmcsettings
   - bmcsettingssets
+  - bmcuserrotations
   - bmcusers
+  - bmcusersets
   - bmcversions
   - bmcversionsets
   verbs:
@@ -53,6 +55,7 @@ rules:
   - bmcsettings/finalizers
   - bmcsettingssets/finalizers
   - bmcusers/finalizers
+  - bmcusersets/finalizers
   - bmcversions/finalizers
   - bmcversionsets/finalizers
   verbs:
@@ -62,7 +65,9 @@ rules:
   resources:
   - bmcsettings/status
   - bmcsettingssets/status
+  - bmcuserrotations/status
   - bmcusers/status
+  - bmcusersets/status
   - bmcversions/status
   - bmcversionsets/status
   verbs:
@@ -141,14 +146,6 @@ rules:
 - apiGroups:
   - metal.ironcore.dev
   resources:
-  - endpoints
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - metal.ironcore.dev
-  resources:
   - servers/status
   verbs:
   - get
@@ -188,6 +185,7 @@ rules:
   - biosversions
   - biosversionsets
   - firmwareupdates
+  - firmwareupdatesets
   verbs:
   - create
   - delete
@@ -204,6 +202,7 @@ rules:
   - biosversions/finalizers
   - biosversionsets/finalizers
   - firmwareupdates/finalizers
+  - firmwareupdatesets/finalizers
   verbs:
   - update
 - apiGroups:
@@ -214,6 +213,7 @@ rules:
   - biosversions/status
   - biosversionsets/status
   - firmwareupdates/status
+  - firmwareupdatesets/status
   verbs:
   - get
   - patch

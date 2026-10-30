@@ -560,6 +560,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&systemctrl.FirmwareUpdateSetReconciler{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		ResyncInterval: resyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create FirmwareUpdateSet controller")
+		os.Exit(1)
+	}
+
 	if enableWebhooks {
 		if err = webhookbaseboardv1alpha1.SetupBMCSettingsWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BMCSettings webhook")
@@ -590,11 +599,35 @@ func main() {
 	if err = (&baseboardctrl.BMCUserReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
+		ManagerNamespace:   managerNamespace,
 		DefaultProtocol:    protocol,
 		SkipCertValidation: skipCertValidation,
 		BMCOptions:         bmcOpts,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUser controller")
+		os.Exit(1)
+	}
+	if err = (&baseboardctrl.BMCUserSetReconciler{
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		ManagerNamespace:   managerNamespace,
+		ResyncInterval:     resyncInterval,
+		DefaultProtocol:    protocol,
+		SkipCertValidation: skipCertValidation,
+		BMCOptions:         bmcOpts,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create BMCUserSet controller")
+		os.Exit(1)
+	}
+	if err = (&baseboardctrl.BMCUserRotationReconciler{
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		DefaultProtocol:    protocol,
+		SkipCertValidation: skipCertValidation,
+		BMCOptions:         bmcOpts,
+		ResyncInterval:     resyncInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create BMCUserRotation controller")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

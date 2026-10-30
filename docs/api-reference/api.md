@@ -16,6 +16,8 @@ Package v1alpha1 contains API Schema definitions for the baseboard v1alpha1 API 
 - [BMCSettings](#bmcsettings)
 - [BMCSettingsSet](#bmcsettingsset)
 - [BMCUser](#bmcuser)
+- [BMCUserRotation](#bmcuserrotation)
+- [BMCUserSet](#bmcuserset)
 - [BMCVersion](#bmcversion)
 - [BMCVersionSet](#bmcversionset)
 
@@ -223,6 +225,164 @@ BMCUser is the Schema for the bmcusers API.
 | `status` _[BMCUserStatus](#bmcuserstatus)_ |  |  |  |
 
 
+#### BMCUserRotation
+
+
+
+BMCUserRotation is the Schema for the bmcuserrotations API.
+Each object represents one rotation event for a BMCUser. Spec is immutable after creation.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `BMCUserRotation` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[BMCUserRotationSpec](#bmcuserrotationspec)_ |  |  |  |
+| `status` _[BMCUserRotationStatus](#bmcuserrotationstatus)_ |  |  |  |
+
+
+#### BMCUserRotationPhase
+
+_Underlying type:_ _string_
+
+BMCUserRotationPhase describes the current phase of a BMCUserRotation.
+
+_Validation:_
+- Enum: [Pending InProgress Succeeded Failed]
+
+_Appears in:_
+- [BMCUserRotationStatus](#bmcuserrotationstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` |  |
+| `InProgress` |  |
+| `Succeeded` |  |
+| `Failed` |  |
+
+
+#### BMCUserRotationSpec
+
+
+
+BMCUserRotationSpec defines the desired state of BMCUserRotation.
+Spec is immutable after creation.
+
+
+
+_Appears in:_
+- [BMCUserRotation](#bmcuserrotation)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `bmcUserRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCUserRef references the BMCUser this rotation was triggered for. |  |  |
+| `type` _[RotationStrategy](#rotationstrategy)_ | Type is the rotation strategy used for this rotation event. |  | Enum: [DualAccount SingleAccount] <br /> |
+
+
+#### BMCUserRotationStatus
+
+
+
+BMCUserRotationStatus defines the observed state of BMCUserRotation.
+
+
+
+_Appears in:_
+- [BMCUserRotation](#bmcuserrotation)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `phase` _[BMCUserRotationPhase](#bmcuserrotationphase)_ | Phase is the current lifecycle phase of this rotation. | Pending | Enum: [Pending InProgress Succeeded Failed] <br /> |
+| `triggeredAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | TriggeredAt is the timestamp when the rotation was initiated. Recorded by the<br />controller when it creates the rotation. |  |  |
+| `triggerReason` _[BMCUserRotationTrigger](#bmcuserrotationtrigger)_ | TriggerReason describes what caused this rotation. |  | Enum: [RotationPeriod Annotation PasswordExpiry FactoryBootstrap] <br /> |
+| `completedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | CompletedAt is the timestamp when the rotation finished (succeeded or failed). |  |  |
+| `newSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | NewSecretRef references the BMCSecret created by this rotation.<br />Set on success. |  |  |
+| `message` _string_ | Message provides a human-readable description of the current state,<br />especially useful when Phase is Failed. |  |  |
+| `connectionTestRetries` _integer_ | ConnectionTestRetries counts how many times the post-password-change<br />connection test has been retried. When this exceeds the configured<br />MaxConnectionTestRetries the rotation is moved to Failed. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the progress of this rotation. |  |  |
+
+
+#### BMCUserRotationTrigger
+
+_Underlying type:_ _string_
+
+BMCUserRotationTrigger describes what caused a rotation to be initiated.
+
+
+
+_Appears in:_
+- [BMCUserRotationStatus](#bmcuserrotationstatus)
+
+| Field | Description |
+| --- | --- |
+| `RotationPeriod` |  |
+| `Annotation` |  |
+| `PasswordExpiry` |  |
+| `FactoryBootstrap` |  |
+
+
+#### BMCUserSet
+
+
+
+BMCUserSet is the Schema for the bmcusersets API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `baseboard.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `BMCUserSet` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[BMCUserSetSpec](#bmcusersetspec)_ |  |  |  |
+| `status` _[BMCUserSetStatus](#bmcusersetstatus)_ |  |  |  |
+
+
+#### BMCUserSetSpec
+
+
+
+BMCUserSetSpec defines the desired state of BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSet](#bmcuserset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `bmcSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | BMCSelector selects which BMC objects this set manages. |  |  |
+| `setupCredentialRef` _[SecretReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#secretreference-v1-core)_ | SetupCredentialRef references a corev1.Secret (keys: username, password) in the<br />operator namespace used for first contact with a new BMC before operator accounts exist.<br />This credential is used only during the bootstrap phase; once operator accounts<br />are proven it is never used again for that BMC.<br />When omitted, the controller falls back to the BMCSecret recorded in<br />BMCUser.Status.BootstrapSecretRef (the factory credential in BMC.Spec.BMCSecretRef<br />at the time the BMCUser was first created). |  |  |
+| `rotationStrategy` _[RotationStrategy](#rotationstrategy)_ | RotationStrategy determines how many BMCUser objects are created per BMC.<br />DualAccount (default) creates two users per BMC; SingleAccount creates one. | DualAccount | Enum: [DualAccount SingleAccount] <br /> |
+| `template` _[BMCUserTemplate](#bmcusertemplate)_ | Template defines the common fields for BMCUser objects created by this set. |  |  |
+| `factoryAccount` _[FactoryAccount](#factoryaccount)_ | FactoryAccount configures how the factory/default BMC account is handled once<br />both operator admin accounts are proven. When omitted, the factory account is<br />left untouched. |  |  |
+
+
+#### BMCUserSetStatus
+
+
+
+BMCUserSetStatus defines the observed state of BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSet](#bmcuserset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `totalBMCs` _integer_ | TotalBMCs is the number of BMCs matched by the selector. |  |  |
+| `bootstrappedBMCs` _integer_ | BootstrappedBMCs is the number of BMCs where all operator accounts are proven<br />and the factory account has been handled. |  |  |
+| `pendingBMCs` _integer_ | PendingBMCs is the number of BMCs still in the bootstrap phase. |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the aggregate state of the BMCUserSet. |  |  |
+
+
 #### BMCUserSpec
 
 
@@ -242,6 +402,9 @@ _Appears in:_
 | `rotationPeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | RotationPeriod defines how often the password should be rotated.<br />If not set, the password will not be rotated. |  |  |
 | `bmcSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCSecretRef references the BMCSecret containing the credentials for this user.<br />If not set, the operator will generate a secure password based on BMC manufacturer requirements. |  |  |
 | `bmcRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BMCRef references the BMC this user should be created on. |  |  |
+| `type` _[BMCUserType](#bmcusertype)_ | Type identifies the role of this BMCUser within the operator.<br />OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef<br />and use dual-account rotation. Defaults to ServiceAccount. | ServiceAccount | Enum: [OperatorAdmin ServiceAccount] <br /> |
+| `rotationHistoryLimit` _integer_ | RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)<br />BMCUserRotation objects to retain. Older objects beyond this limit are pruned.<br />Defaults to 10. | 10 | Minimum: 1 <br /> |
+| `deletionPolicy` _string_ | DeletionPolicy controls whether the BMC account is deleted when this BMCUser is removed.<br />Retain preserves the account on the BMC hardware; Delete removes it.<br />When empty, OperatorAdmin users default to Retain and ServiceAccount users to Delete. |  | Enum: [Retain Delete] <br /> |
 
 
 #### BMCUserStatus
@@ -258,10 +421,52 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `effectiveBMCSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | EffectiveBMCSecretRef references the BMCSecret currently used for this user.<br />This may differ from Spec.BMCSecretRef if the operator generated a password. |  |  |
+| `bootstrapSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.<br />Written once by the BMCUserSet controller before the user is first reconciled, so the<br />peer (-b) can still bootstrap using the original factory credential even after -a has<br />promoted a new credential into BMC.Spec.BMCSecretRef.<br />Never changed after being set. |  |  |
 | `lastRotation` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastRotation is the timestamp of the last password rotation. |  |  |
 | `passwordExpiration` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | PasswordExpiration is the timestamp when the password will expire. |  |  |
 | `id` _string_ | ID is the identifier of the user in the BMC system. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the current state of the BMCUser. |  |  |
+| `factoryAccountHandled` _boolean_ | FactoryAccountHandled records whether the factory account on this user's BMC has been<br />successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller<br />once the FactoryBootstrap rotation succeeds. |  |  |
+
+
+#### BMCUserTemplate
+
+
+
+BMCUserTemplate defines the fields templated onto each BMCUser created by a BMCUserSet.
+
+
+
+_Appears in:_
+- [BMCUserSetSpec](#bmcusersetspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `userName` _string_ | UserName is the base username for the BMC account.<br />For DualAccount strategy, -a and -b suffixes are appended per instance. |  |  |
+| `roleID` _string_ | RoleID is the Redfish role to assign (e.g. "Administrator", "ReadOnly"). |  |  |
+| `rotationPeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | RotationPeriod defines how often the password should be rotated. |  |  |
+| `credentialSecretNameTemplate` _string_ | CredentialSecretNameTemplate is a Go template for the stable corev1.Secret<br />name written for each BMC after the first successful credential promotion.<br />Available variable: .BMCName. Example: "bmc-operator-cred-\{\{ .BMCName \}\}".<br />If empty, no stable Secret is written. |  |  |
+| `credentialSecretNamespace` _string_ | CredentialSecretNamespace is the namespace in which stable credential Secrets<br />are created. Defaults to the operator namespace if empty. |  |  |
+| `rotationHistoryLimit` _integer_ | RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)<br />BMCUserRotation objects to retain per BMCUser. Older objects are pruned once<br />the limit is exceeded. Defaults to 10. | 10 | Minimum: 1 <br /> |
+| `deletionPolicy` _string_ | DeletionPolicy controls whether the BMC account is deleted when the BMCUser is removed.<br />Retain (default for OperatorAdmin) preserves the account on the BMC hardware; Delete<br />removes it. Omitting this field uses Retain for OperatorAdmin users and Delete for<br />ServiceAccount users. |  | Enum: [Retain Delete] <br /> |
+
+
+#### BMCUserType
+
+_Underlying type:_ _string_
+
+BMCUserType identifies the role of a BMCUser within the operator.
+
+_Validation:_
+- Enum: [OperatorAdmin ServiceAccount]
+
+_Appears in:_
+- [BMCUserSpec](#bmcuserspec)
+
+| Field | Description |
+| --- | --- |
+| `OperatorAdmin` | BMCUserTypeOperatorAdmin marks this BMCUser as the operator's own admin<br />credential for its referenced BMC. After a successful credential rotation<br />and live-auth verification, the controller updates BMC.Spec.BMCSecretRef<br />so all operator controllers pick up the new credential.<br /> |
+| `ServiceAccount` | BMCUserTypeServiceAccount is the default type for a non-elevated BMCUser.<br /> |
 
 
 #### BMCVersion
@@ -424,6 +629,64 @@ _Appears in:_
 | `serverMaintenancePolicy` _[ServerMaintenancePolicy](#servermaintenancepolicy)_ | ServerMaintenancePolicy is a maintenance policy to be applied on the server. |  |  |
 | `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
 | `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources.<br />Immutable once set: it can be patched from empty to a value, but not changed or cleared<br />afterwards. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
+
+
+#### FactoryAccount
+
+
+
+FactoryAccount configures how the factory/default BMC account is handled once both
+operator admin accounts (DualAccount) are proven and BMC.Spec.BMCSecretRef points at
+an operator-owned credential.
+
+
+
+_Appears in:_
+- [BMCUserSetSpec](#bmcusersetspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `action` _[FactoryAccountAction](#factoryaccountaction)_ | Action specifies what to do with the factory account.<br />Only Rotate is supported at this time. | Rotate | Enum: [Rotate] <br /> |
+| `userNames` _string array_ | UserNames is an explicit list of factory account usernames to act on.<br />When empty, the username is read from the BMCSecret referenced by<br />BMCUser.Status.BootstrapSecretRef (the credential the BMC shipped with). |  |  |
+| `retainCredential` _boolean_ | RetainCredential keeps the rotated password as an immutable BMCSecret<br />labelled baseboard.metal.ironcore.dev/credential-role=break-glass.<br />The secret is owned by the active OperatorAdmin BMCUser.<br />Defaults to true. | true |  |
+| `ignoreVendors` _string array_ | IgnoreVendors lists manufacturers (case-insensitive, matched against<br />BMC.Status.Manufacturer) for which factory account handling is skipped. |  |  |
+
+
+#### FactoryAccountAction
+
+_Underlying type:_ _string_
+
+FactoryAccountAction specifies what to do with the factory/default BMC account after bootstrap.
+
+_Validation:_
+- Enum: [Rotate]
+
+_Appears in:_
+- [FactoryAccount](#factoryaccount)
+
+| Field | Description |
+| --- | --- |
+| `Rotate` | FactoryAccountActionRotate changes the factory account's password to a new random one.<br />Disable and Delete require a SetAccountPassword/DisableAccount extension to the bmc.BMC<br />interface in metal-operator and are planned for a future release.<br /> |
+
+
+#### RotationStrategy
+
+_Underlying type:_ _string_
+
+RotationStrategy determines how many BMCUser objects are created per BMC
+and how rotation is executed.
+
+_Validation:_
+- Enum: [DualAccount SingleAccount]
+
+_Appears in:_
+- [BMCUserRotationSpec](#bmcuserrotationspec)
+- [BMCUserSetSpec](#bmcusersetspec)
+
+| Field | Description |
+| --- | --- |
+| `DualAccount` | RotationStrategyDualAccount creates two BMCUser objects per BMC.<br />The account being rotated is never the one currently in use,<br />eliminating any lockout window. Required for operator admin accounts.<br /> |
+| `SingleAccount` | RotationStrategySingleAccount creates one BMCUser per BMC.<br />A narrow failure window exists between hardware password change and<br />Secret update. Acceptable for non-critical read-only accounts.<br /> |
 
 
 #### WriteOnlyDriftPolicy
@@ -709,6 +972,7 @@ Package v1alpha1 contains API Schema definitions for the system v1alpha1 API gro
 - [BIOSVersion](#biosversion)
 - [BIOSVersionSet](#biosversionset)
 - [FirmwareUpdate](#firmwareupdate)
+- [FirmwareUpdateSet](#firmwareupdateset)
 
 
 
@@ -1223,6 +1487,63 @@ FirmwareUpdate is the Schema for the firmwareupdates API.
 | `status` _[FirmwareUpdateStatus](#firmwareupdatestatus)_ |  |  |  |
 
 
+#### FirmwareUpdateSet
+
+
+
+FirmwareUpdateSet is the Schema for the firmwareupdatesets API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `system.metal.ironcore.dev/v1alpha1` | | |
+| `kind` _string_ | `FirmwareUpdateSet` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[FirmwareUpdateSetSpec](#firmwareupdatesetspec)_ |  |  |  |
+| `status` _[FirmwareUpdateSetStatus](#firmwareupdatesetstatus)_ |  |  |  |
+
+
+#### FirmwareUpdateSetSpec
+
+
+
+FirmwareUpdateSetSpec defines the desired state of FirmwareUpdateSet.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSet](#firmwareupdateset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `serverSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#labelselector-v1-meta)_ | ServerSelector specifies a label selector to identify the servers that are to be selected. |  |  |
+| `firmwareUpdateTemplate` _[FirmwareUpdateTemplate](#firmwareupdatetemplate)_ | FirmwareUpdateTemplate defines the template for the FirmwareUpdate resource to be applied to the servers.<br />Its ttlSecondsAfterFinished field, if set, causes this FirmwareUpdateSet to be deleted that<br />many seconds after all of its owned FirmwareUpdates have reached the Completed state (it is<br />not propagated to the owned FirmwareUpdates themselves). See FirmwareUpdateTemplate for details. |  |  |
+
+
+#### FirmwareUpdateSetStatus
+
+
+
+FirmwareUpdateSetStatus defines the observed state of FirmwareUpdateSet.
+
+
+
+_Appears in:_
+- [FirmwareUpdateSet](#firmwareupdateset)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `fullyLabeledServers` _integer_ | FullyLabeledServers is the number of servers in the set. |  |  |
+| `availableFirmwareUpdate` _integer_ | AvailableFirmwareUpdate is the number of FirmwareUpdate resources currently created by the set. |  |  |
+| `pendingFirmwareUpdate` _integer_ | PendingFirmwareUpdate is the total number of pending FirmwareUpdate resources in the set. |  |  |
+| `inProgressFirmwareUpdate` _integer_ | InProgressFirmwareUpdate is the total number of FirmwareUpdate resources in the set that are currently in progress. |  |  |
+| `completedFirmwareUpdate` _integer_ | CompletedFirmwareUpdate is the total number of completed FirmwareUpdate resources in the set. |  |  |
+| `failedFirmwareUpdate` _integer_ | FailedFirmwareUpdate is the total number of failed FirmwareUpdate resources in the set. |  |  |
+
+
 #### FirmwareUpdateSpec
 
 
@@ -1241,9 +1562,9 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
 | `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources.<br />Immutable once set: it can be patched from empty to a value, but not changed or cleared<br />afterwards. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
-| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
 | `progressDeadlineSeconds` _integer_ | ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward<br />progress before the update is marked Failed. Defaults to 3600 (1 hour). | 3600 |  |
-| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection. |  |  |
+| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection.<br />When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to<br />the owned FirmwareUpdate children themselves (they are never auto-deleted individually);<br />instead the FirmwareUpdateSet reads it directly from its own template to delete itself once<br />all of its owned FirmwareUpdates have reached Completed. |  |  |
+| `serverRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | ServerRef is a reference to a specific server to apply the firmware update on. |  |  |
 
 
 #### FirmwareUpdateState
@@ -1297,6 +1618,7 @@ FirmwareUpdateTemplate defines the desired firmware update parameters.
 
 
 _Appears in:_
+- [FirmwareUpdateSetSpec](#firmwareupdatesetspec)
 - [FirmwareUpdateSpec](#firmwareupdatespec)
 
 | Field | Description | Default | Validation |
@@ -1306,6 +1628,8 @@ _Appears in:_
 | `retryPolicy` _[RetryPolicy](#retrypolicy)_ | RetryPolicy defines the retry behavior for automatic retries on transient failures. |  |  |
 | `readinessGates` _ConditionRequirement array_ | ReadinessGates is a list of Server conditions that must be satisfied before the<br />controller starts applying this resource. Semantics mirror Kubernetes<br />Pod.Spec.ReadinessGates: every listed condition type must be present on the related<br />Server(s) with the required status. |  |  |
 | `completionConditionType` _string_ | CompletionConditionType, if set, is the condition Type patched (status True) onto the<br />related Server(s) once this resource reaches its terminal success state. Downstream<br />resources can reference this Type in their own ReadinessGates to build a manual<br />sequence across resources.<br />Immutable once set: it can be patched from empty to a value, but not changed or cleared<br />afterwards. |  | MaxLength: 316 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$` <br /> |
+| `progressDeadlineSeconds` _integer_ | ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward<br />progress before the update is marked Failed. Defaults to 3600 (1 hour). | 3600 |  |
+| `ttlSecondsAfterFinished` _integer_ | TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds<br />after it reaches Completed state. Failed objects are retained for operator inspection.<br />When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to<br />the owned FirmwareUpdate children themselves (they are never auto-deleted individually);<br />instead the FirmwareUpdateSet reads it directly from its own template to delete itself once<br />all of its owned FirmwareUpdates have reached Completed. |  |  |
 
 
 #### RepositoryJob
