@@ -706,10 +706,34 @@ func (r *BMCVersionReconciler) handleFailedState(
 // resets the BMC before a Failed BMCVersion is retried
 func (r *BMCVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, bmcVersion *baseboardv1alpha1.BMCVersion, bmcObj *metalv1alpha1.BMC) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
+	// checkIfMaintenanceGranted treats nil ServerMaintenanceRefs as trivially granted
+	// (nothing to wait for), which is only correct once requestMaintenanceOnServers has
+	// actually run; guard with the nil check so "not yet requested" isn't mistaken for
+	// "already active" here.
+	maintenanceActive := bmcVersion.Spec.ServerMaintenanceRefs != nil && r.checkIfMaintenanceGranted(ctx, bmcClient, bmcVersion)
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to these Servers, so a sibling resource sharing one
+		// is blocked behind that very ServerMaintenance - continuing to gate here
+		// could deadlock against that sibling (it waits for us to release
+		// ServerMaintenance, we'd wait for its condition).
+		satisfied, reasons, err := r.checkBMCVersionReadinessGates(ctx, bmcClient, bmcVersion)
+		if err != nil {
+			return false, err
+		}
+		if !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			return false, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, bmcVersion.Status.State, reasons)
+		}
+		if err := r.markBMCVersionReadinessGatesSatisfied(ctx, bmcVersion, bmcVersion.Status.State); err != nil {
+			return false, err
+		}
+	}
 	if requeue, err := r.requestMaintenanceOnServers(ctx, bmcClient, bmcVersion); err != nil || requeue {
 		return false, err
 	}
-	if !r.checkIfMaintenanceGranted(ctx, bmcClient, bmcVersion) {
+	if !maintenanceActive && !r.checkIfMaintenanceGranted(ctx, bmcClient, bmcVersion) {
 		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC for retry", "BMC", bmcObj.Name)
 		return false, nil
 	}
