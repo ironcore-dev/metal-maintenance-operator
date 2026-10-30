@@ -44,6 +44,22 @@ type FirmwareUpdateTemplate struct {
 
 	// ReadinessGating defines the readiness gates and completion condition propagated to the Server.
 	api.ReadinessGating `json:",inline"`
+
+	// ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward
+	// progress before the update is marked Failed. Defaults to 3600 (1 hour).
+	// +kubebuilder:default=3600
+	// +optional
+	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty"`
+
+	// TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds
+	// after it reaches Completed state. Failed objects are retained for operator inspection.
+	//
+	// When set via a FirmwareUpdateSet's firmwareUpdateTemplate, this value is not propagated to
+	// the owned FirmwareUpdate children themselves (they are never auto-deleted individually);
+	// instead the FirmwareUpdateSet reads it directly from its own template to delete itself once
+	// all of its owned FirmwareUpdates have reached Completed.
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // FirmwareUpdateSpec defines the desired state of FirmwareUpdate.
@@ -55,17 +71,6 @@ type FirmwareUpdateSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="serverRef is immutable"
 	// +required
 	ServerRef *corev1.LocalObjectReference `json:"serverRef"`
-
-	// ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward
-	// progress before the update is marked Failed. Defaults to 3600 (1 hour).
-	// +kubebuilder:default=3600
-	// +optional
-	ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty"`
-
-	// TTLSecondsAfterFinished, if set, causes the FirmwareUpdate to be deleted that many seconds
-	// after it reaches Completed state. Failed objects are retained for operator inspection.
-	// +optional
-	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // FirmwareUpdateStatus defines the observed state of FirmwareUpdate.

@@ -697,11 +697,9 @@ func (r *BIOSSettingsReconciler) applySettingUpdate(ctx context.Context, bmcClie
 			return false, r.updateFlowStatus(ctx, settings, flowStatus.State, flowStatus, turnOnServer)
 		}
 		// we need to request maintenance to get the server to power-On to apply the BIOS settings
-		if settings.Spec.ServerMaintenanceRef == nil {
-			log.V(1).Info("Server powered off, request maintenance to turn the server On")
-			if requeue, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || requeue {
-				return false, err
-			}
+		log.V(1).Info("Server powered off, request maintenance to turn the server On")
+		if requeue, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || requeue {
+			return false, err
 		}
 
 		return r.ensureServerPowerOnIssued(ctx, bmcClient, settings, flowStatus, server)
@@ -1305,16 +1303,14 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, bmcClien
 
 	log.V(1).Info("Failed to update BIOS settings", "Server", server.Name)
 
-	// Create maintenance object only if failure is due to pending settings and maintenance not already present
-	if settings.Spec.ServerMaintenanceRef == nil {
-		// Check if the failure is due to pending settings
-		for _, condition := range settings.Status.Conditions {
-			if condition.Type == ConditionPendingSettingsCheck && condition.Status == metav1.ConditionTrue {
-				if _, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil {
-					return ctrl.Result{}, err
-				}
-				break
+	// Create maintenance object only if failure is due to pending settings
+	// (maintenance not already present, or a previously referenced ServerMaintenance was removed)
+	for _, condition := range settings.Status.Conditions {
+		if condition.Type == ConditionPendingSettingsCheck && condition.Status == metav1.ConditionTrue {
+			if _, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil {
+				return ctrl.Result{}, err
 			}
+			break
 		}
 	}
 
@@ -1325,12 +1321,39 @@ func (r *BIOSSettingsReconciler) handleFailedState(ctx context.Context, bmcClien
 // BMC and reboots (or powers on) the server before a Failed BIOSSettings is retried
 func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
-	if settings.Spec.ServerMaintenanceRef == nil {
-		if req, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || req {
+	maintenanceActive := r.isServerInMaintenance(ctx, settings, server)
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to the Server, so a sibling resource sharing it is
+		// blocked behind that very ServerMaintenance - continuing to gate here could
+		// deadlock against that sibling (it waits for us to release ServerMaintenance,
+		// we'd wait for its condition). This mirrors handleServerMaintenance's
+		// InProgress-state gate handling.
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, settings, settings.Status.State, condition)
+		}
+		if err := r.markBIOSSettingsReadinessGatesSatisfied(ctx, settings, settings.Status.State); err != nil {
 			return false, err
 		}
 	}
-	if !r.isServerInMaintenance(ctx, settings, server) {
+	if req, err := r.requestMaintenanceForServer(ctx, settings, server); err != nil || req {
+		return false, err
+	}
+	if !maintenanceActive {
 		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
 		return false, nil
 	}

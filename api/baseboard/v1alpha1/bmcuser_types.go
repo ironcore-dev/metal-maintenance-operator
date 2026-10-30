@@ -9,6 +9,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// BMCUserType identifies the role of a BMCUser within the operator.
+// +kubebuilder:validation:Enum=OperatorAdmin;ServiceAccount
+type BMCUserType string
+
+const (
+	// BMCUserTypeOperatorAdmin marks this BMCUser as the operator's own admin
+	// credential for its referenced BMC. After a successful credential rotation
+	// and live-auth verification, the controller updates BMC.Spec.BMCSecretRef
+	// so all operator controllers pick up the new credential.
+	BMCUserTypeOperatorAdmin BMCUserType = "OperatorAdmin"
+
+	// BMCUserTypeServiceAccount is the default type for a non-elevated BMCUser.
+	BMCUserTypeServiceAccount BMCUserType = "ServiceAccount"
+)
+
 // BMCUserSpec defines the desired state of BMCUser.
 type BMCUserSpec struct {
 	// UserName is the username of the BMC user.
@@ -30,6 +45,28 @@ type BMCUserSpec struct {
 
 	// BMCRef references the BMC this user should be created on.
 	BMCRef *v1.LocalObjectReference `json:"bmcRef,omitempty"`
+
+	// Type identifies the role of this BMCUser within the operator.
+	// OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef
+	// and use dual-account rotation. Defaults to ServiceAccount.
+	// +kubebuilder:default=ServiceAccount
+	// +optional
+	Type BMCUserType `json:"type,omitempty"`
+
+	// RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)
+	// BMCUserRotation objects to retain. Older objects beyond this limit are pruned.
+	// Defaults to 10.
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RotationHistoryLimit *int32 `json:"rotationHistoryLimit,omitempty"`
+
+	// DeletionPolicy controls whether the BMC account is deleted when this BMCUser is removed.
+	// Retain preserves the account on the BMC hardware; Delete removes it.
+	// When empty, OperatorAdmin users default to Retain and ServiceAccount users to Delete.
+	// +kubebuilder:validation:Enum=Retain;Delete
+	// +optional
+	DeletionPolicy string `json:"deletionPolicy,omitempty"`
 }
 
 // BMCUserStatus defines the observed state of BMCUser.
@@ -37,6 +74,14 @@ type BMCUserStatus struct {
 	// EffectiveBMCSecretRef references the BMCSecret currently used for this user.
 	// This may differ from Spec.BMCSecretRef if the operator generated a password.
 	EffectiveBMCSecretRef *v1.LocalObjectReference `json:"effectiveBMCSecretRef,omitempty"`
+
+	// BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.
+	// Written once by the BMCUserSet controller before the user is first reconciled, so the
+	// peer (-b) can still bootstrap using the original factory credential even after -a has
+	// promoted a new credential into BMC.Spec.BMCSecretRef.
+	// Never changed after being set.
+	// +optional
+	BootstrapSecretRef *v1.LocalObjectReference `json:"bootstrapSecretRef,omitempty"`
 
 	// LastRotation is the timestamp of the last password rotation.
 	LastRotation *metav1.Time `json:"lastRotation,omitempty"`
@@ -49,6 +94,12 @@ type BMCUserStatus struct {
 
 	// Conditions reflects the current state of the BMCUser.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// FactoryAccountHandled records whether the factory account on this user's BMC has been
+	// successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller
+	// once the FactoryBootstrap rotation succeeds.
+	// +optional
+	FactoryAccountHandled bool `json:"factoryAccountHandled,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -54,3 +54,5 @@ dashboards/built/*/
 hack/verify-test-events/servers.local.yaml
 hack/verify-test-events/*.local.yaml
 plugins
+hack/verify-test-events/servers.yaml
+hack/verify-test-events/config.yaml

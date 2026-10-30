@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: system.metal.ironcore.dev/v1alpha1
+kind: FirmwareUpdateSet
+metadata:
+  labels:
+    app.kubernetes.io/name: metal-maintenance-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: firmwareupdateset-sample
+spec:
+  serverSelector:
+    matchLabels:
+      metal.ironcore.dev/vendor: dell
+  firmwareUpdateTemplate:
+    dellRepository:
+      shareType: HTTPS
+      address: example.repository.com
+      shareName: /hw-firmware/firmware_80u3_04_2026
+      catalogFile: Catalog.xml
+      rebootNeeded: true
+      # applyVersionPolicy omitted -> only genuine upgrades are applied
+    serverMaintenancePolicy: OwnerApproval
+    # ttlSecondsAfterFinished is read directly by the FirmwareUpdateSet to delete itself
+    # once all of its owned FirmwareUpdates have reached Completed; it is not propagated
+    # to the owned FirmwareUpdates themselves.
+    ttlSecondsAfterFinished: 86400

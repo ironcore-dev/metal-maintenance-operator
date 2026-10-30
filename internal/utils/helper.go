@@ -68,7 +68,11 @@ func (e MultiErrorTracker) Unwrap() error {
 
 // --- ServerMaintenance helpers ---
 
-// IsAnyServerMaintenanceActive returns true if any referenced ServerMaintenance is in InMaintenance state.
+// IsAnyServerMaintenanceActive returns true if any referenced ServerMaintenance is in
+// InMaintenance state. A ServerMaintenance whose target Server no longer exists is treated
+// as not active: the ServerMaintenance's own reconciliation requires fetching that Server
+// (e.g. to confirm it has unparked) and can never progress once it's gone, so waiting on it
+// would otherwise block forever.
 func IsAnyServerMaintenanceActive(ctx context.Context, c client.Reader, refs []metalv1alpha1.ObjectReference) (bool, error) {
 	for _, ref := range refs {
 		sm := &maintenancev1alpha1.ServerMaintenance{}
@@ -81,9 +85,19 @@ func IsAnyServerMaintenanceActive(ctx context.Context, c client.Reader, refs []m
 		if !sm.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if sm.Status.State == maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
-			return true, nil
+		if sm.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
+			continue
 		}
+		if sm.Spec.ServerRef != nil {
+			server := &metalv1alpha1.Server{}
+			if err := c.Get(ctx, client.ObjectKey{Name: sm.Spec.ServerRef.Name}, server); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return false, fmt.Errorf("failed to check server existence for ServerMaintenance %s/%s: %w", sm.Namespace, sm.Name, err)
+			}
+		}
+		return true, nil
 	}
 	return false, nil
 }

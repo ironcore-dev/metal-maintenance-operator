@@ -9,14 +9,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const pipelineTestResultName = "event_pipeline_test_last_result"
+const (
+	pipelineTestResultName    = "event_pipeline_test_last_result"
+	pipelineTestTimestampName = "event_pipeline_test_timestamp"
+)
 
 // TestEventSink records the most recent pipeline health-check result per BMC
-// as the redfish_event_pipeline_test_last_result gauge.
+// as the redfish_event_pipeline_test_last_result gauge (1 = success, 0 = failure)
+// and the Unix timestamp of the last successful check as
+// redfish_event_pipeline_test_timestamp{result="success"}.
 //
-// Label set: {hostname}. Value is 1 for success, 0 for failure.
+// Label set for both metrics: {hostname}. The timestamp metric additionally
+// carries {result="success"} so dashboard queries can filter unambiguously.
 type TestEventSink struct {
-	gauge *prometheus.GaugeVec
+	gauge     *prometheus.GaugeVec
+	timestamp *prometheus.GaugeVec
 
 	mu      sync.Mutex
 	tracked map[string]struct{}
@@ -44,6 +51,14 @@ func NewTestEventSink(reg prometheus.Registerer) (*TestEventSink, error) {
 	if err := reg.Register(s.gauge); err != nil {
 		return nil, err
 	}
+	s.timestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: metricNamespace,
+		Name:      pipelineTestTimestampName,
+		Help:      "Unix timestamp (seconds) of the last successful end-to-end pipeline health-check per BMC.",
+	}, []string{labelHostname, "result"})
+	if err := reg.Register(s.timestamp); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -57,6 +72,9 @@ func (s *TestEventSink) RecordTestResult(bmcName, result string) {
 	defer s.mu.Unlock()
 	s.tracked[bmcName] = struct{}{}
 	s.gauge.With(prometheus.Labels{labelHostname: bmcName}).Set(v)
+	if result == "success" {
+		s.timestamp.With(prometheus.Labels{labelHostname: bmcName, "result": "success"}).SetToCurrentTime()
+	}
 }
 
 // Forget removes the series for the given BMC. Idempotent.
@@ -65,4 +83,5 @@ func (s *TestEventSink) Forget(bmcName string) {
 	defer s.mu.Unlock()
 	delete(s.tracked, bmcName)
 	s.gauge.Delete(prometheus.Labels{labelHostname: bmcName})
+	s.timestamp.Delete(prometheus.Labels{labelHostname: bmcName, "result": "success"})
 }

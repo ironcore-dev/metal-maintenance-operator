@@ -112,6 +112,13 @@ var _ = Describe("FirmwareUpdate Webhook", func() {
 	})
 
 	It("should not allow update of an in-progress FirmwareUpdate, but should allow forcefully updating it", func(ctx SpecContext) {
+		By("Creating a Server referenced by the ServerMaintenance")
+		server := &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -155,6 +162,13 @@ var _ = Describe("FirmwareUpdate Webhook", func() {
 	})
 
 	It("should deny deletion of an in-progress FirmwareUpdate, but should allow forcefully deleting it", func(ctx SpecContext) {
+		By("Creating a Server referenced by the ServerMaintenance")
+		server := &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{

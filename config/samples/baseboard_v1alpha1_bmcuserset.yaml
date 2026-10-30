@@ -1,0 +1,57 @@
+---
+# Operator admin credential set — DualAccount strategy (recommended for admin accounts).
+# Creates two BMCUser objects per matched BMC (maint-admin-a / maint-admin-b).
+# The account being rotated is never the one currently in use, eliminating any
+# lockout window. BMC.Spec.BMCSecretRef is updated after each proven rotation.
+#
+# setupCredentialRef is optional. When omitted, the controller falls back to the
+# per-BMC factory credential recorded in BMCUser.Status.BootstrapSecretRef.
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCUserSet
+metadata:
+  name: maintenance-operator-admin
+spec:
+  bmcSelector:
+    matchLabels:
+      metal.ironcore.dev/site: dc-1
+  # Optional: a single global setup credential. Omit to rely on per-BMC factory secrets.
+  setupCredentialRef:
+    name: operator-setup-secret
+    namespace: metal-maintenance-system
+  rotationStrategy: DualAccount
+  factoryAccount:
+    action: Rotate
+    ignoreVendors:
+      - HPE
+    # userNames is optional; defaults to the username from the bootstrap BMCSecret.
+    # userNames:
+    #   - root
+    #   - calvin
+    #   - Administrator
+    retainCredential: true
+  template:
+    userName: maint-admin
+    roleID: Administrator
+    rotationPeriod: 720h0m0s
+    credentialSecretNameTemplate: "bmc-operator-cred-{{ .BMCName }}"
+    credentialSecretNamespace: metal-maintenance-system
+---
+# Read-only credential set for the redfish-exporter — SingleAccount strategy.
+# Acceptable for non-critical accounts where a brief auth failure during
+# rotation is tolerable. Stable Secret written to the monitoring namespace.
+# setupCredentialRef is omitted; per-BMC factory credentials are used instead.
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCUserSet
+metadata:
+  name: redfish-exporter
+spec:
+  bmcSelector:
+    matchLabels:
+      metal.ironcore.dev/site: dc-1
+  rotationStrategy: SingleAccount
+  template:
+    userName: redfish-exporter
+    roleID: ReadOnly
+    rotationPeriod: 2160h0m0s
+    credentialSecretNameTemplate: "bmc-redfish-cred-{{ .BMCName }}"
+    credentialSecretNamespace: monitoring

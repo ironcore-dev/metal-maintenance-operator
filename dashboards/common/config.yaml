@@ -69,3 +69,6 @@ topology:
     displayName: Zone
     # KSM sanitizes the Kubernetes label key topology.kubernetes.io/zone → topology_kubernetes_io_zone
     labelKey: "topology_kubernetes_io_zone"
+  type:
+    displayName: Server Type
+    labelKey: ""  # override in your deployment config if applicable

@@ -259,6 +259,13 @@ var _ = Describe("BIOSSettings Webhook", func() {
 	})
 
 	It("should not allow update of BIOSSettings which are in-progress, but should allow forcefully deleting it", func() {
+		By("Creating a Server referenced by the ServerMaintenance")
+		server := &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
@@ -309,6 +316,13 @@ var _ = Describe("BIOSSettings Webhook", func() {
 	})
 
 	It("should deny deletion of an in-progress BIOSSettings", func() {
+		By("Creating a Server referenced by the ServerMaintenance")
+		server := &metalv1alpha1.Server{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
+			Spec:       metalv1alpha1.ServerSpec{SystemUUID: "38947555-7742-3448-3784-823347823834"},
+		}
+		Expect(k8sClient.Create(ctx, server)).To(Succeed())
+
 		By("Creating a ServerMaintenance in InMaintenance state")
 		sm := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
