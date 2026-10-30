@@ -434,7 +434,16 @@ func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context
 		return ctrl.Result{}, fmt.Errorf("failed to get BMC settings: %w", err)
 	}
 	if len(settingsDiff) == 0 {
-		return ctrl.Result{}, r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied, nil)
+		if len(settings.Spec.SettingsFlow) == 0 {
+			return ctrl.Result{}, r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied, nil)
+		}
+		flowComplete, err := r.checkSettingsFlowBeforeMaintenance(ctx, settings)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if flowComplete {
+			return ctrl.Result{}, nil
+		}
 	}
 
 	if req, err := r.requestMaintenanceOnServers(ctx, settings, bmcObj, bmcClient); err != nil || req {
@@ -496,6 +505,47 @@ func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context
 	return r.updateSettingsAndVerify(ctx, settings, bmcObj, settingsDiff, effectiveSettings, bmcClient)
 }
 
+// checkSettingsFlowBeforeMaintenance skips maintenance when the merged top-level diff is empty,
+// meaning the BMC already matches every managed key. All unapplied flow groups are marked
+// Applied without issuing any BMC queries, and status is patched if anything changed.
+func (r *BMCSettingsReconciler) checkSettingsFlowBeforeMaintenance(
+	ctx context.Context,
+	settings *baseboardv1alpha1.BMCSettings,
+) (bool, error) {
+	if len(settings.Spec.SettingsFlow) == 0 {
+		return false, nil
+	}
+
+	base := settings.DeepCopy()
+
+	resolvedVars, err := utils.ResolveVariables(ctx, r.Client, settings, settings.Spec.Variables)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve settings flow variables: %w", err)
+	}
+	flow := utils.SortedSettingsFlowGroups(settings.Spec.SettingsFlow)
+	stateChanged := false
+	for i := range flow {
+		flow[i].Settings, err = utils.ApplyVariables(flow[i].Settings, resolvedVars)
+		if err != nil {
+			return false, fmt.Errorf("failed to apply variables to settings flow group %q: %w", flow[i].Name, err)
+		}
+		if !r.isFlowGroupApplied(settings, flow[i]) {
+			r.setFlowGroupState(settings, flow[i], baseboardv1alpha1.BMCSettingsFlowStateApplied)
+			stateChanged = true
+		}
+	}
+	settings.Status.State = baseboardv1alpha1.BMCSettingsStateApplied
+	settings.Status.ObservedGeneration = settings.Generation
+	if !stateChanged && base.Status.State == baseboardv1alpha1.BMCSettingsStateApplied {
+		// Kubernetes already reflects Applied with all groups Applied — no patch needed.
+		return true, nil
+	}
+	if err := r.Status().Patch(ctx, settings, client.MergeFrom(base)); err != nil {
+		return false, fmt.Errorf("failed to persist settings flow pre-maintenance status: %w", err)
+	}
+	return true, nil
+}
+
 func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, settingsDiff schemas.SettingsAttributes, effectiveSettings map[string]string, bmcClient bmc.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
@@ -507,6 +557,9 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 
 	if changesIssued.Reason != ReasonBMCSettingsChangesIssued || changesIssued.ObservedGeneration < settings.Generation {
 		// Settings not yet issued, or spec changed since last apply — (re-)apply them now.
+		// Snapshot before Phase 1 mutations so the status patch captures FlowState changes.
+		phase1Base := settings.DeepCopy()
+		r.clearFlowStateOnGenerationChange(settings, changesIssued)
 		if ok, err := r.handleBMCPowerState(ctx, bmcObj, settings); err != nil || ok {
 			return ctrl.Result{}, err
 		}
@@ -525,7 +578,12 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 		}
 
 		if len(effectivePending) == 0 {
-			resetBMCReq, err := bmcClient.CheckBMCAttributes(ctx, bmcObj.Spec.BMCUUID, settingsDiff)
+			groupDiff, effectiveSettings, _, err := r.flowGroupDiff(ctx, settings, bmcObj, bmcClient, settingsDiff, effectiveSettings, false)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to calculate current settings flow group diff: %w", err)
+			}
+
+			resetBMCReq, err := bmcClient.CheckBMCAttributes(ctx, bmcObj.Spec.BMCUUID, groupDiff)
 			if err != nil {
 				log.Error(err, "could not validate settings and determine if reboot needed")
 				if _, ok := errors.AsType[*bmc.InvalidBMCSettingsError](err); ok {
@@ -547,11 +605,11 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 				return ctrl.Result{}, fmt.Errorf("failed to check BMC settings provided: %w", err)
 			}
 
-			applyResults, err := bmcClient.SetBMCAttributesImmediately(ctx, bmcObj.Spec.BMCUUID, settingsDiff)
+			applyResults, err := bmcClient.SetBMCAttributesImmediately(ctx, bmcObj.Spec.BMCUUID, groupDiff)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to set BMC settings: %w", err)
 			}
-			log.V(1).Info("BMC settings issued successfully", "SettingKeys", utils.SettingKeys(settingsDiff))
+			log.V(1).Info("BMC settings issued successfully", "SettingKeys", utils.SettingKeys(groupDiff))
 
 			if err := r.Conditions.Update(
 				changesIssued,
@@ -563,7 +621,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 				return ctrl.Result{}, fmt.Errorf("failed to update BMCSettings Applied condition: %w", err)
 			}
 
-			if err := r.persistApplyCycleConditions(ctx, settings, changesIssued, resetBMCReq, applyResults, effectiveSettings); err != nil {
+			if err := r.persistApplyCycleConditions(ctx, settings, phase1Base, changesIssued, resetBMCReq, applyResults, effectiveSettings); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
@@ -579,7 +637,7 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 	}
 
 	// Phase 3: Verify settings
-	settingsDiff, _, err = r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient, true)
+	settingsDiff, effectiveSettings, err = r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient, true)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get BMC settings: %w", err)
 	}
@@ -587,6 +645,15 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get Condition for verification BMC settings changes: %w", err)
 	}
+
+	settingsDiff, flowStateChanged, err := r.updateFlowStateAfterVerification(ctx, settings, bmcObj, bmcClient, changesIssued, settingsDiff, effectiveSettings)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if flowStateChanged {
+		return ctrl.Result{}, nil
+	}
+
 	if len(settingsDiff) == 0 {
 		if err := r.Conditions.Update(
 			BMCSettingsVerifiedCondition,
@@ -614,9 +681,197 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 	return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 }
 
-// persistApplyCycleConditions resets later-phase conditions (verified, reset) and
-// persists all phase conditions and AppliedETags atomically after a successful settings apply in Phase 1.
-func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition, resetBMCReq bool, applyResults map[string]bmc.ApplyResult, effectiveSettings map[string]string) error {
+// updateFlowStateAfterVerification advances FlowState after verifying the current group against the BMC.
+func (r *BMCSettingsReconciler) updateFlowStateAfterVerification(
+	ctx context.Context,
+	settings *baseboardv1alpha1.BMCSettings,
+	bmcObj *metalv1alpha1.BMC,
+	bmcClient etagDriftClient,
+	changesIssued *metav1.Condition,
+	mergedDiff schemas.SettingsAttributes,
+	mergedSettings map[string]string,
+) (schemas.SettingsAttributes, bool, error) {
+	flowStateBase := settings.DeepCopy()
+	groupDiff, _, flowStateChanged, err := r.flowGroupDiff(ctx, settings, bmcObj, bmcClient, mergedDiff, mergedSettings, true)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to calculate current settings flow group diff: %w", err)
+	}
+	if !flowStateChanged {
+		return groupDiff, false, nil
+	}
+	if err := r.Conditions.Update(
+		changesIssued,
+		conditionutils.UpdateStatus(corev1.ConditionFalse),
+		conditionutils.UpdateReason(ReasonBMCSettingsVerificationPending),
+		conditionutils.UpdateMessage("Advancing settings flow priority group"),
+	); err != nil {
+		return nil, false, fmt.Errorf("failed to reset ChangesIssued for next flow group: %w", err)
+	}
+	if err := r.updateFlowStateAndCondition(ctx, settings, flowStateBase, changesIssued); err != nil {
+		return nil, false, err
+	}
+	return groupDiff, true, nil
+}
+
+// flowGroupDiff computes the next unapplied group's diff using its resolved values.
+// Once all groups are Applied, it uses the merged diff to detect drift.
+func (r *BMCSettingsReconciler) flowGroupDiff(
+	ctx context.Context,
+	settings *baseboardv1alpha1.BMCSettings,
+	bmcObj *metalv1alpha1.BMC,
+	bmcClient etagDriftClient,
+	mergedDiff schemas.SettingsAttributes,
+	mergedSettings map[string]string,
+	verifyOnly bool,
+) (schemas.SettingsAttributes, map[string]string, bool, error) {
+	if len(settings.Spec.SettingsFlow) == 0 {
+		return mergedDiff, mergedSettings, false, nil
+	}
+
+	resolvedVars, err := utils.ResolveVariables(ctx, r.Client, settings, settings.Spec.Variables)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("failed to resolve settings flow variables: %w", err)
+	}
+	flow := utils.SortedSettingsFlowGroups(settings.Spec.SettingsFlow)
+	for i := range flow {
+		flow[i].Settings, err = utils.ApplyVariables(flow[i].Settings, resolvedVars)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("failed to apply variables to settings flow group %q: %w", flow[i].Name, err)
+		}
+	}
+
+	stateChanged := false
+	for _, item := range flow {
+		if r.isFlowGroupApplied(settings, item) {
+			continue
+		}
+		groupDiff, err := r.getBMCSettingsDifferenceForDesiredSettings(ctx, settings, bmcObj, bmcClient, item.Settings, verifyOnly)
+		if err != nil {
+			return nil, nil, stateChanged, err
+		}
+		if len(groupDiff) == 0 {
+			r.setFlowGroupState(settings, item, baseboardv1alpha1.BMCSettingsFlowStateApplied)
+			stateChanged = true
+			continue
+		}
+		// groupDiff is non-empty: this group needs work.
+		// Write Pending on first encounter so the entry is visible before the apply issues.
+		// Upgrade to InProgress when we are about to issue (not verify-only).
+		// Neither transition counts as forward progress (stateChanged) — only Applied does.
+		if !r.hasFlowGroupEntry(settings, item) {
+			r.setFlowGroupState(settings, item, baseboardv1alpha1.BMCSettingsFlowStatePending)
+		}
+		if !verifyOnly {
+			r.setFlowGroupState(settings, item, baseboardv1alpha1.BMCSettingsFlowStateInProgress)
+		}
+		return groupDiff, item.Settings, stateChanged, nil
+	}
+
+	if len(mergedDiff) == 0 {
+		return schemas.SettingsAttributes{}, mergedSettings, stateChanged, nil
+	}
+
+	// All groups were previously Applied but drift was detected on the merged state.
+	// Apply the full merged diff in one cycle — ordering is not required because all
+	// groups were already complete.
+	//
+	// Always signal stateChanged=true so the caller (updateFlowStateAfterVerification)
+	// resets ChangesIssued and re-arms the apply cycle.
+	//
+	// In apply mode (not verifyOnly), also re-mark every group Applied so that on the
+	// next reconcile the sequential forward pass skips them all and the merged-drift
+	// check re-runs cleanly.  Resetting to nil would cause the first group's
+	// subset-settings to appear as a new diff (because a later group's overriding
+	// values are still on the BMC), stalling the controller.
+	if !verifyOnly {
+		for _, item := range flow {
+			r.setFlowGroupState(settings, item, baseboardv1alpha1.BMCSettingsFlowStateApplied)
+		}
+	}
+	return mergedDiff, mergedSettings, true, nil
+}
+
+// isFlowGroupApplied reports whether the given flow item is recorded as Applied in FlowState.
+func (r *BMCSettingsReconciler) isFlowGroupApplied(settings *baseboardv1alpha1.BMCSettings, item api.SettingsFlowItem) bool {
+	for _, fs := range settings.Status.FlowState {
+		if fs.Name == item.Name && fs.Priority == item.Priority {
+			return fs.State == baseboardv1alpha1.BMCSettingsFlowStateApplied
+		}
+	}
+	return false
+}
+
+// allFlowGroupsApplied reports whether every item in spec.settingsFlow has a corresponding Applied entry in FlowState.
+func (r *BMCSettingsReconciler) allFlowGroupsApplied(settings *baseboardv1alpha1.BMCSettings) bool {
+	for _, item := range settings.Spec.SettingsFlow {
+		if !r.isFlowGroupApplied(settings, item) {
+			return false
+		}
+	}
+	return true
+}
+
+// hasFlowGroupEntry reports whether the given flow item has any entry in FlowState.
+func (r *BMCSettingsReconciler) hasFlowGroupEntry(settings *baseboardv1alpha1.BMCSettings, item api.SettingsFlowItem) bool {
+	for _, fs := range settings.Status.FlowState {
+		if fs.Name == item.Name && fs.Priority == item.Priority {
+			return true
+		}
+	}
+	return false
+}
+
+// setFlowGroupState upserts the FlowState entry for the given flow item.
+func (r *BMCSettingsReconciler) setFlowGroupState(settings *baseboardv1alpha1.BMCSettings, item api.SettingsFlowItem, state baseboardv1alpha1.BMCSettingsFlowState) {
+	for i, fs := range settings.Status.FlowState {
+		if fs.Name == item.Name && fs.Priority == item.Priority {
+			settings.Status.FlowState[i].State = state
+			return
+		}
+	}
+	settings.Status.FlowState = append(settings.Status.FlowState, baseboardv1alpha1.BMCSettingsFlowStatus{
+		Priority: item.Priority,
+		Name:     item.Name,
+		State:    state,
+	})
+}
+
+// clearFlowStateOnGenerationChange clears flow progress when either generation marker is stale.
+func (r *BMCSettingsReconciler) clearFlowStateOnGenerationChange(settings *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition) bool {
+	changesIssuedStale := changesIssued.ObservedGeneration > 0 && changesIssued.ObservedGeneration < settings.Generation
+	statusStale := settings.Status.ObservedGeneration > 0 && settings.Status.ObservedGeneration < settings.Generation
+	legacyNoOpFlow := changesIssued.ObservedGeneration == 0 &&
+		settings.Status.ObservedGeneration == 0 &&
+		settings.Status.State == baseboardv1alpha1.BMCSettingsStateApplied &&
+		len(settings.Spec.SettingsFlow) > 0 &&
+		settings.Generation > 1
+	if changesIssuedStale || statusStale || legacyNoOpFlow {
+		settings.Status.FlowState = nil
+		return true
+	}
+	return false
+}
+
+// updateFlowStateAndCondition patches FlowState and a single condition atomically.
+// base must be a snapshot of settings taken before FlowState was mutated in-memory,
+// so that MergeFrom produces a patch that includes the FlowState change.
+func (r *BMCSettingsReconciler) updateFlowStateAndCondition(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, base *baseboardv1alpha1.BMCSettings, cond *metav1.Condition) error {
+	patched := base.DeepCopy()
+	patched.Status.FlowState = settings.Status.FlowState
+	if err := r.Conditions.UpdateSlice(&patched.Status.Conditions, cond.Type,
+		conditionutils.UpdateStatus(cond.Status),
+		conditionutils.UpdateReason(cond.Reason),
+		conditionutils.UpdateMessage(cond.Message),
+	); err != nil {
+		return fmt.Errorf("failed to update condition in flow-state patch: %w", err)
+	}
+	return r.Status().Patch(ctx, patched, client.MergeFrom(base))
+}
+
+// persistApplyCycleConditions atomically patches the BMC reset condition, stores
+// per-key ETags from applyResults, and updates the POST key fingerprints for
+// idempotency, using phase1Base as the patch baseline.
+func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, phase1Base *baseboardv1alpha1.BMCSettings, changesIssued *metav1.Condition, resetBMCReq bool, applyResults map[string]bmc.ApplyResult, effectiveSettings map[string]string) error {
 	log := ctrl.LoggerFrom(ctx)
 
 	resetCond, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCResetPostSettingApply)
@@ -656,9 +911,9 @@ func (r *BMCSettingsReconciler) persistApplyCycleConditions(ctx context.Context,
 		}
 	}
 
-	// Persist conditions and AppliedETags in a single atomic status patch.
-	// The base must be taken before any mutation so the diff captures all changes.
-	BMCSettingsBase := settings.DeepCopy()
+	// Persist conditions, FlowState, and AppliedETags atomically.
+	// The pre-mutation base includes FlowState updates made during Phase 1.
+	BMCSettingsBase := phase1Base
 	if len(applyResults) > 0 {
 		if settings.Status.AppliedETags == nil {
 			settings.Status.AppliedETags = make(map[string]baseboardv1alpha1.BMCSettingsApplyResultEntry, len(applyResults))
@@ -733,14 +988,48 @@ func (r *BMCSettingsReconciler) handleSettingAppliedState(ctx context.Context, s
 	if err := r.markBMCSettingsReadinessGatesSatisfied(ctx, settings, baseboardv1alpha1.BMCSettingsStateApplied); err != nil {
 		return err
 	}
+	if len(settings.Spec.SettingsFlow) > 0 {
+		changesIssued, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCSettingsChangesIssued)
+		if err != nil {
+			return fmt.Errorf("failed to get condition for settings changes issued: %w", err)
+		}
+		base := settings.DeepCopy()
+		if r.clearFlowStateOnGenerationChange(settings, changesIssued) {
+			settings.Status.State = ""
+			settings.Status.ObservedGeneration = settings.Generation
+			// Remove only apply-cycle conditions that are stale for the new generation.
+			// Persistent conditions (ReadinessGatesSatisfied, ServerMaintenance*, VersionUpdatePending)
+			// reflect external state independent of spec content and must survive.
+			for _, t := range []string{
+				ConditionBMCSettingsChangesIssued,
+				ConditionBMCSettingsChangesVerified,
+				ConditionBMCResetPostSettingApply,
+				ConditionBMCSettingsValidationFailed,
+				constants.ConditionResetIssued,
+				constants.ConditionRetryOfFailedResourceIssued,
+			} {
+				apimeta.RemoveStatusCondition(&settings.Status.Conditions, t)
+			}
+			if err := r.Status().Patch(ctx, settings, client.MergeFrom(base)); err != nil {
+				return fmt.Errorf("failed to reset settings flow for new generation: %w", err)
+			}
+			return nil
+		}
+	}
+
+	// Skip the merged-diff drift check when settingsFlow is partially applied.
+	// The merged diff reflects the final desired state, which won't match the BMC
+	// until all groups have been applied in order. Drift is re-evaluated once all
+	// groups are Applied.
+	if len(settings.Spec.SettingsFlow) > 0 && !r.allFlowGroupsApplied(settings) {
+		return nil
+	}
 
 	settingsDiff, _, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient, false)
 	if err != nil {
 		return fmt.Errorf("failed to fetch and check BMCSettings: %w", err)
 	}
 	if len(settingsDiff) > 0 {
-		// Drift detected — reset all conditions and state so the next reconcile
-		// re-enters the apply phase from scratch.
 		log.V(1).Info("Settings drift detected, resetting state for re-apply")
 		if settings.Spec.CompletionConditionType != "" {
 			servers, err := r.getServers(ctx, bmcObj, bmcClient)
@@ -895,6 +1184,7 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, bmcClient
 			}
 		}
 		settings.Status.Conditions = []metav1.Condition{*retryCondition}
+		settings.Status.FlowState = nil
 		if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for retrying: %w", err)
 		}
@@ -938,6 +1228,7 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, bmcClient
 			} else {
 				settings.Status.Conditions = nil
 			}
+			settings.Status.FlowState = nil
 			settings.Status.FailedAttempts++
 			if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for auto-retrying: %w", err)
@@ -953,6 +1244,19 @@ func (r *BMCSettingsReconciler) handleFailedState(ctx context.Context, bmcClient
 		settings.Status.ObservedGeneration = settings.Generation
 		if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to patch BMCSettings status for disabled auto-retry: %w", err)
+		}
+	}
+	// Mark any InProgress flow group as Failed so status reflects the terminal state.
+	if len(settings.Spec.SettingsFlow) > 0 {
+		for i, fs := range settings.Status.FlowState {
+			if fs.State == baseboardv1alpha1.BMCSettingsFlowStateInProgress {
+				settingsBase := settings.DeepCopy()
+				settings.Status.FlowState[i].State = baseboardv1alpha1.BMCSettingsFlowStateFailed
+				if err := r.Status().Patch(ctx, settings, client.MergeFrom(settingsBase)); err != nil {
+					return ctrl.Result{}, fmt.Errorf("failed to mark flow group %q as failed: %w", fs.Name, err)
+				}
+				break
+			}
 		}
 	}
 	// todo: revisit this logic to either create maintenance if not present, put server in Error state on failed bmc settings maintenance
@@ -984,8 +1288,6 @@ func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 // Strict policy is downgraded to Conservative, preventing write-only keys whose
 // fingerprint is unchanged from re-appearing in the diff and blocking the Applied transition.
 func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, verifyOnly bool) (diff schemas.SettingsAttributes, effectiveSettings map[string]string, err error) {
-	log := ctrl.LoggerFrom(ctx)
-
 	resolvedVars, err := utils.ResolveVariables(ctx, r.Client, settings, settings.Spec.Variables)
 	if err != nil {
 		return diff, nil, fmt.Errorf("failed to resolve BMCSettings variables: %w", err)
@@ -994,6 +1296,21 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	if err != nil {
 		return diff, nil, fmt.Errorf("failed to apply BMCSettings variables: %w", err)
 	}
+	diff, err = r.getBMCSettingsDifferenceForDesiredSettings(ctx, settings, bmcObj, bmcClient, effectiveSettingsMap, verifyOnly)
+	return diff, effectiveSettingsMap, err
+}
+
+// getBMCSettingsDifferenceForDesiredSettings computes the BMC diff for an explicit desired settings map.
+func (r *BMCSettingsReconciler) getBMCSettingsDifferenceForDesiredSettings(
+	ctx context.Context,
+	settings *baseboardv1alpha1.BMCSettings,
+	bmcObj *metalv1alpha1.BMC,
+	bmcClient etagDriftClient,
+	effectiveSettingsMap map[string]string,
+	verifyOnly bool,
+) (schemas.SettingsAttributes, error) {
+	log := ctrl.LoggerFrom(ctx)
+	var diff schemas.SettingsAttributes
 
 	policy := settings.Spec.WriteOnlyDriftPolicy
 	if policy == "" {
@@ -1004,11 +1321,11 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	if len(settings.Status.AppliedETags) > 0 {
 		diff, currentETags, backfillHashes, err := r.etagAwareDiff(ctx, bmcClient, bmcObj.Spec.BMCUUID, effectiveSettingsMap, settings.Status.AppliedETags, policy, verifyOnly)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		r.persistETagRefreshes(ctx, settings, diff, currentETags, backfillHashes)
 		log.V(1).Info("ETag-aware diff computed", "diffKeys", utils.SettingKeys(diff))
-		return diff, effectiveSettingsMap, nil
+		return diff, nil
 	}
 	// Fallback: full value-map GET (no stored ETags yet).
 	currentSettings, err := bmcClient.GetBMCAttributeValues(ctx, bmc.GetBMCAttributeValuesRequest{
@@ -1016,7 +1333,7 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 		Attributes: effectiveSettingsMap,
 	})
 	if err != nil {
-		return diff, nil, fmt.Errorf("failed to get BMC settings: %w", err)
+		return diff, fmt.Errorf("failed to get BMC settings: %w", err)
 	}
 
 	log.V(1).Info("Current BMC settings fetched", "SettingKeys", utils.SettingKeys(currentSettings))
@@ -1024,10 +1341,10 @@ func (r *BMCSettingsReconciler) getBMCSettingsDifference(ctx context.Context, se
 	var errs []error
 	diff, errs = buildFallbackDiff(effectiveSettingsMap, currentSettings, settings.Status.AppliedETags, r.HMACKey, policy, verifyOnly)
 	if len(errs) > 0 {
-		return diff, effectiveSettingsMap, fmt.Errorf("failed to find diff for some BMC settings: %v", errs)
+		return diff, fmt.Errorf("failed to find diff for some BMC settings: %v", errs)
 	}
 
-	return diff, effectiveSettingsMap, nil
+	return diff, nil
 }
 
 // buildFallbackDiff computes the settings diff from a full GET response when no stored ETags exist.
@@ -1272,8 +1589,9 @@ func (r *BMCSettingsReconciler) requestMaintenanceOnServers(ctx context.Context,
 		}
 		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
 			ObjectMeta: metav1.ObjectMeta{
-				Namespace:    r.ManagerNamespace,
-				GenerateName: "bmc-settings-",
+				Namespace: r.ManagerNamespace,
+				// Deterministic name prevents duplicate creation on cache-stale re-reconciles.
+				Name: utils.VersionSetChildName(settings.Name, server.Name),
 			},
 		}
 		opResult, err := controllerutil.CreateOrPatch(ctx, r.Client, serverMaintenance, func() error {

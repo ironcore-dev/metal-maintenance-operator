@@ -18,6 +18,9 @@ type SettingsTemplate struct {
 	Version string `json:"version,omitempty"`
 
 	// SettingsFlow contains the settings sequence to apply in the given order.
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:XValidation:rule="self.all(a, self.filter(b, b.name == a.name).size() == 1)",message="settingsFlow item names must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(a, self.filter(b, b.priority == a.priority).size() == 1)",message="settingsFlow item priorities must be unique"
 	// +optional
 	SettingsFlow []SettingsFlowItem `json:"settingsFlow,omitempty"`
 
@@ -102,6 +105,7 @@ type RetryPolicy struct {
 	MaxAttempts *int32 `json:"maxAttempts,omitempty"`
 }
 
+// SettingsFlowItem defines one priority step in a settings application sequence.
 type SettingsFlowItem struct {
 	// Name is the name of the flow item.
 	// +required

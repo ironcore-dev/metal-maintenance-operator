@@ -9,7 +9,11 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"github.com/ironcore-dev/controller-utils/conditionutils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -17,6 +21,11 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestUtils(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Utils Suite")
+}
 
 // fakePowerCycleBMC is a minimal bmc.BMC implementation used to unit-test
 // HandleServerPowerCycle's state machine without a real Redfish server.
@@ -590,3 +599,37 @@ func TestHandleBMCReset_PropagatesResetPendingError(t *testing.T) {
 		t.Fatalf("expected error to wrap %v, got %v", wantErr, err)
 	}
 }
+
+var _ = Describe("SortedSettingsFlowGroups", func() {
+	It("returns items sorted by ascending priority", func() {
+		flow := []api.SettingsFlowItem{
+			{Name: "c", Priority: 3},
+			{Name: "a", Priority: 1},
+			{Name: "b", Priority: 2},
+		}
+		sorted := utils.SortedSettingsFlowGroups(flow)
+		Expect(sorted).To(HaveLen(3))
+		Expect(sorted[0].Name).To(Equal("a"))
+		Expect(sorted[1].Name).To(Equal("b"))
+		Expect(sorted[2].Name).To(Equal("c"))
+	})
+
+	It("preserves relative order for equal priorities (stable sort)", func() {
+		flow := []api.SettingsFlowItem{
+			{Name: "x", Priority: 1},
+			{Name: "y", Priority: 1},
+		}
+		sorted := utils.SortedSettingsFlowGroups(flow)
+		Expect(sorted[0].Name).To(Equal("x"))
+		Expect(sorted[1].Name).To(Equal("y"))
+	})
+
+	It("does not modify the original slice", func() {
+		flow := []api.SettingsFlowItem{
+			{Name: "b", Priority: 2},
+			{Name: "a", Priority: 1},
+		}
+		_ = utils.SortedSettingsFlowGroups(flow)
+		Expect(flow[0].Name).To(Equal("b"))
+	})
+})

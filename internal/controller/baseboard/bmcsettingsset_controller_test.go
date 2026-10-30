@@ -113,6 +113,10 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 		By("Ensuring that the BMC has right state: enabled")
 		Eventually(Object(bmc01)).Should(HaveField("Status.State", metalv1alpha1.BMCStateEnabled))
 
+		// The version gate in the BMCSettings controller requires Status.FirmwareVersion to match
+		// spec.version; the sim-bmc controller populates it asynchronously, so wait for it here.
+		Eventually(Object(bmc01)).Should(HaveField("Status.FirmwareVersion", mockUpServerBMCVersion))
+
 		By("Patching server01 to Available so it can be Parked for maintenance")
 		Eventually(UpdateStatus(server01, func() {
 			server01.Status.State = metalv1alpha1.ServerStateAvailable
@@ -128,6 +132,10 @@ var _ = Describe("BMCSettingsSet Controller", func() {
 
 		By("Ensuring that the BMC has right state: enabled")
 		Eventually(Object(bmc02)).Should(HaveField("Status.State", metalv1alpha1.BMCStateEnabled))
+
+		// The version gate in the BMCSettings controller requires Status.FirmwareVersion to match
+		// spec.version; the sim-bmc controller populates it asynchronously, so wait for it here.
+		Eventually(Object(bmc02)).Should(HaveField("Status.FirmwareVersion", mockUpServerBMCVersion))
 
 		By("Patching server02 to Available so it can be Parked for maintenance")
 		Eventually(UpdateStatus(server02, func() {
