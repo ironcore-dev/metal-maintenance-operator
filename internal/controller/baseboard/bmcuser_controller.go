@@ -1052,6 +1052,19 @@ func (r *BMCUserReconciler) ensureExpiresAtStatus(ctx context.Context, user *bas
 // triggers a TTLExpiry password rotation (so the old credential is invalidated)
 // and disables the BMC account. When the TTL is still in the future it schedules
 // a requeue to fire exactly at expiry.
+//
+// State machine after expiry:
+//
+//	No rotation yet, AccountActive not False
+//	  → create rotation, disable account, set AccountActive=False
+//
+//	Rotation in flight
+//	  → disable account (rotation re-enables it via hardcoded enabled=true),
+//	    set AccountActive=False, wait for rotation to finish
+//
+//	Rotation succeeded/failed, AccountActive=False (steady state)
+//	  → ensure account is still disabled (rotation set enabled=true on success),
+//	    do not create another rotation
 func (r *BMCUserReconciler) ensureTTLExpiry(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcClient bmc.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if user.Status.ExpiresAt == nil {
@@ -1071,18 +1084,31 @@ func (r *BMCUserReconciler) ensureTTLExpiry(ctx context.Context, user *baseboard
 		return result, nil
 	}
 
-	// TTL has elapsed.
-	log.Info("BMC user TTL has elapsed, disabling account and rotating credentials",
+	// TTL has elapsed. We are in or moving toward the AccountActive=False steady state.
+	log.Info("BMC user TTL has elapsed, ensuring account is disabled",
 		"expiresAt", user.Status.ExpiresAt.Time)
 
-	if err := r.ensureTTLExpiryRotation(ctx, user); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to ensure TTLExpiry rotation: %w", err)
+	// Only create a rotation if one hasn't run yet for this expiry. Once the
+	// condition is False and no rotation is in flight, the credential has already
+	// been invalidated — do not keep creating new rotations.
+	activeCond := apimeta.FindStatusCondition(user.Status.Conditions, conditionTypeAccountActive)
+	alreadyExpired := activeCond != nil && activeCond.Status == metav1.ConditionFalse
+
+	if !alreadyExpired {
+		// First time we see TTL elapsed: trigger the credential rotation.
+		if err := r.ensureTTLExpiryRotation(ctx, user); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to ensure TTLExpiry rotation: %w", err)
+		}
 	}
+
+	// Always disable the account while TTL is elapsed — the rotation controller
+	// unconditionally calls CreateOrUpdateAccount with enabled=true, so we must
+	// re-disable after it completes. This is idempotent.
 	if err := r.disableBMCAccount(ctx, user, bmcClient); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to disable BMC account after TTL expiry: %w", err)
 	}
 	if err := r.setAccountActiveCondition(ctx, user, false, reasonAccountTTLExpired,
-		fmt.Sprintf("TTL elapsed at %s; account disabled and credential rotation triggered", user.Status.ExpiresAt)); err != nil {
+		fmt.Sprintf("TTL elapsed at %s; account disabled and credential rotation triggered", user.Status.ExpiresAt.Time)); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
