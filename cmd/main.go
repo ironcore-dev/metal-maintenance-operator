@@ -546,12 +546,13 @@ func main() {
 	var firmwareUpdateConfigLoader *configloader.Loader[config.FirmwareUpdateConfig]
 	if firmwareUpdateConfigName != "" && firmwareUpdateConfigNamespace != "" {
 		firmwareUpdateConfigLoader = &configloader.Loader[config.FirmwareUpdateConfig]{
-			Cache:     mgr.GetCache(),
-			Client:    mgr.GetClient(),
-			Namespace: firmwareUpdateConfigNamespace,
-			Name:      firmwareUpdateConfigName,
-			Parse:     config.ParseFirmwareUpdateConfig,
-			Log:       ctrl.Log.WithName("firmwareupdate-config-loader"),
+			Cache:         mgr.GetCache(),
+			Client:        mgr.GetClient(),
+			Namespace:     firmwareUpdateConfigNamespace,
+			Name:          firmwareUpdateConfigName,
+			Parse:         config.ParseFirmwareUpdateConfig,
+			Log:           ctrl.Log.WithName("firmwareupdate-config-loader"),
+			EventRecorder: mgr.GetEventRecorder("metal-maintenance-operator"),
 		}
 		if err := mgr.Add(firmwareUpdateConfigLoader); err != nil {
 			setupLog.Error(err, "Unable to register FirmwareUpdate ConfigMap loader")
