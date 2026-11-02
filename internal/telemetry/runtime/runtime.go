@@ -235,12 +235,6 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 	return nil
 }
 
-// ConfigKey is the ConfigMap data key holding the telemetry config.yaml
-// payload. Kept as a package-level const (rather than requiring callers to
-// depend on internal/configloader.DefaultKey directly) for backward
-// compatibility with existing external references (e.g. hack/verify-test-events).
-const ConfigKey = configloader.DefaultKey
-
 // parseSubscriptionsConfig adapts subscriptions.Parse (which returns a
 // field.ErrorList) to the plain `func([]byte) (*T, error)` signature
 // internal/configloader.Loader[T] requires.

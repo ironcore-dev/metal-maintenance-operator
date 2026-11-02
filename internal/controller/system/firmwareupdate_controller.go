@@ -15,9 +15,7 @@ import (
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -95,84 +93,6 @@ type FirmwareUpdateReconciler struct {
 	// before giving up on the retry. Giving up stops further automatic retries but does not
 	// release maintenance. A value <= 0 disables the give-up check.
 	ServerResetGiveUpTimeout time.Duration
-	// ConfigLoader, when set, supplies live-reloaded overrides (from a
-	// ConfigMap) for ResyncInterval, DefaultFailedAutoRetryCount,
-	// MaxRepositoryPasses, MinBMCResetInterval, ScheduledJobPowerOnTimeout, and
-	// RepositoryCheckInterval. Any field left unset in the loaded config (or
-	// the loader itself being nil, or not having loaded a config yet) falls
-	// back to the config package's built-in default constants (config.Default*).
-	ConfigLoader *configloader.Loader[config.FirmwareUpdateConfig]
-}
-
-// resyncInterval returns the live ConfigMap-overridden ResyncInterval, or
-// config.DefaultResyncInterval when no override is set.
-func (r *FirmwareUpdateReconciler) resyncInterval() time.Duration {
-	if r.ConfigLoader != nil {
-		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.ResyncInterval != nil {
-			return *cfg.ResyncInterval
-		}
-	}
-	return config.DefaultResyncInterval
-}
-
-// defaultFailedAutoRetryCount returns the live ConfigMap-overridden
-// DefaultFailedAutoRetryCount, or config.DefaultDefaultFailedAutoRetryCount
-// when no override is set.
-func (r *FirmwareUpdateReconciler) defaultFailedAutoRetryCount() int32 {
-	if r.ConfigLoader != nil {
-		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.DefaultFailedAutoRetryCount != nil {
-			return *cfg.DefaultFailedAutoRetryCount
-		}
-	}
-	return config.DefaultDefaultFailedAutoRetryCount
-}
-
-// maxRepositoryPasses returns the live ConfigMap-overridden
-// MaxRepositoryPasses, or config.DefaultMaxRepositoryPasses when no override
-// is set.
-func (r *FirmwareUpdateReconciler) maxRepositoryPasses() int32 {
-	if r.ConfigLoader != nil {
-		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.MaxRepositoryPasses != nil {
-			return *cfg.MaxRepositoryPasses
-		}
-	}
-	return config.DefaultMaxRepositoryPasses
-}
-
-// minBMCResetInterval returns the live ConfigMap-overridden
-// MinBMCResetInterval, or config.DefaultMinBMCResetInterval when no override
-// is set.
-func (r *FirmwareUpdateReconciler) minBMCResetInterval() time.Duration {
-	if r.ConfigLoader != nil {
-		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.MinBMCResetInterval != nil {
-			return *cfg.MinBMCResetInterval
-		}
-	}
-	return config.DefaultMinBMCResetInterval
-}
-
-// scheduledJobPowerOnTimeout returns the live ConfigMap-overridden
-// ScheduledJobPowerOnTimeout, or config.DefaultScheduledJobPowerOnTimeout when
-// no override is set.
-func (r *FirmwareUpdateReconciler) scheduledJobPowerOnTimeout() time.Duration {
-	if r.ConfigLoader != nil {
-		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.ScheduledJobPowerOnTimeout != nil {
-			return *cfg.ScheduledJobPowerOnTimeout
-		}
-	}
-	return config.DefaultScheduledJobPowerOnTimeout
-}
-
-// repositoryCheckInterval returns the live ConfigMap-overridden
-// RepositoryCheckInterval, or config.DefaultRepositoryCheckInterval when no
-// override is set.
-func (r *FirmwareUpdateReconciler) repositoryCheckInterval() time.Duration {
-	if r.ConfigLoader != nil {
-		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.RepositoryCheckInterval != nil {
-			return *cfg.RepositoryCheckInterval
-		}
-	}
-	return config.DefaultRepositoryCheckInterval
 }
 
 const defaultFirmwarePollingInterval = 2 * time.Minute
@@ -465,7 +385,7 @@ func (r *FirmwareUpdateReconciler) handleBMCReset(
 		// due to an earlier, unrelated reset falling within the cooldown.
 		SkipRecentlyResetCheck: conditionType == constants.ConditionRetryResetIssued,
 		RecentlyReset: func(ctx context.Context) (bool, error) {
-			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.minBMCResetInterval())
+			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.MinBMCResetInterval)
 		},
 		IssueReset: func(ctx context.Context) error {
 			return utils.ResetBMCOfServer(ctx, r.Client, server, bmcClient)
@@ -568,9 +488,9 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 	if fw.Spec.RetryPolicy != nil && fw.Spec.RetryPolicy.MaxAttempts != nil {
 		// if RetryPolicy is given (even if MaxAttempts is 0), do not use the default value.
 		maxAttempts = *fw.Spec.RetryPolicy.MaxAttempts
-	} else if defaultFailedAutoRetryCount := r.defaultFailedAutoRetryCount(); defaultFailedAutoRetryCount > 0 {
+	} else if r.DefaultFailedAutoRetryCount > 0 {
 		// set the retry to this, if the optional RetryPolicy is not given and default retry count is set on the reconciler.
-		maxAttempts = defaultFailedAutoRetryCount
+		maxAttempts = r.DefaultFailedAutoRetryCount
 	}
 	if maxAttempts > 0 {
 		if fw.Status.ObservedGeneration != fw.Generation {
