@@ -2519,6 +2519,7 @@ spec:
                 - Annotation
                 - PasswordExpiry
                 - FactoryBootstrap
+                - TTLExpiry
                 type: string
               triggeredAt:
                 description: |-
@@ -2568,6 +2569,9 @@ spec:
       type: date
     - jsonPath: .status.passwordExpiration
       name: PasswordExpiration
+      type: date
+    - jsonPath: .status.expiresAt
+      name: ExpiresAt
       type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -2640,6 +2644,14 @@ spec:
               description:
                 description: Description is a description for the BMC user.
                 type: string
+              expiresAt:
+                description: |-
+                  ExpiresAt is the absolute timestamp at which this ServiceAccount user's access window ends.
+                  When reached, the operator rotates the credential and disables the BMC account.
+                  Takes precedence over TTL when both are set.
+                  Only valid for Type=ServiceAccount.
+                format: date-time
+                type: string
               roleID:
                 description: RoleID is the ID of the role to assign to the user.
                 type: string
@@ -2656,6 +2668,13 @@ spec:
                 description: |-
                   RotationPeriod defines how often the password should be rotated.
                   If not set, the password will not be rotated.
+                type: string
+              ttl:
+                description: |-
+                  TTL defines how long this ServiceAccount user remains active, measured from creationTimestamp.
+                  When the TTL elapses the operator rotates the credential and disables the BMC account.
+                  Mutually exclusive with ExpiresAt; if both are set ExpiresAt takes precedence.
+                  Only valid for Type=ServiceAccount.
                 type: string
               type:
                 default: ServiceAccount
@@ -2769,6 +2788,13 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              expiresAt:
+                description: |-
+                  ExpiresAt is the computed effective TTL expiry for this user.
+                  Populated from spec.expiresAt when set, otherwise from creationTimestamp + spec.ttl.
+                  Nil when no TTL is configured.
+                format: date-time
+                type: string
               factoryAccountHandled:
                 description: |-
                   FactoryAccountHandled records whether the factory account on this user's BMC has been

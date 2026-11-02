@@ -298,7 +298,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `phase` _[BMCUserRotationPhase](#bmcuserrotationphase)_ | Phase is the current lifecycle phase of this rotation. | Pending | Enum: [Pending InProgress Succeeded Failed] <br /> |
 | `triggeredAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | TriggeredAt is the timestamp when the rotation was initiated. Recorded by the<br />controller when it creates the rotation. |  |  |
-| `triggerReason` _[BMCUserRotationTrigger](#bmcuserrotationtrigger)_ | TriggerReason describes what caused this rotation. |  | Enum: [RotationPeriod Annotation PasswordExpiry FactoryBootstrap] <br /> |
+| `triggerReason` _[BMCUserRotationTrigger](#bmcuserrotationtrigger)_ | TriggerReason describes what caused this rotation. |  | Enum: [RotationPeriod Annotation PasswordExpiry FactoryBootstrap TTLExpiry] <br /> |
 | `completedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | CompletedAt is the timestamp when the rotation finished (succeeded or failed). |  |  |
 | `newSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | NewSecretRef references the BMCSecret created by this rotation.<br />Set on success. |  |  |
 | `message` _string_ | Message provides a human-readable description of the current state,<br />especially useful when Phase is Failed. |  |  |
@@ -323,6 +323,7 @@ _Appears in:_
 | `Annotation` |  |
 | `PasswordExpiry` |  |
 | `FactoryBootstrap` |  |
+| `TTLExpiry` | BMCUserRotationTriggerTTLExpiry is used when a TTL-gated ServiceAccount user expires.<br />The rotation invalidates the old credential before the account is disabled.<br /> |
 
 
 #### BMCUserSet
@@ -405,6 +406,8 @@ _Appears in:_
 | `type` _[BMCUserType](#bmcusertype)_ | Type identifies the role of this BMCUser within the operator.<br />OperatorAdmin users propagate their verified credential to BMC.Spec.BMCSecretRef<br />and use dual-account rotation. Defaults to ServiceAccount. | ServiceAccount | Enum: [OperatorAdmin ServiceAccount] <br /> |
 | `rotationHistoryLimit` _integer_ | RotationHistoryLimit is the maximum number of completed (Succeeded or Failed)<br />BMCUserRotation objects to retain. Older objects beyond this limit are pruned.<br />Defaults to 10. | 10 | Minimum: 1 <br /> |
 | `deletionPolicy` _string_ | DeletionPolicy controls whether the BMC account is deleted when this BMCUser is removed.<br />Retain preserves the account on the BMC hardware; Delete removes it.<br />When empty, OperatorAdmin users default to Retain and ServiceAccount users to Delete. |  | Enum: [Retain Delete] <br /> |
+| `ttl` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | TTL defines how long this ServiceAccount user remains active, measured from creationTimestamp.<br />When the TTL elapses the operator rotates the credential and disables the BMC account.<br />Mutually exclusive with ExpiresAt; if both are set ExpiresAt takes precedence.<br />Only valid for Type=ServiceAccount. |  |  |
+| `expiresAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | ExpiresAt is the absolute timestamp at which this ServiceAccount user's access window ends.<br />When reached, the operator rotates the credential and disables the BMC account.<br />Takes precedence over TTL when both are set.<br />Only valid for Type=ServiceAccount. |  |  |
 
 
 #### BMCUserStatus
@@ -424,6 +427,7 @@ _Appears in:_
 | `bootstrapSecretRef` _[LocalObjectReference](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#localobjectreference-v1-core)_ | BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.<br />Written once by the BMCUserSet controller before the user is first reconciled, so the<br />peer (-b) can still bootstrap using the original factory credential even after -a has<br />promoted a new credential into BMC.Spec.BMCSecretRef.<br />Never changed after being set. |  |  |
 | `lastRotation` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastRotation is the timestamp of the last password rotation. |  |  |
 | `passwordExpiration` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | PasswordExpiration is the timestamp when the password will expire. |  |  |
+| `expiresAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | ExpiresAt is the computed effective TTL expiry for this user.<br />Populated from spec.expiresAt when set, otherwise from creationTimestamp + spec.ttl.<br />Nil when no TTL is configured. |  |  |
 | `id` _string_ | ID is the identifier of the user in the BMC system. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the current state of the BMCUser. |  |  |
 | `factoryAccountHandled` _boolean_ | FactoryAccountHandled records whether the factory account on this user's BMC has been<br />successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller<br />once the FactoryBootstrap rotation succeeds. |  |  |

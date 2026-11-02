@@ -47,6 +47,13 @@ const (
 	conditionTypePasswordValid = "PasswordValid"
 	reasonPasswordValid        = "PasswordValid"
 	reasonPasswordInvalid      = "PasswordInvalid"
+
+	// conditionTypeAccountActive mirrors BMCUserConditionAccountActive and tracks whether
+	// the BMC account is currently enabled and within its TTL window.
+	conditionTypeAccountActive = baseboardv1alpha1.BMCUserConditionAccountActive
+	reasonAccountActive        = "AccountActive"
+	reasonAccountTTLExpired    = "TTLExpired"
+	reasonAccountReactivated   = "Reactivated"
 )
 
 // rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
@@ -199,7 +206,13 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	if err := r.updateCredentialsBootstrappedCondition(ctx, user); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update CredentialsBootstrapped condition: %w", err)
 	}
-	return r.ensureBMCUserRotation(ctx, user)
+	if err := r.ensureExpiresAtStatus(ctx, user); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update ExpiresAt status: %w", err)
+	}
+	if err := r.reconcileAccountEnabled(ctx, user, bmcClient); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to reconcile account enabled state: %w", err)
+	}
+	return r.ensureTTLExpiry(ctx, user, bmcClient)
 }
 
 // patchUserStatus looks up the BMC account matching the user's UserName and
@@ -996,6 +1009,212 @@ func (r *BMCUserReconciler) updateCredentialsBootstrappedCondition(ctx context.C
 	apimeta.SetStatusCondition(&user.Status.Conditions, cond)
 	if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
 		return fmt.Errorf("failed to patch CredentialsBootstrapped condition: %w", err)
+	}
+	return nil
+}
+
+// computeExpiresAt returns the effective TTL expiry for the BMCUser.
+// spec.expiresAt takes priority; otherwise creationTimestamp + spec.ttl is used.
+// Returns nil when no TTL is configured.
+func computeExpiresAt(user *baseboardv1alpha1.BMCUser) *metav1.Time {
+	if user.Spec.ExpiresAt != nil {
+		return user.Spec.ExpiresAt
+	}
+	if user.Spec.TTL != nil {
+		t := metav1.Time{Time: user.CreationTimestamp.Add(user.Spec.TTL.Duration)}
+		return &t
+	}
+	return nil
+}
+
+// ensureExpiresAtStatus writes status.expiresAt from the spec TTL fields when it
+// differs from the currently recorded value. Only applies to ServiceAccount users.
+func (r *BMCUserReconciler) ensureExpiresAtStatus(ctx context.Context, user *baseboardv1alpha1.BMCUser) error {
+	if user.Spec.Type == baseboardv1alpha1.BMCUserTypeOperatorAdmin {
+		return nil
+	}
+	want := computeExpiresAt(user)
+	if want == nil && user.Status.ExpiresAt == nil {
+		return nil
+	}
+	if want != nil && user.Status.ExpiresAt != nil && want.Equal(user.Status.ExpiresAt) {
+		return nil
+	}
+	userBase := user.DeepCopy()
+	user.Status.ExpiresAt = want
+	if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
+		return fmt.Errorf("failed to patch ExpiresAt status: %w", err)
+	}
+	return nil
+}
+
+// ensureTTLExpiry checks whether the TTL window has elapsed. When it has, it
+// triggers a TTLExpiry password rotation (so the old credential is invalidated)
+// and disables the BMC account. When the TTL is still in the future it schedules
+// a requeue to fire exactly at expiry.
+func (r *BMCUserReconciler) ensureTTLExpiry(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcClient bmc.BMC) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if user.Status.ExpiresAt == nil {
+		return r.ensureBMCUserRotation(ctx, user)
+	}
+	now := time.Now()
+	if user.Status.ExpiresAt.After(now) {
+		remaining := time.Until(user.Status.ExpiresAt.Time)
+		log.V(1).Info("BMC user TTL not yet reached", "expiresAt", user.Status.ExpiresAt.Time, "remaining", remaining)
+		result, err := r.ensureBMCUserRotation(ctx, user)
+		if err != nil {
+			return result, err
+		}
+		if result.RequeueAfter == 0 || result.RequeueAfter > remaining {
+			result.RequeueAfter = remaining
+		}
+		return result, nil
+	}
+
+	// TTL has elapsed.
+	log.Info("BMC user TTL has elapsed, disabling account and rotating credentials",
+		"expiresAt", user.Status.ExpiresAt.Time)
+
+	if err := r.ensureTTLExpiryRotation(ctx, user); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to ensure TTLExpiry rotation: %w", err)
+	}
+	if err := r.disableBMCAccount(ctx, user, bmcClient); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to disable BMC account after TTL expiry: %w", err)
+	}
+	if err := r.setAccountActiveCondition(ctx, user, false, reasonAccountTTLExpired,
+		fmt.Sprintf("TTL elapsed at %s; account disabled and credential rotation triggered", user.Status.ExpiresAt)); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// ensureTTLExpiryRotation creates a BMCUserRotation with TriggerReason=TTLExpiry
+// unless one is already in flight for this user.
+func (r *BMCUserReconciler) ensureTTLExpiryRotation(ctx context.Context, user *baseboardv1alpha1.BMCUser) error {
+	log := ctrl.LoggerFrom(ctx)
+	rotationList := &baseboardv1alpha1.BMCUserRotationList{}
+	if err := r.List(ctx, rotationList); err != nil {
+		return fmt.Errorf("failed to list BMCUserRotations: %w", err)
+	}
+	for _, rot := range rotationList.Items {
+		if rot.Spec.BMCUserRef.Name != user.Name {
+			continue
+		}
+		if rot.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseSucceeded &&
+			rot.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseFailed {
+			log.V(1).Info("TTLExpiry rotation already in flight", "BMCUserRotation", rot.Name)
+			return nil
+		}
+	}
+
+	rotation := &baseboardv1alpha1.BMCUserRotation{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: user.Name + "-",
+		},
+		Spec: baseboardv1alpha1.BMCUserRotationSpec{
+			BMCUserRef: corev1.LocalObjectReference{Name: user.Name},
+			Type:       baseboardv1alpha1.RotationStrategySingleAccount,
+		},
+	}
+	if err := controllerutil.SetControllerReference(user, rotation, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference for TTLExpiry BMCUserRotation: %w", err)
+	}
+	if err := r.Create(ctx, rotation); err != nil {
+		return fmt.Errorf("failed to create TTLExpiry BMCUserRotation: %w", err)
+	}
+	rotBase := rotation.DeepCopy()
+	rotation.Status.TriggeredAt = &metav1.Time{Time: time.Now()}
+	rotation.Status.TriggerReason = baseboardv1alpha1.BMCUserRotationTriggerTTLExpiry
+	if err := r.Status().Patch(ctx, rotation, client.MergeFrom(rotBase)); err != nil {
+		return fmt.Errorf("failed to record TTLExpiry trigger in rotation status: %w", err)
+	}
+	log.Info("Created TTLExpiry BMCUserRotation", "BMCUserRotation", rotation.Name)
+	if err := r.pruneRotationHistory(ctx, user, rotationList.Items); err != nil {
+		return fmt.Errorf("failed to prune rotation history: %w", err)
+	}
+	return nil
+}
+
+// disableBMCAccount calls CreateOrUpdateAccount with enabled=false to lock out
+// the BMC account without deleting it. The existing password is passed unchanged
+// so vendors that require it (e.g. Dell iDRAC) accept the PATCH.
+func (r *BMCUserReconciler) disableBMCAccount(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcClient bmc.BMC) error {
+	if user.Status.EffectiveBMCSecretRef == nil {
+		return nil
+	}
+	secret := &metalv1alpha1.BMCSecret{}
+	if err := r.Get(ctx, client.ObjectKey{Name: user.Status.EffectiveBMCSecretRef.Name}, secret); err != nil {
+		return fmt.Errorf("failed to get effective BMCSecret for account disable: %w", err)
+	}
+	_, password, err := bmcutils.GetBMCCredentialsFromSecret(secret)
+	if err != nil {
+		return fmt.Errorf("failed to get credentials from BMCSecret for account disable: %w", err)
+	}
+	if err := bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, false); err != nil {
+		return fmt.Errorf("failed to disable BMC account: %w", err)
+	}
+	ctrl.LoggerFrom(ctx).Info("Disabled BMC account", "userName", user.Spec.UserName)
+	return nil
+}
+
+// reconcileAccountEnabled re-enables a previously disabled BMC account when the
+// TTL has been re-armed (spec.expiresAt updated to a future time). Detected by
+// finding AccountActive=False while status.expiresAt is now in the future.
+func (r *BMCUserReconciler) reconcileAccountEnabled(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcClient bmc.BMC) error {
+	if user.Status.ExpiresAt == nil {
+		return nil
+	}
+	activeCond := apimeta.FindStatusCondition(user.Status.Conditions, conditionTypeAccountActive)
+	if activeCond == nil || activeCond.Status != metav1.ConditionFalse {
+		return nil
+	}
+	if !user.Status.ExpiresAt.After(time.Now()) {
+		return nil
+	}
+	log := ctrl.LoggerFrom(ctx)
+	log.Info("TTL re-armed, re-enabling BMC account", "expiresAt", user.Status.ExpiresAt.Time)
+
+	if user.Status.EffectiveBMCSecretRef == nil {
+		return nil
+	}
+	secret := &metalv1alpha1.BMCSecret{}
+	if err := r.Get(ctx, client.ObjectKey{Name: user.Status.EffectiveBMCSecretRef.Name}, secret); err != nil {
+		return fmt.Errorf("failed to get effective BMCSecret for account re-enable: %w", err)
+	}
+	_, password, err := bmcutils.GetBMCCredentialsFromSecret(secret)
+	if err != nil {
+		return fmt.Errorf("failed to get credentials from BMCSecret for account re-enable: %w", err)
+	}
+	if err := bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
+		return fmt.Errorf("failed to re-enable BMC account: %w", err)
+	}
+	log.Info("Re-enabled BMC account", "userName", user.Spec.UserName)
+
+	if err := r.setAccountActiveCondition(ctx, user, true, reasonAccountReactivated,
+		fmt.Sprintf("Account re-enabled; new TTL expires at %s", user.Status.ExpiresAt.Time)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// setAccountActiveCondition sets the AccountActive condition on the BMCUser status.
+func (r *BMCUserReconciler) setAccountActiveCondition(ctx context.Context, user *baseboardv1alpha1.BMCUser, active bool, reason, message string) error {
+	status := metav1.ConditionTrue
+	if !active {
+		status = metav1.ConditionFalse
+	}
+	cond := metav1.Condition{
+		Type:               conditionTypeAccountActive,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: user.Generation,
+	}
+	userBase := user.DeepCopy()
+	if apimeta.SetStatusCondition(&user.Status.Conditions, cond) {
+		if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
+			return fmt.Errorf("failed to patch AccountActive condition: %w", err)
+		}
 	}
 	return nil
 }

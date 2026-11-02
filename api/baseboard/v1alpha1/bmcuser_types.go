@@ -24,6 +24,13 @@ const (
 	BMCUserTypeServiceAccount BMCUserType = "ServiceAccount"
 )
 
+const (
+	// BMCUserConditionAccountActive is True when the BMC account is enabled and within its TTL
+	// window (or no TTL is set). Set to False once the TTL expires and the account has been
+	// disabled. Re-arming the TTL (extending spec.expiresAt) transitions it back to True.
+	BMCUserConditionAccountActive = "AccountActive"
+)
+
 // BMCUserSpec defines the desired state of BMCUser.
 type BMCUserSpec struct {
 	// UserName is the username of the BMC user.
@@ -67,6 +74,20 @@ type BMCUserSpec struct {
 	// +kubebuilder:validation:Enum=Retain;Delete
 	// +optional
 	DeletionPolicy string `json:"deletionPolicy,omitempty"`
+
+	// TTL defines how long this ServiceAccount user remains active, measured from creationTimestamp.
+	// When the TTL elapses the operator rotates the credential and disables the BMC account.
+	// Mutually exclusive with ExpiresAt; if both are set ExpiresAt takes precedence.
+	// Only valid for Type=ServiceAccount.
+	// +optional
+	TTL *metav1.Duration `json:"ttl,omitempty"`
+
+	// ExpiresAt is the absolute timestamp at which this ServiceAccount user's access window ends.
+	// When reached, the operator rotates the credential and disables the BMC account.
+	// Takes precedence over TTL when both are set.
+	// Only valid for Type=ServiceAccount.
+	// +optional
+	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 }
 
 // BMCUserStatus defines the observed state of BMCUser.
@@ -88,6 +109,12 @@ type BMCUserStatus struct {
 
 	// PasswordExpiration is the timestamp when the password will expire.
 	PasswordExpiration *metav1.Time `json:"passwordExpiration,omitempty"`
+
+	// ExpiresAt is the computed effective TTL expiry for this user.
+	// Populated from spec.expiresAt when set, otherwise from creationTimestamp + spec.ttl.
+	// Nil when no TTL is configured.
+	// +optional
+	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 
 	// ID is the identifier of the user in the BMC system.
 	ID string `json:"id,omitempty"`
@@ -111,6 +138,7 @@ type BMCUserStatus struct {
 // +kubebuilder:printcolumn:name="RoleID",type=string,JSONPath=`.spec.roleID`
 // +kubebuilder:printcolumn:name="LastRotation",type=date,JSONPath=`.status.lastRotation`
 // +kubebuilder:printcolumn:name="PasswordExpiration",type=date,JSONPath=`.status.passwordExpiration`
+// +kubebuilder:printcolumn:name="ExpiresAt",type=date,JSONPath=`.status.expiresAt`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // BMCUser is the Schema for the bmcusers API.
