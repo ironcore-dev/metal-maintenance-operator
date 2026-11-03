@@ -1807,30 +1807,9 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 				ServerRef: &v1.LocalObjectReference{Name: server.Name},
 			},
 		}
-		Expect(k8sClient.Create(ctx, biosSettings2)).To(Succeed())
+		By("Ensuring duplicate flow item names are rejected at admission by the API")
+		Expect(k8sClient.Create(ctx, biosSettings2)).To(MatchError(ContainSubstring("settingsFlow item names must be unique")))
 
-		By("Ensuring that the BIOSSetting Object has moved to Failed")
-		Eventually(Object(biosSettings2)).Should(SatisfyAll(
-			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateFailed),
-		))
-
-		By("Ensuring right number of conditions are present")
-		Eventually(Object(biosSettings2)).Should(
-			HaveField("Status.Conditions", HaveLen(1)),
-		)
-
-		By("Ensuring the update has been applied by the server")
-		Eventually(Object(biosSettings2)).Should(
-			HaveField("Status.Conditions", ContainElement(
-				SatisfyAll(
-					HaveField("Type", ConditionSettingsDuplicateKeys),
-					HaveField("Status", metav1.ConditionTrue),
-				),
-			)),
-		)
-
-		By("Deleting the biosSettings2")
-		Expect(k8sClient.Delete(ctx, biosSettings2)).To(Succeed())
 		By("Deleting the biosSettings")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)

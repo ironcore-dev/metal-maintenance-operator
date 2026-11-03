@@ -168,6 +168,8 @@ spec:
                 description: SettingsFlow contains the settings sequence to apply
                   in the given order.
                 items:
+                  description: SettingsFlowItem defines one priority step in a settings
+                    application sequence.
                   properties:
                     name:
                       description: Name is the name of the flow item.
@@ -192,7 +194,14 @@ spec:
                   - name
                   - priority
                   type: object
+                maxItems: 64
                 type: array
+                x-kubernetes-validations:
+                - message: settingsFlow item names must be unique
+                  rule: self.all(a, self.filter(b, b.name == a.name).size() == 1)
+                - message: settingsFlow item priorities must be unique
+                  rule: self.all(a, self.filter(b, b.priority == a.priority).size()
+                    == 1)
               variables:
                 description: Variables is a list of variables that can be used in
                   the settings for templating.
@@ -638,6 +647,8 @@ spec:
                     description: SettingsFlow contains the settings sequence to apply
                       in the given order.
                     items:
+                      description: SettingsFlowItem defines one priority step in a
+                        settings application sequence.
                       properties:
                         name:
                           description: Name is the name of the flow item.
@@ -662,7 +673,15 @@ spec:
                       - name
                       - priority
                       type: object
+                    maxItems: 64
                     type: array
+                    x-kubernetes-validations:
+                    - message: settingsFlow item names must be unique
+                      rule: self.all(a, self.filter(b, b.name == a.name).size() ==
+                        1)
+                    - message: settingsFlow item priorities must be unique
+                      rule: self.all(a, self.filter(b, b.priority == a.priority).size()
+                        == 1)
                   variables:
                     description: Variables is a list of variables that can be used
                       in the settings for templating.
@@ -1628,6 +1647,8 @@ spec:
                 description: SettingsFlow contains the settings sequence to apply
                   in the given order.
                 items:
+                  description: SettingsFlowItem defines one priority step in a settings
+                    application sequence.
                   properties:
                     name:
                       description: Name is the name of the flow item.
@@ -1652,7 +1673,14 @@ spec:
                   - name
                   - priority
                   type: object
+                maxItems: 64
                 type: array
+                x-kubernetes-validations:
+                - message: settingsFlow item names must be unique
+                  rule: self.all(a, self.filter(b, b.name == a.name).size() == 1)
+                - message: settingsFlow item priorities must be unique
+                  rule: self.all(a, self.filter(b, b.priority == a.priority).size()
+                    == 1)
               variables:
                 description: Variables is a list of variables that can be used in
                   the settings for templating.
@@ -1906,6 +1934,94 @@ spec:
                   made after failure.
                 format: int32
                 type: integer
+              flowState:
+                description: |-
+                  FlowState tracks the per-priority-step reconciliation state for settingsFlow items.
+                  Each entry corresponds to one priority level in spec.settingsFlow.
+                items:
+                  description: BMCSettingsFlowStatus describes the per-priority-step
+                    reconciliation state.
+                  properties:
+                    conditions:
+                      description: Conditions represents the latest observations of
+                        this flow step's progress.
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                    flowState:
+                      description: State is the current reconciliation state of this
+                        flow step.
+                      type: string
+                    lastAppliedTime:
+                      description: LastAppliedTime is the timestamp when this flow
+                        step was last successfully applied.
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name identifies the flow step from the spec.
+                      type: string
+                    priority:
+                      description: Priority identifies the settings priority from
+                        the spec.
+                      format: int32
+                      type: integer
+                  required:
+                  - priority
+                  type: object
+                type: array
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
@@ -2106,6 +2222,8 @@ spec:
                     description: SettingsFlow contains the settings sequence to apply
                       in the given order.
                     items:
+                      description: SettingsFlowItem defines one priority step in a
+                        settings application sequence.
                       properties:
                         name:
                           description: Name is the name of the flow item.
@@ -2130,7 +2248,15 @@ spec:
                       - name
                       - priority
                       type: object
+                    maxItems: 64
                     type: array
+                    x-kubernetes-validations:
+                    - message: settingsFlow item names must be unique
+                      rule: self.all(a, self.filter(b, b.name == a.name).size() ==
+                        1)
+                    - message: settingsFlow item priorities must be unique
+                      rule: self.all(a, self.filter(b, b.priority == a.priority).size()
+                        == 1)
                   variables:
                     description: Variables is a list of variables that can be used
                       in the settings for templating.
