@@ -23,6 +23,8 @@ data:
     {{- end }}
     {{- if .Values.telemetry.config.testEventOverrides }}
     testEventOverrides:
-{{ .Values.telemetry.config.testEventOverrides | toYaml | indent 6 }}
+      {{- range $key := (.Values.telemetry.config.testEventOverrides | keys | sortAlpha) }}
+      - {{ get $.Values.telemetry.config.testEventOverrides $key | toYaml | trimSuffix "\n" | nindent 10 | trimPrefix "\n          " }}
+      {{- end }}
     {{- end }}
 {{- end }}
