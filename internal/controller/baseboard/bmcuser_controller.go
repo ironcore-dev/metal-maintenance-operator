@@ -1184,21 +1184,23 @@ func (r *BMCUserReconciler) disableBMCAccount(ctx context.Context, user *baseboa
 }
 
 // reconcileAccountEnabled re-enables a previously disabled BMC account when the
-// TTL has been re-armed (spec.expiresAt updated to a future time). Detected by
-// finding AccountActive=False while status.expiresAt is now in the future.
+// TTL has been re-armed or removed. Detected by finding AccountActive=False while
+// status.expiresAt is nil (TTL removed) or in the future (window extended).
 func (r *BMCUserReconciler) reconcileAccountEnabled(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcClient bmc.BMC) error {
-	if user.Status.ExpiresAt == nil {
-		return nil
-	}
 	activeCond := apimeta.FindStatusCondition(user.Status.Conditions, conditionTypeAccountActive)
 	if activeCond == nil || activeCond.Status != metav1.ConditionFalse {
 		return nil
 	}
-	if !user.Status.ExpiresAt.After(time.Now()) {
+	// Still expired — do not re-enable.
+	if user.Status.ExpiresAt != nil && !user.Status.ExpiresAt.After(time.Now()) {
 		return nil
 	}
 	log := ctrl.LoggerFrom(ctx)
-	log.Info("TTL re-armed, re-enabling BMC account", "expiresAt", user.Status.ExpiresAt.Time)
+	if user.Status.ExpiresAt != nil {
+		log.Info("TTL re-armed, re-enabling BMC account", "expiresAt", user.Status.ExpiresAt.Time)
+	} else {
+		log.Info("TTL removed, re-enabling BMC account")
+	}
 
 	if user.Status.EffectiveBMCSecretRef == nil {
 		return nil
@@ -1216,8 +1218,11 @@ func (r *BMCUserReconciler) reconcileAccountEnabled(ctx context.Context, user *b
 	}
 	log.Info("Re-enabled BMC account", "userName", user.Spec.UserName)
 
-	if err := r.setAccountActiveCondition(ctx, user, true, reasonAccountReactivated,
-		fmt.Sprintf("Account re-enabled; new TTL expires at %s", user.Status.ExpiresAt.Time)); err != nil {
+	msg := "Account re-enabled; TTL removed"
+	if user.Status.ExpiresAt != nil {
+		msg = fmt.Sprintf("Account re-enabled; new TTL expires at %s", user.Status.ExpiresAt.Time)
+	}
+	if err := r.setAccountActiveCondition(ctx, user, true, reasonAccountReactivated, msg); err != nil {
 		return err
 	}
 	return nil
