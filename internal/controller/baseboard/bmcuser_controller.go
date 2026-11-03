@@ -1111,7 +1111,34 @@ func (r *BMCUserReconciler) ensureTTLExpiry(ctx context.Context, user *baseboard
 		fmt.Sprintf("TTL elapsed at %s; account disabled and credential rotation triggered", user.Status.ExpiresAt.Time)); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	// If a rotation is still in flight, requeue so we re-disable the account
+	// once it completes (the rotation controller sets enabled=true). The owned
+	// BMCUserRotation watch also triggers a reconcile on status changes, but an
+	// explicit requeue provides a safety net for missed watch events.
+	if r.hasTTLExpiryRotationInFlight(ctx, user) {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	return ctrl.Result{}, nil
+}
+
+// hasTTLExpiryRotationInFlight returns true when any non-terminal BMCUserRotation
+// exists for this user, indicating the TTLExpiry rotation has not yet completed.
+func (r *BMCUserReconciler) hasTTLExpiryRotationInFlight(ctx context.Context, user *baseboardv1alpha1.BMCUser) bool {
+	rotationList := &baseboardv1alpha1.BMCUserRotationList{}
+	if err := r.List(ctx, rotationList); err != nil {
+		return false
+	}
+	for _, rot := range rotationList.Items {
+		if rot.Spec.BMCUserRef.Name != user.Name {
+			continue
+		}
+		if rot.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseSucceeded &&
+			rot.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureTTLExpiryRotation creates a BMCUserRotation with TriggerReason=TTLExpiry
