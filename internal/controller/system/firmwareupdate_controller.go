@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
@@ -24,6 +25,7 @@ import (
 	"github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,6 +41,10 @@ const (
 
 	ConditionUnsupportedVendor = "UnsupportedVendor"
 	ReasonUnsupportedVendor    = "UnsupportedVendor"
+
+	ReasonFirmwareUpdateCompletionConditionApplied     = "FirmwareUpdateApplied"
+	ReasonFirmwareUpdateCompletionConditionInitialized = "FirmwareUpdateNotYetApplied"
+	ReasonFirmwareUpdateCompletionConditionInProgress  = "FirmwareUpdateInProgress"
 )
 
 // vendorHandler is implemented by each vendor-specific handler and drives the
@@ -160,6 +166,7 @@ func (r *FirmwareUpdateReconciler) repositoryCheckInterval() time.Duration {
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update
+// +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=maintenance.metal.ironcore.dev,resources=servermaintenances/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -215,12 +222,30 @@ func (r *FirmwareUpdateReconciler) delete(ctx context.Context, fw *systemv1alpha
 		return ctrl.Result{}, nil
 	}
 
+	if err := r.cleanupCompletionCondition(ctx, fw); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	log.V(1).Info("Ensuring that the finalizer is removed")
 	if modified, err := clientutils.PatchEnsureNoFinalizer(ctx, r.Client, fw, FirmwareUpdateFinalizer); err != nil || modified {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// cleanupCompletionCondition removes Spec.CompletionConditionType, if set, from the related
+// Server so a future FirmwareUpdate reusing the same condition type doesn't skip initialization
+// because of a stale condition left behind by this deleted object.
+func (r *FirmwareUpdateReconciler) cleanupCompletionCondition(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate) error {
+	if fw.Spec.CompletionConditionType == "" || fw.Spec.ServerRef == nil {
+		return nil
+	}
+	server, err := utils.GetServerByName(ctx, r.Client, fw.Spec.ServerRef.Name)
+	if err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return utils.RemoveServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType)
 }
 
 func (r *FirmwareUpdateReconciler) cleanupServerMaintenanceReferences(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate) error {
@@ -328,8 +353,33 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 			log.V(1).Info("Removed retry annotation from FirmwareUpdate for retrying", "FirmwareUpdate", fw.Annotations)
 			return false, nil
 		}
+		if err := r.ensureCompletionConditionInitialized(ctx, server, fw); err != nil {
+			return true, err
+		}
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			return r.patchFirmwareUpdateReadinessGatesNotSatisfied(ctx, fw, systemv1alpha1.FirmwareUpdateStatePending, reasons)
+		}
+		// Gates are satisfied: ensure the condition reflects that (it may be stale False from a
+		// previous reconcile). Skip entirely when no gates are configured, so resources without
+		// ReadinessGates never gain this condition.
+		if err := r.markFirmwareUpdateReadinessGatesSatisfied(ctx, fw, systemv1alpha1.FirmwareUpdateStatePending); err != nil {
+			return true, err
+		}
 		return h.handlePending(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateCompleted:
+		// Re-check readiness gates on every resync while Completed: a sibling object sharing the
+		// same ServerRef may depend on THIS object's completion condition to unblock, and
+		// conversely this object's gates may reference a sibling that is still mid-rollout. If
+		// gates are no longer satisfied, stay Completed without touching the BMC/hardware or
+		// releasing the ServerMaintenance claim, so we never redrive/fight an active sibling.
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates no longer satisfied, staying Completed", "Reasons", reasons)
+			return r.patchFirmwareUpdateReadinessGatesNotSatisfied(ctx, fw, systemv1alpha1.FirmwareUpdateStateCompleted, reasons)
+		}
+		if err := r.markFirmwareUpdateReadinessGatesSatisfied(ctx, fw, systemv1alpha1.FirmwareUpdateStateCompleted); err != nil {
+			return true, err
+		}
 		return h.handleCompleted(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateInProgress:
 		// handleInProgress runs first so that any recovery action it takes
@@ -366,7 +416,85 @@ func (r *FirmwareUpdateReconciler) failUnsupportedVendor(ctx context.Context, fw
 	); err != nil {
 		return fmt.Errorf("failed to update UnsupportedVendor condition: %w", err)
 	}
-	return r.updateStatus(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition)
+	return r.updateStatus(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, updateStatusOptions{})
+}
+
+// ensureCompletionConditionInitialized makes sure Spec.CompletionConditionType, if set, is
+// present on server with an explicit status (False)
+func (r *FirmwareUpdateReconciler) ensureCompletionConditionInitialized(ctx context.Context, server *metalv1alpha1.Server, fw *systemv1alpha1.FirmwareUpdate) error {
+	if fw.Spec.CompletionConditionType == "" {
+		return nil
+	}
+	if apimeta.FindStatusCondition(server.Status.Conditions, fw.Spec.CompletionConditionType) != nil {
+		return nil
+	}
+	return utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionFalse, ReasonFirmwareUpdateCompletionConditionInitialized, fmt.Sprintf("FirmwareUpdate %s has not yet been applied", fw.Name))
+}
+
+// ensureCompletionConditionInProgress patches Spec.CompletionConditionType, if set, to
+// Status=Unknown with ReasonFirmwareUpdateCompletionConditionInProgress, once maintenance has been
+// granted and the real update work is about to start. It is a no-op if the condition is already
+// recording this phase, so it isn't re-patched every reconcile.
+func (r *FirmwareUpdateReconciler) ensureCompletionConditionInProgress(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) error {
+	if fw.Spec.CompletionConditionType == "" {
+		return nil
+	}
+	existing := apimeta.FindStatusCondition(server.Status.Conditions, fw.Spec.CompletionConditionType)
+	if existing != nil && existing.Reason == ReasonFirmwareUpdateCompletionConditionInProgress {
+		return nil
+	}
+	return utils.PatchServerCondition(ctx, r.Client, server, fw.Spec.CompletionConditionType, metav1.ConditionUnknown, ReasonFirmwareUpdateCompletionConditionInProgress, fmt.Sprintf("FirmwareUpdate %s update in progress", fw.Name))
+}
+
+// markFirmwareUpdateReadinessGatesSatisfied patches ConditionReadinessGatesSatisfied to True if it
+// isn't already, so a previously-recorded failure does not remain stale once gates pass. It is a
+// no-op when no ReadinessGates are configured, so ungated resources never gain this condition.
+func (r *FirmwareUpdateReconciler) markFirmwareUpdateReadinessGatesSatisfied(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, state systemv1alpha1.FirmwareUpdateState) error {
+	if len(fw.Spec.ReadinessGates) == 0 {
+		return nil
+	}
+	condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if condition.Status == metav1.ConditionTrue {
+		return nil
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(ReasonReadinessGatesSatisfied),
+		conditionutils.UpdateMessage("Readiness gates satisfied"),
+	); err != nil {
+		return fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	return r.updateStatus(ctx, fw, state, condition, updateStatusOptions{
+		PreserveObservedGeneration: state == systemv1alpha1.FirmwareUpdateStateCompleted,
+	})
+}
+
+// patchFirmwareUpdateReadinessGatesNotSatisfied patches ConditionReadinessGatesSatisfied to False
+// with the given reasons and requeues after ResyncInterval. Shared by the Pending-entry check and
+// the Completed re-check, which both stop forward progress identically when gates regress.
+func (r *FirmwareUpdateReconciler) patchFirmwareUpdateReadinessGatesNotSatisfied(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, state systemv1alpha1.FirmwareUpdateState, reasons []string) (bool, error) {
+	condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return true, fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionFalse),
+		conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+		conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+	); err != nil {
+		return true, fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	if err := r.updateStatus(ctx, fw, state, condition, updateStatusOptions{
+		PreserveObservedGeneration: state == systemv1alpha1.FirmwareUpdateStateCompleted,
+	}); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
@@ -386,6 +514,25 @@ func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, 
 	}
 	if !active {
 		log.V(1).Info("Server is not in maintenance, waiting", "Server", server.Name)
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates no longer satisfied while waiting for maintenance approval, reverting to Pending", "Reasons", reasons)
+			if err := r.cleanupServerMaintenanceReferences(ctx, fw); err != nil {
+				return false, err
+			}
+			gatesCondition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				gatesCondition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, fw, systemv1alpha1.FirmwareUpdateStatePending, gatesCondition, updateStatusOptions{})
+		}
 		if condition.Status != metav1.ConditionTrue {
 			if err := r.Conditions.Update(
 				condition,
@@ -395,7 +542,7 @@ func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, 
 			); err != nil {
 				return false, fmt.Errorf("failed to update creating ServerMaintenance condition: %w", err)
 			}
-			if err := r.updateStatus(ctx, fw, fw.Status.State, condition); err != nil {
+			if err := r.updateStatus(ctx, fw, fw.Status.State, condition, updateStatusOptions{}); err != nil {
 				return false, fmt.Errorf("failed to patch FirmwareUpdate ServerMaintenance waiting conditions: %w", err)
 			}
 		}
@@ -411,10 +558,14 @@ func (r *FirmwareUpdateReconciler) handleServerMaintenance(ctx context.Context, 
 		); err != nil {
 			return false, fmt.Errorf("failed to update creating ServerMaintenance condition: %w", err)
 		}
-		if err := r.updateStatus(ctx, fw, fw.Status.State, condition); err != nil {
+		if err := r.updateStatus(ctx, fw, fw.Status.State, condition, updateStatusOptions{}); err != nil {
 			return false, fmt.Errorf("failed to patch FirmwareUpdate ServerMaintenance waiting conditions: %w", err)
 		}
 		return false, nil
+	}
+
+	if err := r.ensureCompletionConditionInProgress(ctx, fw, server); err != nil {
+		return false, err
 	}
 
 	if ok, err := r.handleBMCReset(ctx, bmcClient, fw, server, constants.ConditionResetIssued); !ok || err != nil {
@@ -452,7 +603,7 @@ func (r *FirmwareUpdateReconciler) handleBMCReset(
 			return utils.IsBMCResetAnnotationPending(ctx, r.Client, server)
 		},
 		Persist: func(ctx context.Context) error {
-			return r.updateStatus(ctx, fw, fw.Status.State, resetBMC)
+			return r.updateStatus(ctx, fw, fw.Status.State, resetBMC, updateStatusOptions{})
 		},
 	})
 }
@@ -482,7 +633,7 @@ func (r *FirmwareUpdateReconciler) checkProgressDeadline(ctx context.Context, fw
 	); err != nil {
 		return false, fmt.Errorf("failed to update ProgressDeadlineExceeded condition: %w", err)
 	}
-	return true, r.updateStatus(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition)
+	return true, r.updateStatus(ctx, fw, systemv1alpha1.FirmwareUpdateStateFailed, condition, updateStatusOptions{})
 }
 
 // handleTTL deletes a completed FirmwareUpdate if TTLSecondsAfterFinished has elapsed.
@@ -614,14 +765,45 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 // BMC and reboots (or powers on) the server before a Failed FirmwareUpdate is retried
 func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, bmcClient bmc.BMC, fw *systemv1alpha1.FirmwareUpdate, server *metalv1alpha1.Server) (bool, error) {
 	log := ctrl.LoggerFrom(ctx)
+	maintenanceActive := false
+	if fw.Status.ServerMaintenanceRef != nil {
+		active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*fw.Status.ServerMaintenanceRef})
+		if err != nil {
+			return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
+		}
+		maintenanceActive = active
+	}
+	if !maintenanceActive {
+		// Only gate while maintenance hasn't been granted yet (i.e. before/while
+		// requesting it). Once ServerMaintenance is active, this resource already
+		// holds exclusive access to the Server, so a sibling resource sharing it is
+		// blocked behind that very ServerMaintenance - continuing to gate here could
+		// deadlock against that sibling (it waits for us to release ServerMaintenance,
+		// we'd wait for its condition).
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionReadinessGatesSatisfied)
+			if err != nil {
+				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
+			}
+			if err := r.Conditions.Update(
+				condition,
+				conditionutils.UpdateStatus(corev1.ConditionFalse),
+				conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+				conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+			); err != nil {
+				return false, fmt.Errorf("failed to update readiness gates condition: %w", err)
+			}
+			return false, r.updateStatus(ctx, fw, fw.Status.State, condition, updateStatusOptions{})
+		}
+		if err := r.markFirmwareUpdateReadinessGatesSatisfied(ctx, fw, fw.Status.State); err != nil {
+			return false, err
+		}
+	}
 	if req, err := r.requestServerMaintenance(ctx, fw, server); err != nil || req {
 		return false, err
 	}
-	active, err := utils.IsAnyServerMaintenanceActive(ctx, r.Client, []metalv1alpha1.ObjectReference{*fw.Status.ServerMaintenanceRef})
-	if err != nil {
-		return false, fmt.Errorf("failed to check maintenance state before retry: %w", err)
-	}
-	if !active {
+	if !maintenanceActive {
 		log.V(1).Info("Waiting for ServerMaintenance before resetting BMC/server for retry", "Server", server.Name)
 		return false, nil
 	}
@@ -637,7 +819,7 @@ func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, b
 		BMCClient:        bmcClient,
 		Server:           server,
 		Persist: func(ctx context.Context, condition *metav1.Condition) error {
-			return r.updateStatus(ctx, fw, fw.Status.State, condition)
+			return r.updateStatus(ctx, fw, fw.Status.State, condition, updateStatusOptions{})
 		},
 		PowerOffTimeout: r.ServerPowerOffTimeout,
 		GiveUpTimeout:   r.ServerResetGiveUpTimeout,
@@ -679,22 +861,70 @@ func (r *FirmwareUpdateReconciler) getServerMaintenanceForRef(ctx context.Contex
 	return serverMaintenance, nil
 }
 
-// updateStatus patches the top-level State and, if condition is non-nil,
-// merges it into the conditions slice. If condition is nil, this represents a
-// transition to a new top-level phase (Pending->InProgress, ->Completed): all
-// conditions and per-pass job-tracking fields from the previous phase are
-// wiped since they no longer apply.
+// updateStatusOptions customizes updateStatus's default per-call behavior. The zero value
+// (updateStatusOptions{}) is the common case: bump ObservedGeneration to the current generation,
+// and merge condition (if non-nil) into the existing conditions slice.
+type updateStatusOptions struct {
+	// PreserveObservedGeneration, when true, leaves Status.ObservedGeneration untouched instead of
+	// bumping it to the current generation. Only the Completed-state readiness-gate writes
+	// (markFirmwareUpdateReadinessGatesSatisfied and patchFirmwareUpdateReadinessGatesNotSatisfied)
+	// set this: those calls may run on every resync while gates stay unsatisfied, without
+	// handleCompleted/processRepositoryCheck ever running, so bumping ObservedGeneration there
+	// would erase the "spec changed since last check" signal those read
+	// (fw.Status.ObservedGeneration != fw.Generation) to bypass the RepositoryCheckInterval
+	// deferral, before they ever get a chance to observe it.
+	PreserveObservedGeneration bool
+	// ClearStatus, when true, represents a transition to a new top-level phase (Pending->InProgress,
+	// ->Completed): Status.Conditions and the per-pass job-tracking fields (DellStatus,
+	// LastProgressTime, PassCount) are wiped since they no longer apply, and condition is ignored.
+	// When false (the default), condition (if non-nil) is merged into the existing conditions slice
+	// instead.
+	ClearStatus bool
+}
+
+// patchStatus snapshots fw before mutate runs, then issues a single status patch against that
+// snapshot. It owns the DeepCopy+Status().Patch boilerplate and error wrapping shared by every
+// status-writing call site (updateStatus, patchProgress, and the handful of callers with their
+// own bespoke field-reset rules that don't fit either of those), so each of them only needs to
+// describe what fields to change, not how to patch.
+func (r *FirmwareUpdateReconciler) patchStatus(ctx context.Context, fw *systemv1alpha1.FirmwareUpdate, mutate func() error) error {
+	fwBase := fw.DeepCopy()
+	if err := mutate(); err != nil {
+		return err
+	}
+	if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
+		return fmt.Errorf("failed to patch FirmwareUpdate status: %w", err)
+	}
+	return nil
+}
+
+// updateStatus patches the top-level State and, depending on opts, either merges condition into
+// the conditions slice or wipes all conditions/job-tracking fields for a new top-level phase. See
+// updateStatusOptions for details.
 func (r *FirmwareUpdateReconciler) updateStatus(
 	ctx context.Context,
 	fw *systemv1alpha1.FirmwareUpdate,
 	state systemv1alpha1.FirmwareUpdateState,
 	condition *metav1.Condition,
+	opts updateStatusOptions,
 ) error {
-	fwBase := fw.DeepCopy()
-	fw.Status.State = state
-	fw.Status.ObservedGeneration = fw.Generation
+	return r.patchStatus(ctx, fw, func() error {
+		fw.Status.State = state
+		if !opts.PreserveObservedGeneration {
+			fw.Status.ObservedGeneration = fw.Generation
+		}
 
-	if condition != nil {
+		if opts.ClearStatus {
+			fw.Status.Conditions = []metav1.Condition{}
+			fw.Status.DellStatus = nil
+			fw.Status.LastProgressTime = nil
+			fw.Status.PassCount = 0
+			return nil
+		}
+
+		if condition == nil {
+			return nil
+		}
 		if err := r.Conditions.UpdateSlice(
 			&fw.Status.Conditions,
 			condition.Type,
@@ -704,18 +934,8 @@ func (r *FirmwareUpdateReconciler) updateStatus(
 		); err != nil {
 			return fmt.Errorf("failed to patch FirmwareUpdate condition: %w", err)
 		}
-	} else {
-		fw.Status.Conditions = []metav1.Condition{}
-		fw.Status.DellStatus = nil
-		fw.Status.LastProgressTime = nil
-		fw.Status.PassCount = 0
-	}
-
-	if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
-		return fmt.Errorf("failed to patch FirmwareUpdate status: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // patchProgress patches the top-level State, optionally merges condition (and
@@ -735,60 +955,56 @@ func (r *FirmwareUpdateReconciler) patchProgress(
 	mutate func(*systemv1alpha1.FirmwareUpdateStatus),
 	extraConditions ...*metav1.Condition,
 ) error {
-	fwBase := fw.DeepCopy()
-	prevState := fw.Status.State
-	prevJobTracking := jobTrackingFields(&fw.Status)
+	return r.patchStatus(ctx, fw, func() error {
+		prevState := fw.Status.State
+		prevJobTracking := jobTrackingFields(&fw.Status)
 
-	fw.Status.State = state
-	fw.Status.ObservedGeneration = fw.Generation
+		fw.Status.State = state
+		fw.Status.ObservedGeneration = fw.Generation
 
-	progressed := condition != nil || state != prevState
+		progressed := condition != nil || state != prevState
 
-	if condition != nil {
-		if err := r.Conditions.UpdateSlice(
-			&fw.Status.Conditions,
-			condition.Type,
-			conditionutils.UpdateStatus(condition.Status),
-			conditionutils.UpdateReason(condition.Reason),
-			conditionutils.UpdateMessage(condition.Message),
-		); err != nil {
-			return fmt.Errorf("failed to patch FirmwareUpdate condition: %w", err)
+		if condition != nil {
+			if err := r.Conditions.UpdateSlice(
+				&fw.Status.Conditions,
+				condition.Type,
+				conditionutils.UpdateStatus(condition.Status),
+				conditionutils.UpdateReason(condition.Reason),
+				conditionutils.UpdateMessage(condition.Message),
+			); err != nil {
+				return fmt.Errorf("failed to patch FirmwareUpdate condition: %w", err)
+			}
 		}
-	}
 
-	for _, extra := range extraConditions {
-		if extra == nil {
-			continue
+		for _, extra := range extraConditions {
+			if extra == nil {
+				continue
+			}
+			if err := r.Conditions.UpdateSlice(
+				&fw.Status.Conditions,
+				extra.Type,
+				conditionutils.UpdateStatus(extra.Status),
+				conditionutils.UpdateReason(extra.Reason),
+				conditionutils.UpdateMessage(extra.Message),
+			); err != nil {
+				return fmt.Errorf("failed to patch FirmwareUpdate condition: %w", err)
+			}
 		}
-		if err := r.Conditions.UpdateSlice(
-			&fw.Status.Conditions,
-			extra.Type,
-			conditionutils.UpdateStatus(extra.Status),
-			conditionutils.UpdateReason(extra.Reason),
-			conditionutils.UpdateMessage(extra.Message),
-		); err != nil {
-			return fmt.Errorf("failed to patch FirmwareUpdate condition: %w", err)
+
+		if mutate != nil {
+			mutate(&fw.Status)
 		}
-	}
 
-	if mutate != nil {
-		mutate(&fw.Status)
-	}
+		if !progressed {
+			progressed = !reflect.DeepEqual(prevJobTracking, jobTrackingFields(&fw.Status))
+		}
 
-	if !progressed {
-		progressed = !reflect.DeepEqual(prevJobTracking, jobTrackingFields(&fw.Status))
-	}
-
-	if progressed || fw.Status.LastProgressTime == nil {
-		now := metav1.Now()
-		fw.Status.LastProgressTime = &now
-	}
-
-	if err := r.Status().Patch(ctx, fw, client.MergeFrom(fwBase)); err != nil {
-		return fmt.Errorf("failed to patch FirmwareUpdate status: %w", err)
-	}
-
-	return nil
+		if progressed || fw.Status.LastProgressTime == nil {
+			now := metav1.Now()
+			fw.Status.LastProgressTime = &now
+		}
+		return nil
+	})
 }
 
 // jobTrackingFields returns a copy of status with the fields patchProgress
@@ -853,7 +1069,7 @@ func (r *FirmwareUpdateReconciler) requestServerMaintenance(ctx context.Context,
 		); err != nil {
 			return false, fmt.Errorf("failed to update creating ServerMaintenance condition: %w", err)
 		}
-		if err := r.updateStatus(ctx, fw, fw.Status.State, condition); err != nil {
+		if err := r.updateStatus(ctx, fw, fw.Status.State, condition, updateStatusOptions{}); err != nil {
 			return false, fmt.Errorf("failed to patch FirmwareUpdate conditions: %w", err)
 		}
 		return true, nil
@@ -900,7 +1116,10 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByServerRefs(ctx context
 		return nil
 	}
 
-	// don't requeue if host has no active ServerMaintenance
+	// Collect active ServerMaintenances for later gating of non-terminal FirmwareUpdates. Note:
+	// we deliberately do NOT early-return when this is empty, since a Completed FirmwareUpdate
+	// with ReadinessGates configured already released its ServerMaintenance and must still be
+	// re-evaluated purely based on the Server's conditions.
 	maintenanceList := &maintenancev1alpha1.ServerMaintenanceList{}
 	if err := r.List(ctx, maintenanceList, client.MatchingFields{constants.ServerRefField: host.Name}); err != nil {
 		log.Error(err, "Failed to list ServerMaintenances for server", "Server", host.Name)
@@ -911,9 +1130,6 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByServerRefs(ctx context
 		if sm.Status.State == maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 			activeMaintNames[sm.Name] = struct{}{}
 		}
-	}
-	if len(activeMaintNames) == 0 {
-		return nil
 	}
 
 	fwUpdateList := &systemv1alpha1.FirmwareUpdateList{}
@@ -927,9 +1143,23 @@ func (r *FirmwareUpdateReconciler) enqueueFirmwareUpdateByServerRefs(ctx context
 		if fwUpdate.Spec.ServerRef == nil || fwUpdate.Spec.ServerRef.Name != host.Name {
 			continue
 		}
+		if fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateFailed {
+			continue
+		}
+		if fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateCompleted {
+			// A Completed object's ServerMaintenance is already released (ServerMaintenanceRef is
+			// nil), so the activeMaintNames gate below never applies to it. It only needs to be
+			// re-evaluated if it has ReadinessGates that could later become unsatisfied again.
+			if len(fwUpdate.Spec.ReadinessGates) == 0 {
+				continue
+			}
+			reqs = append(reqs, ctrl.Request{
+				NamespacedName: types.NamespacedName{Namespace: fwUpdate.Namespace, Name: fwUpdate.Name},
+			})
+			continue
+		}
 		// states where we do not need to requeue for host changes
-		if fwUpdate.Status.ServerMaintenanceRef == nil ||
-			fwUpdate.Status.State == systemv1alpha1.FirmwareUpdateStateCompleted {
+		if len(activeMaintNames) == 0 || fwUpdate.Status.ServerMaintenanceRef == nil {
 			continue
 		}
 		if _, ok := activeMaintNames[fwUpdate.Status.ServerMaintenanceRef.Name]; !ok {

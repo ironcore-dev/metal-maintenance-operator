@@ -42,6 +42,9 @@ type FirmwareUpdateTemplate struct {
 	// +optional
 	RetryPolicy *api.RetryPolicy `json:"retryPolicy,omitempty"`
 
+	// ReadinessGating defines the readiness gates and completion condition propagated to the Server.
+	api.ReadinessGating `json:",inline"`
+
 	// ProgressDeadlineSeconds is the maximum time in seconds to wait without observable forward
 	// progress before the update is marked Failed. Defaults to 3600 (1 hour).
 	// +kubebuilder:default=3600
