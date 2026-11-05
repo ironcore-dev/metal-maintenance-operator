@@ -9,38 +9,49 @@ import (
 	"github.com/blang/semver/v4"
 )
 
-// SubscribeToBMC decides whether the reconciler should keep Redfish
-// event subscriptions on this BMC. It returns the matching HardwareMatch
-// row (which carries vendor-specific settings like TestMessageId), or nil
-// if no row matches and subscriptions should not be created.
-func SubscribeToBMC(ref BMCRef, cfg *Config) *HardwareMatch {
+// IsExcluded reports whether the BMC should be kept out of event-based
+// delivery based on the excludeHardware opt-out list. Returns false when the
+// vendor is not yet known (informer hasn't populated Status) so that the
+// EventService probe — not a vendor mismatch — makes the final call.
+func IsExcluded(ref BMCRef, cfg *Config) bool {
+	if cfg == nil || ref.Vendor == "" {
+		return false
+	}
+	for _, ex := range cfg.ExcludeHardware {
+		if !vendorMatches(ex.Vendor, ref.Vendor) {
+			continue
+		}
+		if !modelsMatch(ex.Models, ref.Model) {
+			continue
+		}
+		if !excludeFirmwareSatisfies(ex.MinFirmware, ref.FirmwareVersion) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// TestOverrideFor returns the first TestOverride row that matches the BMC,
+// or nil when no row matches (caller should auto-discover a MessageId).
+func TestOverrideFor(ref BMCRef, cfg *Config) *TestOverride {
 	if cfg == nil {
 		return nil
 	}
-	// An unknown vendor (informer hasn't populated Status yet, or BMC
-	// never reported one) does not qualify — we have no signal that
-	// this BMC supports subscriptions.
-	if ref.Vendor == "" {
-		return nil
-	}
-	for i := range cfg.EventBasedHardware {
-		hw := &cfg.EventBasedHardware[i]
-		if !vendorMatches(hw.Vendor, ref.Vendor) {
+	for i := range cfg.TestEventOverrides {
+		ov := &cfg.TestEventOverrides[i]
+		if !vendorMatches(ov.Vendor, ref.Vendor) {
 			continue
 		}
-		if !modelsMatch(hw.Models, ref.Model) {
+		if !modelsMatch(ov.Models, ref.Model) {
 			continue
 		}
-		if !firmwareSatisfies(hw.MinFirmware, ref.FirmwareVersion) {
-			continue
-		}
-		return hw
+		return ov
 	}
 	return nil
 }
 
-// vendorMatches compares the configured vendor against the BMC's
-// reported manufacturer.
+// vendorMatches compares the configured vendor against the BMC's reported manufacturer.
 func vendorMatches(configured, reported string) bool {
 	if configured == "" || reported == "" {
 		return false
@@ -49,12 +60,9 @@ func vendorMatches(configured, reported string) bool {
 }
 
 // modelsMatch returns true if model is in the configured list, or if
-// the list contains "*". Comparison is case-insensitive — vendor
-// product naming has the same casing chaos as vendor strings.
+// the list contains "*". Comparison is case-insensitive.
 func modelsMatch(models []string, reported string) bool {
 	if len(models) == 0 {
-		// Defensive: schema validation rejects empty lists, but under-
-		// specified rows should never match.
 		return false
 	}
 	reported = strings.TrimSpace(reported)
@@ -69,24 +77,25 @@ func modelsMatch(models []string, reported string) bool {
 	return false
 }
 
-// firmwareSatisfies returns true when minFirmware is empty, or when
-// reported parses as a semver >= minFirmware.
-func firmwareSatisfies(minFirmware, reported string) bool {
+// excludeFirmwareSatisfies returns true when minFirmware is empty (no floor),
+// or when the reported firmware is BELOW the floor — meaning the exclude rule
+// applies to old firmware only ("exclude this model if firmware < X").
+// An empty reported version with a non-empty floor is treated as "unknown,
+// apply the exclusion conservatively".
+func excludeFirmwareSatisfies(minFirmware, reported string) bool {
 	if minFirmware == "" {
 		return true
 	}
-	if reported == "" {
-		return false
-	}
 	min, err := semver.ParseTolerant(minFirmware)
 	if err != nil {
-		// Config validation rejects invalid semver, but treat it as
-		// "never matches" if one reaches us anyway.
-		return false
+		return true
+	}
+	if reported == "" {
+		return true
 	}
 	got, err := semver.ParseTolerant(reported)
 	if err != nil {
-		return false
+		return true
 	}
-	return got.GTE(min)
+	return got.LT(min)
 }

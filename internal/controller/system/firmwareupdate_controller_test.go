@@ -11,9 +11,7 @@ import (
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
-	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
-	fwconfig "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
@@ -261,22 +259,18 @@ var _ = Describe("handleStuckScheduledJob", func() {
 	const powerOnTimeout = time.Minute
 
 	var (
-		dh                         *dellHandler
-		r                          *FirmwareUpdateReconciler
-		server                     *metalv1alpha1.Server
-		fw                         *systemv1alpha1.FirmwareUpdate
-		fakeBMCImpl                *fakeStuckJobBMC
-		firmwareUpdateConfigLoader *configloader.Loader[fwconfig.FirmwareUpdateConfig]
+		dh          *dellHandler
+		r           *FirmwareUpdateReconciler
+		server      *metalv1alpha1.Server
+		fw          *systemv1alpha1.FirmwareUpdate
+		fakeBMCImpl *fakeStuckJobBMC
 	)
 
 	BeforeEach(func() {
 		dh = &dellHandler{}
-		firmwareUpdateConfigLoader = &configloader.Loader[fwconfig.FirmwareUpdateConfig]{}
-		timeout := powerOnTimeout
-		firmwareUpdateConfigLoader.Set(&fwconfig.FirmwareUpdateConfig{ScheduledJobPowerOnTimeout: &timeout})
 		r = &FirmwareUpdateReconciler{
-			Conditions:   conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
-			ConfigLoader: firmwareUpdateConfigLoader,
+			Conditions:                 conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
+			ScheduledJobPowerOnTimeout: powerOnTimeout,
 		}
 		server = &metalv1alpha1.Server{
 			Spec: metalv1alpha1.ServerSpec{SystemURI: "/redfish/v1/Systems/1"},
@@ -298,8 +292,7 @@ var _ = Describe("handleStuckScheduledJob", func() {
 	}
 
 	It("does nothing when ScheduledJobPowerOnTimeout is disabled", func() {
-		disabled := time.Duration(0)
-		firmwareUpdateConfigLoader.Set(&fwconfig.FirmwareUpdateConfig{ScheduledJobPowerOnTimeout: &disabled})
+		r.ScheduledJobPowerOnTimeout = 0
 		stuckSince := metav1.NewTime(time.Now().Add(-2 * powerOnTimeout))
 		fw.Status.LastProgressTime = &stuckSince
 
@@ -406,15 +399,9 @@ var _ = Describe("checkProgressDeadline", func() {
 	)
 
 	BeforeEach(func(ctx SpecContext) {
-		disabledScheduledJobPowerOnTimeout := time.Duration(0)
-		firmwareUpdateConfigLoader := &configloader.Loader[fwconfig.FirmwareUpdateConfig]{}
-		firmwareUpdateConfigLoader.Set(&fwconfig.FirmwareUpdateConfig{
-			ScheduledJobPowerOnTimeout: &disabledScheduledJobPowerOnTimeout,
-		})
 		r = &FirmwareUpdateReconciler{
-			Client:       k8sClient,
-			Conditions:   conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
-			ConfigLoader: firmwareUpdateConfigLoader,
+			Client:     k8sClient,
+			Conditions: conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
 		}
 
 		ns = &v1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"}}

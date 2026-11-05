@@ -63,7 +63,7 @@ func readyBMC(name string, opts ...func(*metalv1alpha1.BMC)) *metalv1alpha1.BMC 
 
 func TestRender_HappyPath(t *testing.T) {
 	b := readyBMC("bmc-1")
-	got := discovery.Render([]metalv1alpha1.BMC{*b})
+	got := discovery.Render([]metalv1alpha1.BMC{*b}, nil, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("targets: got %d, want 1: %+v", len(got), got)
@@ -92,7 +92,7 @@ func TestRender_DropsBMCsWithoutIP(t *testing.T) {
 	noIP := readyBMC("no-ip", func(b *metalv1alpha1.BMC) {
 		b.Status.IP = metalv1alpha1.IP{}
 	})
-	got := discovery.Render([]metalv1alpha1.BMC{*noIP})
+	got := discovery.Render([]metalv1alpha1.BMC{*noIP}, nil, nil)
 	if len(got) != 0 {
 		t.Errorf("BMC without IP should be omitted; got %+v", got)
 	}
@@ -104,7 +104,7 @@ func TestRender_DropsDeletionPendingBMCs(t *testing.T) {
 		b.DeletionTimestamp = &now
 		b.Finalizers = []string{"a-finalizer-keeping-it-alive"} // required by fake client
 	})
-	got := discovery.Render([]metalv1alpha1.BMC{*deleting})
+	got := discovery.Render([]metalv1alpha1.BMC{*deleting}, nil, nil)
 	if len(got) != 0 {
 		t.Errorf("deletion-pending BMC should be omitted; got %+v", got)
 	}
@@ -114,7 +114,7 @@ func TestRender_OmitsPortWhenZero(t *testing.T) {
 	b := readyBMC("noport", func(b *metalv1alpha1.BMC) {
 		b.Spec.Protocol.Port = 0
 	})
-	got := discovery.Render([]metalv1alpha1.BMC{*b})
+	got := discovery.Render([]metalv1alpha1.BMC{*b}, nil, nil)
 	if len(got) != 1 || got[0].Targets[0] != "10.0.0.1" {
 		t.Errorf("zero-port should yield bare host; got %v", got[0].Targets)
 	}
@@ -124,7 +124,7 @@ func TestRender_DefaultsSchemeToHTTPS(t *testing.T) {
 	b := readyBMC("noscheme", func(b *metalv1alpha1.BMC) {
 		b.Spec.Protocol.Scheme = ""
 	})
-	got := discovery.Render([]metalv1alpha1.BMC{*b})
+	got := discovery.Render([]metalv1alpha1.BMC{*b}, nil, nil)
 	if got[0].Labels["__meta_bmc_protocol"] != "https" {
 		t.Errorf("default protocol: got %q, want https", got[0].Labels["__meta_bmc_protocol"])
 	}
@@ -141,7 +141,7 @@ func TestRender_OmitsEmptyOptionalLabels(t *testing.T) {
 			IP: metalv1alpha1.MustParseIP("10.0.0.2"),
 		},
 	}
-	got := discovery.Render([]metalv1alpha1.BMC{*b})
+	got := discovery.Render([]metalv1alpha1.BMC{*b}, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 target: %+v", got)
 	}
@@ -161,6 +161,51 @@ func TestRender_OmitsEmptyOptionalLabels(t *testing.T) {
 }
 
 // -- HTTP handler tests --
+
+func TestRender_OmitsSubscribedBMCs(t *testing.T) {
+	b1 := readyBMC("bmc-1")
+	b2 := readyBMC("bmc-2")
+	subscribed := map[string]struct{}{"bmc-1": {}}
+	got := discovery.Render([]metalv1alpha1.BMC{*b1, *b2}, subscribed, nil)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 target (bmc-2 only); got %d: %+v", len(got), got)
+	}
+	if got[0].Labels["__meta_bmc_name"] != "bmc-2" {
+		t.Errorf("expected bmc-2; got %q", got[0].Labels["__meta_bmc_name"])
+	}
+}
+
+func TestRender_IncludesAllWhenNoSubscribed(t *testing.T) {
+	b1 := readyBMC("bmc-1")
+	b2 := readyBMC("bmc-2")
+	got := discovery.Render([]metalv1alpha1.BMC{*b1, *b2}, nil, nil)
+	if len(got) != 2 {
+		t.Errorf("expected 2 targets; got %d", len(got))
+	}
+}
+
+func TestServeHTTP_OmitsSubscribedWhenFuncSet(t *testing.T) {
+	b1 := readyBMC("bmc-1")
+	b2 := readyBMC("bmc-2")
+	c := newClient(t, b1, b2)
+	h := &discovery.Handler{
+		Client: c,
+		SubscribedBMCs: func() map[string]struct{} {
+			return map[string]struct{}{"bmc-1": {}}
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, discovery.Path, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	var got []discovery.Target
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 || got[0].Labels["__meta_bmc_name"] != "bmc-2" {
+		t.Errorf("expected only bmc-2; got %+v", got)
+	}
+}
 
 func TestServeHTTP_GETReturnsSDJSON(t *testing.T) {
 	c := newClient(t, readyBMC("bmc-1"), readyBMC("bmc-2"))
@@ -234,6 +279,68 @@ func TestServeHTTP_EmptyInventoryReturnsEmptyArray(t *testing.T) {
 	body := strings.TrimSpace(rec.Body.String())
 	if body != "[]" {
 		t.Errorf("empty inventory body: got %q, want %q", body, "[]")
+	}
+}
+
+func TestRender_SubscriptionReasonLabel(t *testing.T) {
+	b := readyBMC("bmc-1")
+	reasons := map[string]string{"bmc-1": "service_disabled"}
+	got := discovery.Render([]metalv1alpha1.BMC{*b}, nil, reasons)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 target; got %d", len(got))
+	}
+	if v := got[0].Labels["__meta_bmc_subscription_reason"]; v != "service_disabled" {
+		t.Errorf("__meta_bmc_subscription_reason: got %q, want %q", v, "service_disabled")
+	}
+}
+
+func TestRender_NoSubscriptionReasonWhenReasonEmpty(t *testing.T) {
+	b := readyBMC("bmc-1")
+	// Pass a reasons map that has no entry for bmc-1.
+	reasons := map[string]string{"other-bmc": "excluded"}
+	got := discovery.Render([]metalv1alpha1.BMC{*b}, nil, reasons)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 target; got %d", len(got))
+	}
+	if _, ok := got[0].Labels["__meta_bmc_subscription_reason"]; ok {
+		t.Errorf("__meta_bmc_subscription_reason should be absent when reason is empty")
+	}
+}
+
+func TestServeHTTP_ReasonLabelFromUnsubscribedFunc(t *testing.T) {
+	b1 := readyBMC("bmc-1")
+	b2 := readyBMC("bmc-2")
+	c := newClient(t, b1, b2)
+	h := &discovery.Handler{
+		Client: c,
+		UnsubscribedBMCReasons: func() map[string]string {
+			return map[string]string{
+				"bmc-1": "service_disabled",
+				"bmc-2": "excluded",
+			}
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, discovery.Path, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	var got []discovery.Target
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 targets; got %d: %+v", len(got), got)
+	}
+	reasons := map[string]string{}
+	for _, tgt := range got {
+		name := tgt.Labels["__meta_bmc_name"]
+		reasons[name] = tgt.Labels["__meta_bmc_subscription_reason"]
+	}
+	if reasons["bmc-1"] != "service_disabled" {
+		t.Errorf("bmc-1 reason: got %q, want service_disabled", reasons["bmc-1"])
+	}
+	if reasons["bmc-2"] != "excluded" {
+		t.Errorf("bmc-2 reason: got %q, want excluded", reasons["bmc-2"])
 	}
 }
 
