@@ -30,9 +30,10 @@ import (
 // Event metrics carry no topology labels; all filtering is done via the join.
 // kube_ironcore_bmc_info covers every BMC regardless of firmware management enrollment.
 func bbJoin(cfg mmo.DashboardConfig, expr string) string {
+	region := mmo.TopologyRegionLabel(cfg)
 	bb, nodename, _ := mmo.TopologyMetricLabels(cfg)
 	ksmJoin := `label_replace(kube_ironcore_bmc_info{` +
-		`region=~"$region",` +
+		region+`=~"$region",` +
 		bb + `=~"$bb",` + nodename + `=~"$node",` +
 		`manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)")`
 	return expr + ` * on(hostname) group_left() ` + ksmJoin
@@ -50,6 +51,7 @@ func main() {
 	}
 
 	bb, nodename, _ := mmo.TopologyMetricLabels(cfg)
+	region := mmo.TopologyRegionLabel(cfg)
 
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("bmc-alerts",
@@ -65,7 +67,7 @@ func main() {
 		),
 		dashboard.AddVariable("region",
 			listvariable.List(
-				labelvalues.PrometheusLabelValues("region",
+				labelvalues.PrometheusLabelValues(region,
 					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`kube_ironcore_bmc_info`),
 				),
@@ -79,7 +81,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues(bb,
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -91,7 +93,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues(nodename,
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -103,7 +105,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("manufacturer",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer!=""}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer!=""}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -115,7 +117,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer",model!=""}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer",model!=""}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -134,7 +136,7 @@ func main() {
 				panel.Description("Total BMC resources managed in the selected building block. Use this as the denominator when interpreting pipeline health and alert counts below."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -148,6 +150,7 @@ func main() {
 			panelgroup.PanelHeight(12),
 			panelgroup.AddPanel("BMC Fleet — Alert Summary",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithEnableFiltering(true),
 					table.WithColumnSettings([]table.ColumnSettings{
@@ -155,7 +158,7 @@ func main() {
 						{Name: "manufacturer", Header: "Manufacturer", EnableSorting: true, Hide: false},
 						{Name: "model", Header: "Model", EnableSorting: true, Hide: false},
 						{Name: "firmware_version", Header: "Firmware", EnableSorting: true, Hide: false},
-						{Name: "region", Header: "Region", EnableSorting: true, Hide: false},
+						{Name: region, Header: "Region", EnableSorting: true, Hide: false},
 						{Name: bb, Header: cfg.Topology.BB.DisplayName, EnableSorting: true, Hide: false},
 						{Name: "value #1", Header: "Critical Alerts — Last 1 Hour", EnableSorting: true, Sort: table.DescSort, Hide: false,
 							CellSettings: []table.CellSettings{
@@ -204,13 +207,13 @@ func main() {
 				// Critical alerts per BMC: join hostname→name, propagate bmc_info labels; 0 for BMCs with no alerts
 				panel.AddQuery(
 					mmo.PromQL(
-						`sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
+						`sum by(name, manufacturer, model, firmware_version, `+region+`, `+bb+`)(`+
 							`label_replace(round(increase(redfish_event_alert_total{severity="Critical"}[1h])), "name", "$1", "hostname", "(.*)")`+
-							` * on(name) group_left(manufacturer, model, firmware_version, region, `+bb+`)`+
-							` kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` * on(name) group_left(manufacturer, model, firmware_version, `+region+`, `+bb+`)`+
+							` kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
 							`)`+
-							` or sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
-							`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` or sum by(name, manufacturer, model, firmware_version, `+region+`, `+bb+`)(`+
+							`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
 							`) * 0`,
 						"$datasource",
 					),
@@ -218,13 +221,13 @@ func main() {
 				// Warning alerts per BMC: same pattern for severity="Warning"
 				panel.AddQuery(
 					mmo.PromQL(
-						`sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
+						`sum by(name, manufacturer, model, firmware_version, `+region+`, `+bb+`)(`+
 							`label_replace(round(increase(redfish_event_alert_total{severity="Warning"}[1h])), "name", "$1", "hostname", "(.*)")`+
-							` * on(name) group_left(manufacturer, model, firmware_version, region, `+bb+`)`+
-							` kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` * on(name) group_left(manufacturer, model, firmware_version, `+region+`, `+bb+`)`+
+							` kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
 							`)`+
-							` or sum by(name, manufacturer, model, firmware_version, region, `+bb+`)(`+
-							`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` or sum by(name, manufacturer, model, firmware_version, `+region+`, `+bb+`)(`+
+							`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
 							`) * 0`,
 						"$datasource",
 					),
@@ -255,7 +258,7 @@ func main() {
 				panel.AddQuery(
 					mmo.PromQL(
 						`count(`+
-							`label_replace(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)") `+
+							`label_replace(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",`+nodename+`=~"$node",manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)") `+
 							`unless on(hostname) `+
 							`(redfish_event_pipeline_test_timestamp{result="success"} > (time() - 900))`+
 							`) or vector(0)`,
@@ -318,6 +321,7 @@ func main() {
 			panelgroup.PanelHeight(10),
 			panelgroup.AddPanel("Pipeline Health Age by Host",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithEnableFiltering(true),
 				),
 				panel.Description("Current pipeline age per host. Sort by value descending to surface the most degraded hosts immediately. A growing age beyond the configured test interval means health-check events are not being delivered for that host. Use the Node filter above to drill into specific hosts."),
@@ -423,6 +427,7 @@ func main() {
 			panelgroup.PanelHeight(10),
 			panelgroup.AddPanel("Alert Count by Host / Component / Message (last 24 h)",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithEnableFiltering(true),
 					table.WithColumnSettings([]table.ColumnSettings{
