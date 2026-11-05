@@ -9,7 +9,9 @@ import (
 	_ "embed"
 	"fmt"
 	"text/template"
+	"time"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/token"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
@@ -26,18 +28,34 @@ func init() {
 }
 
 type SanitizationProvider struct {
-	ReportBaseURL string
+	ReportBaseURL  string
+	SigningKey      []byte
+	TokenExpiry     time.Duration
 }
 
 func (p *SanitizationProvider) Ignition(
 	_ context.Context,
-	_ *metalv1alpha1.Server,
+	server *metalv1alpha1.Server,
 	sanitizationUID string,
 ) ([]byte, error) {
+	expiry := p.TokenExpiry
+	if expiry <= 0 {
+		expiry = time.Hour
+	}
+
+	tok, err := token.GenerateSignedDiscoveryToken(p.SigningKey, server.Spec.SystemUUID, expiry)
+	if err != nil {
+		return nil, fmt.Errorf("generate sanitization token: %w", err)
+	}
+
 	var buf bytes.Buffer
 	if err := sanitizationIgnitionYAMLTemplate.Execute(&buf, struct {
 		ReportURL string
-	}{ReportURL: fmt.Sprintf("%s/%s", p.ReportBaseURL, sanitizationUID)}); err != nil {
+		Token     string
+	}{
+		ReportURL: fmt.Sprintf("%s/%s", p.ReportBaseURL, sanitizationUID),
+		Token:     tok,
+	}); err != nil {
 		return nil, fmt.Errorf("render sanitization ignition: %w", err)
 	}
 	return buf.Bytes(), nil
