@@ -561,6 +561,19 @@ func (r *BMCUserSetReconciler) enqueueByBMC(ctx context.Context, obj client.Obje
 	return reqs
 }
 
+// enqueueByBMCUser re-enqueues the owning BMCUserSet when a BMCUser changes,
+// including status-only updates (e.g. EffectiveBMCSecretRef set after bootstrap).
+// Owns() misses status subresource updates, so an explicit Watches is required.
+func (r *BMCUserSetReconciler) enqueueByBMCUser(ctx context.Context, obj client.Object) []reconcile.Request {
+	ownerRef := metav1.GetControllerOf(obj)
+	if ownerRef == nil || ownerRef.Kind != "BMCUserSet" {
+		return nil
+	}
+	return []reconcile.Request{
+		{NamespacedName: types.NamespacedName{Name: ownerRef.Name}},
+	}
+}
+
 // enqueueByBMCUserRotation re-enqueues the owning BMCUserSet when a
 // FactoryBootstrap BMCUserRotation changes phase (so the set controller can
 // label/delete the resulting BMCSecret and mark FactoryAccountHandled).
@@ -847,7 +860,10 @@ func (r *BMCUserSetReconciler) maybeDeleteBootstrapSecret(
 func (r *BMCUserSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&baseboardv1alpha1.BMCUserSet{}).
-		Owns(&baseboardv1alpha1.BMCUser{}).
+		Watches(
+			&baseboardv1alpha1.BMCUser{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueByBMCUser),
+		).
 		Watches(
 			&metalv1alpha1.BMC{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueByBMC),
