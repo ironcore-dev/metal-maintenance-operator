@@ -103,8 +103,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF2
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/ironcore-dev/controller-utils v0.14.0 h1:ZRKcTKHxj8xNJDX1t225YoCTykw7rOR1wingeMm424k=
-github.com/ironcore-dev/controller-utils v0.14.0/go.mod h1:r0ANgOsXV7Xo+V8z93frNJMnZdE1ZWc9j2djOKWEigA=
+github.com/ironcore-dev/controller-utils v0.15.1 h1:m7ucpzQgMYBF8adnPTesmJ5Ca2lsXVJVKGJVhA1TVx8=
+github.com/ironcore-dev/controller-utils v0.15.1/go.mod h1:E/3nSv9TxRtSGpejWMwLTxbb9fknTcPhcA8moHXa0sY=
 github.com/ironcore-dev/metal-operator v0.8.1-0.20261027090827-a4276fd5b842 h1:SoJApml2VYyc+clboOuYJ+FYV8M1AEpbhGMhNpy6Jw8=
 github.com/ironcore-dev/metal-operator v0.8.1-0.20261027090827-a4276fd5b842/go.mod h1:826epd/RRmB9pHjyhXYEb3VvGBkj2FWFwtK7ZhYw03E=
 github.com/joshdk/go-junit v1.0.0 h1:S86cUKIdwBHWwA6xCmFlf3RTLfVXYQfvanM5Uh+K6GE=
