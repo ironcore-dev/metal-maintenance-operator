@@ -47,6 +47,12 @@ const (
 	conditionTypePasswordValid = "PasswordValid"
 	reasonPasswordValid        = "PasswordValid"
 	reasonPasswordInvalid      = "PasswordInvalid"
+
+	// conditionTypeReady is the top-level summary condition. True when the account
+	// exists on the BMC, credentials are valid, the account is enabled, and not locked.
+	conditionTypeReady = "Ready"
+	reasonReady        = "Ready"
+	reasonNotReady     = "NotReady"
 )
 
 // rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
@@ -199,6 +205,9 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	if err := r.updateCredentialsBootstrappedCondition(ctx, user); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update CredentialsBootstrapped condition: %w", err)
 	}
+	if err := r.updateReadyCondition(ctx, user); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update Ready condition: %w", err)
+	}
 	return r.ensureBMCUserRotation(ctx, user)
 }
 
@@ -216,6 +225,9 @@ func (r *BMCUserReconciler) patchUserStatus(ctx context.Context, user *baseboard
 			log.V(1).Info("BMC account already exists", "ID", account.ID)
 			userBase := user.DeepCopy()
 			user.Status.ID = account.ID
+			enabled := account.Enabled
+			user.Status.AccountEnabled = &enabled
+			user.Status.AccountLocked = account.Locked
 			if !lastRotation.IsZero() {
 				user.Status.LastRotation = &lastRotation
 			}
@@ -927,6 +939,54 @@ func (r *BMCUserReconciler) pruneOldSecrets(ctx context.Context, user *baseboard
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// updateReadyCondition sets the Ready condition, which is True only when:
+// the account exists on the BMC (ID set), credentials are valid (PasswordValid=True),
+// the account is enabled (AccountEnabled=true), and not locked (AccountLocked=false).
+func (r *BMCUserReconciler) updateReadyCondition(ctx context.Context, user *baseboardv1alpha1.BMCUser) error {
+	var reason, message string
+	ready := true
+
+	if user.Status.ID == "" {
+		ready = false
+		reason = reasonNotReady
+		message = "BMC account does not exist yet"
+	} else if user.Status.AccountEnabled != nil && !*user.Status.AccountEnabled {
+		ready = false
+		reason = reasonNotReady
+		message = "BMC account is disabled"
+	} else if user.Status.AccountLocked {
+		ready = false
+		reason = reasonNotReady
+		message = "BMC account is locked"
+	} else if c := apimeta.FindStatusCondition(user.Status.Conditions, conditionTypePasswordValid); c != nil && c.Status == metav1.ConditionFalse {
+		ready = false
+		reason = reasonNotReady
+		message = c.Message
+	}
+
+	cond := metav1.Condition{
+		Type:               conditionTypeReady,
+		ObservedGeneration: user.Generation,
+	}
+	if ready {
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = reasonReady
+		cond.Message = "BMC account is active and credentials are valid"
+	} else {
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = reason
+		cond.Message = message
+	}
+
+	userBase := user.DeepCopy()
+	if apimeta.SetStatusCondition(&user.Status.Conditions, cond) {
+		if err := r.Status().Patch(ctx, user, client.MergeFrom(userBase)); err != nil {
+			return fmt.Errorf("failed to patch Ready condition: %w", err)
+		}
+	}
+	return nil
 }
 
 // setPasswordValidCondition sets the PasswordValid condition on the BMCUser. message is

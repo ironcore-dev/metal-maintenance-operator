@@ -64,12 +64,13 @@ const (
 // BMCUserSetReconciler reconciles a BMCUserSet object.
 type BMCUserSetReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	ManagerNamespace   string
-	ResyncInterval     time.Duration
-	DefaultProtocol    metalv1alpha1.ProtocolScheme
-	SkipCertValidation bool
-	BMCOptions         bmc.Options
+	Scheme                *runtime.Scheme
+	ManagerNamespace      string
+	ResyncInterval        time.Duration
+	DefaultProtocol       metalv1alpha1.ProtocolScheme
+	SkipCertValidation    bool
+	BMCOptions            bmc.Options
+	DefaultPasswordLength int
 }
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusersets,verbs=get;list;watch;create;update;patch;delete
@@ -603,8 +604,12 @@ func (r *BMCUserSetReconciler) enqueueByBMCUserRotation(ctx context.Context, obj
 
 // handleFactoryAccount handles the factory/default account for each BMC in the set,
 // once both OperatorAdmin users are proven and BMC.Spec.BMCSecretRef is operator-owned.
-// It creates a FactoryBootstrap BMCUserRotation, then on its success labels/deletes the
-// resulting BMCSecret and marks the active OperatorAdmin user's FactoryAccountHandled=true.
+// Behaviour depends on set.Spec.FactoryAccount.Action:
+//   - Rotate: creates a FactoryBootstrap BMCUserRotation, labels/deletes the resulting
+//     BMCSecret on success, and marks FactoryAccountHandled=true.
+//   - Disable: connects to the BMC using the active operator credential and sets the
+//     factory account's Enabled flag to false, then marks FactoryAccountHandled=true.
+//   - None: marks FactoryAccountHandled=true immediately without touching the BMC.
 func (r *BMCUserSetReconciler) handleFactoryAccount(
 	ctx context.Context,
 	set *baseboardv1alpha1.BMCUserSet,
@@ -641,29 +646,161 @@ func (r *BMCUserSetReconciler) handleFactoryAccount(
 			continue
 		}
 
-		rotationList := &baseboardv1alpha1.BMCUserRotationList{}
-		if err := r.List(ctx, rotationList); err != nil {
-			errs = append(errs, fmt.Errorf("BMC %s: failed to list BMCUserRotations: %w", bmcObj.Name, err))
-			continue
+		var err error
+		switch set.Spec.FactoryAccount.Action {
+		case baseboardv1alpha1.FactoryAccountActionNone:
+			err = r.handleFactoryAccountNone(ctx, activeAdmin, bmcObj)
+		case baseboardv1alpha1.FactoryAccountActionDisable:
+			err = r.handleFactoryAccountDisable(ctx, set, activeAdmin, bmcObj, users)
+		default: // Rotate
+			err = r.handleFactoryAccountRotate(ctx, set, bmcObj, activeAdmin, users)
 		}
-
-		factoryRotation := r.findFactoryRotation(rotationList, activeAdmin.Name)
-		if factoryRotation == nil {
-			if err := r.createFactoryRotation(ctx, set, bmcObj, users, activeAdmin); err != nil {
-				errs = append(errs, err)
-			}
-			continue
-		}
-
-		if factoryRotation.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseSucceeded {
-			continue
-		}
-
-		if err := r.completeFactoryRotation(ctx, set, bmcObj, activeAdmin, factoryRotation, rotationList); err != nil {
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// handleFactoryAccountNone marks the factory account as handled without touching the BMC.
+func (r *BMCUserSetReconciler) handleFactoryAccountNone(ctx context.Context, activeAdmin *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
+	log := ctrl.LoggerFrom(ctx)
+	log.Info("Factory account action is None; marking as handled without BMC changes", "BMC", bmcObj.Name)
+	userBase := activeAdmin.DeepCopy()
+	activeAdmin.Status.FactoryAccountHandled = true
+	if err := r.Status().Patch(ctx, activeAdmin, client.MergeFrom(userBase)); err != nil {
+		return fmt.Errorf("BMC %s: failed to set FactoryAccountHandled on BMCUser: %w", bmcObj.Name, err)
+	}
+	return nil
+}
+
+// handleFactoryAccountDisable disables the factory account on the BMC by setting Enabled=false
+// via Redfish. A new random password is also set in the same PATCH to satisfy BMCs (e.g. Dell
+// iDRAC) that reject Enabled/RoleID changes without a password field. This is idempotent and
+// does not require any credential prove loop.
+func (r *BMCUserSetReconciler) handleFactoryAccountDisable(ctx context.Context, set *baseboardv1alpha1.BMCUserSet, activeAdmin *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC, users []baseboardv1alpha1.BMCUser) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	factoryUserNames := set.Spec.FactoryAccount.UserNames
+	if len(factoryUserNames) == 0 && activeAdmin.Status.BootstrapSecretRef != nil {
+		bootstrapSecret := &metalv1alpha1.BMCSecret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: activeAdmin.Status.BootstrapSecretRef.Name}, bootstrapSecret); err != nil {
+			return fmt.Errorf("BMC %s: failed to get bootstrap BMCSecret: %w", bmcObj.Name, err)
+		}
+		username, _, err := bmcutils.GetBMCCredentialsFromSecret(bootstrapSecret)
+		if err != nil {
+			return fmt.Errorf("BMC %s: failed to read bootstrap credentials: %w", bmcObj.Name, err)
+		}
+		factoryUserNames = []string{username}
+	}
+
+	operatorNames := make(map[string]bool, len(users))
+	for _, u := range users {
+		operatorNames[u.Spec.UserName] = true
+	}
+
+	bmcClient, err := bmcutils.GetBMCClientFromBMC(ctx, r.Client, bmcObj, r.DefaultProtocol, r.SkipCertValidation, r.BMCOptions)
+	if err != nil {
+		return fmt.Errorf("BMC %s: failed to get BMC client: %w", bmcObj.Name, err)
+	}
+	defer bmcClient.Logout()
+
+	accountService, err := bmcClient.GetAccountService()
+	if err != nil {
+		return fmt.Errorf("BMC %s: failed to get account service: %w", bmcObj.Name, err)
+	}
+
+	for _, fu := range factoryUserNames {
+		if operatorNames[fu] {
+			log.Info("Factory username conflicts with an operator username; cannot disable",
+				"BMC", bmcObj.Name, "FactoryUser", fu)
+			return fmt.Errorf("BMC %s: factory username %q matches an operator account; update factoryAccount.userNames to resolve the conflict", bmcObj.Name, fu)
+		}
+
+		accounts, err := bmcClient.GetAccounts()
+		if err != nil {
+			return fmt.Errorf("BMC %s: failed to list BMC accounts: %w", bmcObj.Name, err)
+		}
+		found := false
+		for _, account := range accounts {
+			if account.UserName != fu {
+				continue
+			}
+			found = true
+			if !account.Enabled {
+				log.Info("Factory account already disabled", "BMC", bmcObj.Name, "FactoryUser", fu)
+				break
+			}
+			// Generate a new random password to include in the same PATCH — required by some
+			// BMCs (e.g. Dell iDRAC) that reject Enabled/RoleID changes without a password.
+			newPassword, err := utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, r.DefaultPasswordLength)
+			if err != nil {
+				return fmt.Errorf("BMC %s: failed to generate password for factory disable: %w", bmcObj.Name, err)
+			}
+			// Persist the new credential before touching the BMC so that the secret
+			// is available even if the operator restarts between the two operations.
+			// The deterministic name makes CreateOrPatch idempotent on retries.
+			retainCredential := set.Spec.FactoryAccount.RetainCredential == nil || *set.Spec.FactoryAccount.RetainCredential
+			if retainCredential {
+				breakGlassSecret := &metalv1alpha1.BMCSecret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: bmcObj.Name + "-factory-break-glass",
+						Labels: map[string]string{
+							credentialRoleLabel: credentialRoleBreakGlass,
+						},
+					},
+				}
+				_, err := controllerutil.CreateOrPatch(ctx, r.Client, breakGlassSecret, func() error {
+					breakGlassSecret.Data = map[string][]byte{
+						metalv1alpha1.BMCSecretUsernameKeyName: []byte(account.UserName),
+						metalv1alpha1.BMCSecretPasswordKeyName: []byte(newPassword),
+					}
+					if breakGlassSecret.Immutable == nil {
+						breakGlassSecret.Immutable = func() *bool { v := true; return &v }()
+					}
+					return controllerutil.SetControllerReference(activeAdmin, breakGlassSecret, r.Scheme)
+				})
+				if err != nil {
+					return fmt.Errorf("BMC %s: failed to create break-glass BMCSecret for factory disable: %w", bmcObj.Name, err)
+				}
+			}
+			if err := bmcClient.CreateOrUpdateAccount(ctx, account.UserName, account.RoleID, newPassword, false); err != nil {
+				return fmt.Errorf("BMC %s: failed to disable factory account %s: %w", bmcObj.Name, fu, err)
+			}
+			log.Info("Disabled factory account", "BMC", bmcObj.Name, "FactoryUser", fu)
+			break
+		}
+		if !found {
+			log.Info("Factory account not found on BMC; skipping disable", "BMC", bmcObj.Name, "FactoryUser", fu)
+		}
+	}
+
+	userBase := activeAdmin.DeepCopy()
+	activeAdmin.Status.FactoryAccountHandled = true
+	if err := r.Status().Patch(ctx, activeAdmin, client.MergeFrom(userBase)); err != nil {
+		return fmt.Errorf("BMC %s: failed to set FactoryAccountHandled on BMCUser: %w", bmcObj.Name, err)
+	}
+	return nil
+}
+
+// handleFactoryAccountRotate creates a FactoryBootstrap BMCUserRotation, then on its success
+// labels/deletes the resulting BMCSecret and marks FactoryAccountHandled=true.
+func (r *BMCUserSetReconciler) handleFactoryAccountRotate(ctx context.Context, set *baseboardv1alpha1.BMCUserSet, bmcObj *metalv1alpha1.BMC, activeAdmin *baseboardv1alpha1.BMCUser, users []baseboardv1alpha1.BMCUser) error {
+	rotationList := &baseboardv1alpha1.BMCUserRotationList{}
+	if err := r.List(ctx, rotationList); err != nil {
+		return fmt.Errorf("BMC %s: failed to list BMCUserRotations: %w", bmcObj.Name, err)
+	}
+
+	factoryRotation := r.findFactoryRotation(rotationList, activeAdmin.Name)
+	if factoryRotation == nil {
+		return r.createFactoryRotation(ctx, set, bmcObj, users, activeAdmin)
+	}
+
+	if factoryRotation.Status.Phase != baseboardv1alpha1.BMCUserRotationPhaseSucceeded {
+		return nil
+	}
+
+	return r.completeFactoryRotation(ctx, set, bmcObj, activeAdmin, factoryRotation, rotationList)
 }
 
 func (r *BMCUserSetReconciler) isVendorIgnored(ignoreVendors []string, manufacturer string) bool {
