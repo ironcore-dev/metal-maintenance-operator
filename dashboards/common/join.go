@@ -22,6 +22,16 @@ func TopologyMetricLabels(cfg DashboardConfig) (bb, nodename, zone string) {
 	return
 }
 
+// TopologyRegionLabel returns the actual Prometheus label name for the region field.
+// When a labelKey is configured (e.g. topology_kubernetes_io_region) it is used;
+// otherwise the canonical "region" is returned.
+func TopologyRegionLabel(cfg DashboardConfig) string {
+	if cfg.Topology.Region.LabelKey != "" {
+		return cfg.Topology.Region.LabelKey
+	}
+	return "region"
+}
+
 // TypeMetricLabel returns the actual Prometheus label name for the server chassis
 // type field. Returns "" when not configured — callers should skip type-related
 // columns/labels when the returned value is empty.
@@ -39,10 +49,14 @@ func TypeDisplayName(cfg DashboardConfig) string {
 }
 
 // NormaliseTopologyLabels wraps expr with label_replace calls that rename the
-// actual metric label names to the canonical names (bb, nodename, zone).
+// actual metric label names to the canonical names (region, bb, nodename, zone).
 // No-ops when the labelKey already equals the canonical name.
 func NormaliseTopologyLabels(cfg DashboardConfig, expr string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, nodename, zone := TopologyMetricLabels(cfg)
+	if region != "region" {
+		expr = `label_replace(` + expr + `, "region", "$1", "` + region + `", "(.*)")`
+	}
 	if bb != "bb" {
 		expr = `label_replace(` + expr + `, "bb", "$1", "` + bb + `", "(.*)")`
 	}
@@ -109,8 +123,9 @@ func withComplianceLabels(expr string) string {
 // group by(name) deduplicates both sides so at most one series per BMC name participates
 // in the unless and the join, regardless of how many indexed systems exist per BMC.
 func BMCInfoCompliantCount(cfg DashboardConfig, compliantExpr, nonCompliantExpr, joinKey string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, _, _ := TopologyMetricLabels(cfg)
-	base := `kube_ironcore_bmc_info{region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
+	base := `kube_ironcore_bmc_info{` + region + `=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
 	compliantRHS := `group by(name)(label_replace(` + compliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)"))`
 	nonCompliantRHS := `group by(name)(label_replace(` + nonCompliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)"))`
 	return `count(` + base + ` * on(name) group_left() ` + compliantRHS + ` unless on(name) ` + nonCompliantRHS + `) or vector(0)`
@@ -123,8 +138,9 @@ func BMCInfoCompliantCount(cfg DashboardConfig, compliantExpr, nonCompliantExpr,
 // group by(name) deduplicates the managed-non-compliant RHS: if any indexed system
 // for a BMC is non-compliant, that BMC is counted once.
 func BMCInfoNonCompliantCount(cfg DashboardConfig, nonCompliantExpr, anyFirmwareBaseExpr, joinKey string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, _, _ := TopologyMetricLabels(cfg)
-	base := `kube_ironcore_bmc_info{region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
+	base := `kube_ironcore_bmc_info{` + region + `=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}`
 	managedNonCompliantRHS := `group by(name)(label_replace(` + nonCompliantExpr + `, "name", "$1", "` + joinKey + `", "(.*)"))`
 	managedNonCompliant := base + ` * on(name) group_left() ` + managedNonCompliantRHS
 	unmanaged := base + ` unless on(name) label_replace(` + anyFirmwareBaseExpr + `, "name", "$1", "` + joinKey + `", "(.*)")`
@@ -142,16 +158,25 @@ func BMCInfoNonCompliantCount(cfg DashboardConfig, nonCompliantExpr, anyFirmware
 // anyFirmwareBaseExpr: bare metric name (no filters) for the `unless` membership check.
 // joinKey: label on the firmware metric that holds the BMC resource name.
 func BMCInfoFullTableJoin(cfg DashboardConfig, firmwareExpr, anyFirmwareBaseExpr, joinKey, inventoryExtraFilters string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, nodename, zone := TopologyMetricLabels(cfg)
+
+	// Deduplicate firmware metric to one series per BMC before joining.
+	// BIOS firmware CRs have one series per Server resource; a BMC with multiple
+	// indexed Servers (<bmc>-system-N) would otherwise produce one table row per
+	// system. max by(...) collapses all per-system entries that share the same
+	// (joinKey, manufacturer, model, state, observed_version, desired_version) to
+	// a single series. Info metrics have value 1, so max is a no-op on the value.
+	deduped := `max by(` + joinKey + `, manufacturer, model, state, observed_version, desired_version) (` + firmwareExpr + `)`
 
 	// Managed rows: firmware metric enriched with topology from kube_ironcore_bmc_info.
 	// region is included in group_left so the Region table column populates.
-	ksmJoin := `label_replace(kube_ironcore_bmc_info{region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}, "` + joinKey + `", "$1", "name", "(.*)")`
-	managed := firmwareExpr + ` * on(` + joinKey + `) group_left(region, ` + bb + `, ` + nodename + `, ` + zone + `) ` + ksmJoin
+	ksmJoin := `label_replace(kube_ironcore_bmc_info{` + region + `=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"}, "` + joinKey + `", "$1", "name", "(.*)")`
+	managed := deduped + ` * on(` + joinKey + `) group_left(` + region + `, ` + bb + `, ` + nodename + `, ` + zone + `) ` + ksmJoin
 	managedNormalized := NormaliseTopologyLabels(cfg, withComplianceLabels(managed))
 
 	// Unmanaged rows: in kube_ironcore_bmc_info but absent from any firmware CR.
-	inventoryFilters := `region=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"`
+	inventoryFilters := region + `=~"$region",` + bb + `=~"$bb",manufacturer=~"$manufacturer"`
 	if inventoryExtraFilters != "" {
 		inventoryFilters += "," + inventoryExtraFilters
 	}
@@ -167,8 +192,9 @@ func BMCInfoFullTableJoin(cfg DashboardConfig, firmwareExpr, anyFirmwareBaseExpr
 // of BMC resources in the fleet and is not limited by firmware CR coverage, so it
 // is the correct metric for "Total Tracked Servers" panels.
 func BMCInfoDirectCount(cfg DashboardConfig, extraFilters string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, _, _ := TopologyMetricLabels(cfg)
-	filters := `region=~"$region",` + bb + `=~"$bb"`
+	filters := region + `=~"$region",` + bb + `=~"$bb"`
 	if extraFilters != "" {
 		filters += "," + extraFilters
 	}
@@ -209,20 +235,22 @@ func BMCInfoTopologyJoin(cfg DashboardConfig, expr, joinKey string) string {
 // redfish_monitor_reading carries no topology labels; all filtering is done via the join.
 // kube_ironcore_bmc_info covers every BMC regardless of firmware management enrollment.
 func BBJoin(cfg DashboardConfig, expr string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, _, _ := TopologyMetricLabels(cfg)
 	// Filter on "name" (BMC resource name, e.g. "node001-bb098") not the short nodename label,
 	// because $node is always populated from the "name" label on kube_ironcore_bmc_info.
-	ksmJoin := `label_replace(kube_ironcore_bmc_info{region=~"$region",` +
+	ksmJoin := `label_replace(kube_ironcore_bmc_info{` + region + `=~"$region",` +
 		bb + `=~"$bb",name=~"$node",` +
 		`manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)")`
 	return expr + ` * on(hostname) group_left() ` + ksmJoin
 }
 
 // BBJoinNode is like BBJoin but for single-node detail dashboards that have no
-// $manufacturer or $model variables. Filters only by $bb and $node.
+// $manufacturer or $model variables. Filters by $region, $bb and $node.
 func BBJoinNode(cfg DashboardConfig, expr string) string {
+	region := TopologyRegionLabel(cfg)
 	bb, _, _ := TopologyMetricLabels(cfg)
 	ksmJoin := `label_replace(kube_ironcore_bmc_info{` +
-		bb + `=~"$bb",name=~"$node"}, "hostname", "$1", "name", "(.*)")`
+		region + `=~"$region",` + bb + `=~"$bb",name=~"$node"}, "hostname", "$1", "name", "(.*)")`
 	return expr + ` * on(hostname) group_left() ` + ksmJoin
 }

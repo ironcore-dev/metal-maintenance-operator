@@ -22,9 +22,10 @@ type TopologyField struct {
 }
 
 // TopologyConfig maps each canonical metric label name to per-field settings.
-// The canonical label names (bb, nodename, zone) are fixed — they are the
-// contract between the dashboard PromQL and the KSM CustomResourceState config.
+// The canonical label names (region, bb, nodename, zone) are fixed — they are
+// the contract between the dashboard PromQL and the KSM CustomResourceState config.
 type TopologyConfig struct {
+	Region   TopologyField `yaml:"region"`
 	BB       TopologyField `yaml:"bb"`
 	Nodename TopologyField `yaml:"nodename"`
 	Zone     TopologyField `yaml:"zone"`

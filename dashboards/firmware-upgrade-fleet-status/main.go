@@ -187,7 +187,7 @@ func main() {
 		dashboard.AddPanelGroup("Active Upgrades",
 			panelgroup.PanelHeight(8),
 			panelgroup.AddPanel("BIOS Upgrades In Progress",
-				table.Table(),
+				table.Table(table.WithEnableSorting(true)),
 				panel.Description("Servers currently undergoing a BIOS firmware upgrade, showing the CRD resource name, observed version, desired version, and state. Use this to monitor active upgrade progress. A server present here longer than the expected upgrade window needs investigation."),
 				panel.AddQuery(
 					mmoquery.PromQL(
@@ -198,7 +198,7 @@ func main() {
 				),
 			),
 			panelgroup.AddPanel("BMC Upgrades In Progress",
-				table.Table(),
+				table.Table(table.WithEnableSorting(true)),
 				panel.Description("Servers currently undergoing a BMC firmware upgrade. BMC upgrades are longer than BIOS upgrades due to the BMC reboot cycle. A server present here for more than 30 minutes is likely stuck and may need the upgrade to be retried or manually completed."),
 				panel.AddQuery(
 					mmoquery.PromQL(
@@ -212,7 +212,7 @@ func main() {
 		dashboard.AddPanelGroup("Failed Upgrades",
 			panelgroup.PanelHeight(8),
 			panelgroup.AddPanel("BIOS Upgrades Failed",
-				table.Table(),
+				table.Table(table.WithEnableSorting(true)),
 				panel.Description("Servers where the BIOS firmware upgrade has failed, showing the observed and desired versions. If multiple servers of the same model are failing, the issue is likely with the firmware image or compatibility rather than an individual server fault."),
 				panel.AddQuery(
 					mmoquery.PromQL(
@@ -223,7 +223,7 @@ func main() {
 				),
 			),
 			panelgroup.AddPanel("BMC Upgrades Failed",
-				table.Table(),
+				table.Table(table.WithEnableSorting(true)),
 				panel.Description("Servers where the BMC firmware upgrade has failed. A failed BMC upgrade may leave the BMC temporarily unreachable; cross-reference with the BMC Alert Events dashboard and check BMC connectivity before retrying. Repeated failure on the same server may indicate a hardware fault."),
 				panel.AddQuery(
 					mmoquery.PromQL(
