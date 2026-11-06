@@ -26,8 +26,10 @@ func TestSettingsStateCollector_BIOSSettings(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bioss).WithStatusSubresource(bioss).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 
@@ -52,8 +54,10 @@ func TestSettingsStateCollector_BMCSettings(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bmcs).WithStatusSubresource(bmcs).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 
@@ -75,8 +79,10 @@ func TestSettingsStateCollector_NilServerRefSkipped(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bioss).WithStatusSubresource(bioss).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 
@@ -92,8 +98,10 @@ func TestSettingsStateCollector_EmptyCluster(t *testing.T) {
 	scheme := newStateScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewSettingsStateCollector(c, reg); err != nil {
+	if err := promsink.NewSettingsStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewSettingsStateCollector: %v", err)
 	}
 

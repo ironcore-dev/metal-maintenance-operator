@@ -31,11 +31,14 @@ var (
 // SettingsStateCollector implements prometheus.Collector for BIOSSettings and BMCSettings resources.
 type SettingsStateCollector struct {
 	client client.Client
+	leader *LeaderFlag
 }
 
 // NewSettingsStateCollector creates and registers a SettingsStateCollector with the given Prometheus registerer.
-func NewSettingsStateCollector(c client.Client, reg prometheus.Registerer) error {
-	return reg.Register(&SettingsStateCollector{client: c})
+// leader gates metric emission: Collect returns immediately with no series when the pod is not the leader,
+// preventing duplicate series when multiple replicas are running.
+func NewSettingsStateCollector(c client.Client, reg prometheus.Registerer, leader *LeaderFlag) error {
+	return reg.Register(&SettingsStateCollector{client: c, leader: leader})
 }
 
 func (s *SettingsStateCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -44,6 +47,10 @@ func (s *SettingsStateCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (s *SettingsStateCollector) Collect(ch chan<- prometheus.Metric) {
+	if !s.leader.AcquireCollect() {
+		return
+	}
+	defer s.leader.ReleaseCollect()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
