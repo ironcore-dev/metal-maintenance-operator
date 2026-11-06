@@ -712,9 +712,9 @@ func (r *BMCUserSetReconciler) handleFactoryAccountDisable(ctx context.Context, 
 
 	for _, fu := range factoryUserNames {
 		if operatorNames[fu] {
-			log.Info("Factory username matches an operator username; skipping factory disable",
+			log.Info("Factory username conflicts with an operator username; cannot disable",
 				"BMC", bmcObj.Name, "FactoryUser", fu)
-			continue
+			return fmt.Errorf("BMC %s: factory username %q matches an operator account; update factoryAccount.userNames to resolve the conflict", bmcObj.Name, fu)
 		}
 
 		accounts, err := bmcClient.GetAccounts()
