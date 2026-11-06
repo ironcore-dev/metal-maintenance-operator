@@ -58,6 +58,18 @@ func main() {
 		table.ColumnSettings{Name: "firmware_version", Header: "Firmware", EnableSorting: true, Hide: false},
 		table.ColumnSettings{Name: region, Header: "Region", EnableSorting: true, Hide: false},
 		table.ColumnSettings{Name: bb, Header: cfg.Topology.BB.DisplayName, EnableSorting: true, Hide: false},
+		table.ColumnSettings{Name: "telemetry", Header: "Telemetry", EnableSorting: true, Sort: table.AscSort, Hide: false,
+			CellSettings: []table.CellSettings{
+				{
+					Condition: table.Condition{Kind: table.RegexConditionKind, Spec: &table.RegexConditionSpec{Expr: "^Reporting$"}},
+					TextColor: "#73BF69",
+				},
+				{
+					Condition: table.Condition{Kind: table.RegexConditionKind, Spec: &table.RegexConditionSpec{Expr: ".+"}},
+					TextColor: "#F2495C",
+				},
+			},
+		},
 	)
 
 	exec := sdk.NewExec()
@@ -376,14 +388,33 @@ func main() {
 					table.WithEnableFiltering(true),
 					table.WithColumnSettings(inventoryCols),
 				),
-				panel.Description("Per-BMC inventory showing hardware identity and topology. Select a node from the Node variable above and click the panel link icon to open the BMC Detail dashboard for that host."),
+				panel.Description("Per-BMC inventory showing hardware identity, topology and telemetry status. The Telemetry column shows green (Reporting) when the BMC is actively pushing redfish_monitor_reading metrics and red (Not Reporting) when no readings are present. Non-reporting BMCs sort to the top by default. Click the BMC Name link to open the BMC Detail dashboard for that host."),
 				panel.AddLink("/projects/"+cfg.ProjectName+"/dashboards/bmc-detail",
 					link.Name("BMC Detail"),
 					link.RenderVariable(true),
 				),
+				// Single query: bmc_info on the left so all its labels are preserved.
+				// The two arms are mutually exclusive (reporting vs not-reporting), so or never
+				// produces duplicate rows for the same BMC.
 				panel.AddQuery(
 					mmo.PromQL(
-						`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`,
+						// BBJoin scopes readings to the selected region/bb/node/manufacturer/model
+						// by joining redfish_monitor_reading with kube_ironcore_bmc_info on hostname.
+						// This prevents readings from a same-named BMC in a different building block
+						// (e.g. in a federated Prometheus) from affecting the telemetry status shown here.
+						`label_replace(`+
+							`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` * on(name) group_left()`+
+							` label_replace((`+mmo.BBJoin(cfg, `count by(hostname)(redfish_monitor_reading)`)+`) > bool 0, "name", "$1", "hostname", "(.*)"),`+
+							` "telemetry", "Reporting", "name", ".*"`+
+							`)`+
+							` or`+
+							` label_replace(`+
+							`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` unless on(name)`+
+							` label_replace(`+mmo.BBJoin(cfg, `count by(hostname)(redfish_monitor_reading)`)+`, "name", "$1", "hostname", "(.*)"),`+
+							` "telemetry", "Not Reporting", "name", ".*"`+
+							`)`,
 						"$datasource",
 					),
 				),
