@@ -686,7 +686,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `action` _[FactoryAccountAction](#factoryaccountaction)_ | Action specifies what to do with the factory account.<br />Only Rotate is supported at this time. | Rotate | Enum: [Rotate] <br /> |
+| `action` _[FactoryAccountAction](#factoryaccountaction)_ | Action specifies what to do with the factory account once both operator accounts are proven.<br />Rotate changes the password (risky if interrupted). Disable sets Enabled=false on the BMC<br />(idempotent, reversible, recommended for production). None leaves the account untouched. | Disable | Enum: [Rotate Disable None] <br /> |
 | `userNames` _string array_ | UserNames is an explicit list of factory account usernames to act on.<br />When empty, the username is read from the BMCSecret referenced by<br />BMCUser.Status.BootstrapSecretRef (the credential the BMC shipped with). |  |  |
 | `retainCredential` _boolean_ | RetainCredential keeps the rotated password as an immutable BMCSecret<br />labelled baseboard.metal.ironcore.dev/credential-role=break-glass.<br />The secret is owned by the active OperatorAdmin BMCUser.<br />Defaults to true. | true |  |
 | `ignoreVendors` _string array_ | IgnoreVendors lists manufacturers (case-insensitive, matched against<br />BMC.Status.Manufacturer) for which factory account handling is skipped. |  |  |
@@ -699,14 +699,16 @@ _Underlying type:_ _string_
 FactoryAccountAction specifies what to do with the factory/default BMC account after bootstrap.
 
 _Validation:_
-- Enum: [Rotate]
+- Enum: [Rotate Disable None]
 
 _Appears in:_
 - [FactoryAccount](#factoryaccount)
 
 | Field | Description |
 | --- | --- |
-| `Rotate` | FactoryAccountActionRotate changes the factory account's password to a new random one.<br />Disable and Delete require a SetAccountPassword/DisableAccount extension to the bmc.BMC<br />interface in metal-operator and are planned for a future release.<br /> |
+| `Rotate` | FactoryAccountActionRotate changes the factory account's password to a new random one.<br />The original password is retained as a break-glass BMCSecret when RetainCredential is true.<br />Use with caution: if the rotation is interrupted, the factory account may be left in an<br />inconsistent state. Prefer Disable for production environments.<br /> |
+| `Disable` | FactoryAccountActionDisable disables the factory account on the BMC via Redfish<br />(sets Enabled=false). The account remains on the BMC but cannot be used to log in.<br />This is the safest option: it is idempotent, reversible, and requires no credential rotation.<br /> |
+| `None` | FactoryAccountActionNone leaves the factory account completely untouched.<br />Use when the factory account is managed externally or should not be modified.<br /> |
 
 
 #### RotationStrategy

@@ -20,7 +20,7 @@ spec:
     namespace: metal-maintenance-system
   rotationStrategy: DualAccount
   factoryAccount:
-    action: Rotate
+    action: Disable
     ignoreVendors:
       - HPE
     # userNames is optional; defaults to the username from the bootstrap BMCSecret.
