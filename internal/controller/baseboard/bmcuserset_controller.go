@@ -737,6 +737,33 @@ func (r *BMCUserSetReconciler) handleFactoryAccountDisable(ctx context.Context, 
 			if err != nil {
 				return fmt.Errorf("BMC %s: failed to generate password for factory disable: %w", bmcObj.Name, err)
 			}
+			// Persist the new credential before touching the BMC so that the secret
+			// is available even if the operator restarts between the two operations.
+			// The deterministic name makes CreateOrPatch idempotent on retries.
+			retainCredential := set.Spec.FactoryAccount.RetainCredential == nil || *set.Spec.FactoryAccount.RetainCredential
+			if retainCredential {
+				breakGlassSecret := &metalv1alpha1.BMCSecret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: bmcObj.Name + "-factory-break-glass",
+						Labels: map[string]string{
+							credentialRoleLabel: credentialRoleBreakGlass,
+						},
+					},
+				}
+				_, err := controllerutil.CreateOrPatch(ctx, r.Client, breakGlassSecret, func() error {
+					breakGlassSecret.Data = map[string][]byte{
+						metalv1alpha1.BMCSecretUsernameKeyName: []byte(account.UserName),
+						metalv1alpha1.BMCSecretPasswordKeyName: []byte(newPassword),
+					}
+					if breakGlassSecret.Immutable == nil {
+						breakGlassSecret.Immutable = func() *bool { v := true; return &v }()
+					}
+					return controllerutil.SetControllerReference(activeAdmin, breakGlassSecret, r.Scheme)
+				})
+				if err != nil {
+					return fmt.Errorf("BMC %s: failed to create break-glass BMCSecret for factory disable: %w", bmcObj.Name, err)
+				}
+			}
 			if err := bmcClient.CreateOrUpdateAccount(ctx, account.UserName, account.RoleID, newPassword, false); err != nil {
 				return fmt.Errorf("BMC %s: failed to disable factory account %s: %w", bmcObj.Name, fu, err)
 			}
