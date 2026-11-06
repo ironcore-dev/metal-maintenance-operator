@@ -150,7 +150,7 @@ func main() {
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("firmware-version-compliance",
 		dashboard.Name("Firmware Version Compliance"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		dashboard.AddVariable("datasource",
 			listvariable.List(

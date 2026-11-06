@@ -5,6 +5,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"os"
 
 	sdk "github.com/perses/perses/go-sdk"
 	"github.com/perses/perses/go-sdk/dashboard"
@@ -28,13 +30,20 @@ const (
 )
 
 func main() {
-	flag.String("config", "", "topology config YAML path (unused by this dashboard; accepted for CLI consistency)")
+	var configPath string
+	flag.StringVar(&configPath, "config", "", "path to topology config YAML override (default: embedded config.yaml)")
 	flag.Parse()
+
+	cfg, err := mmoquery.LoadConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
+	}
 
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("firmware-upgrade-fleet-status",
 		dashboard.Name("Firmware Upgrade Fleet Status"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		// Variables
 		dashboard.AddVariable("datasource",

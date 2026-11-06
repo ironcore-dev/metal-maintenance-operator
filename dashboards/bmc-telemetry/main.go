@@ -44,7 +44,7 @@ func main() {
 	inventoryCols := []table.ColumnSettings{
 		{Name: "name", Header: "BMC Name", EnableSorting: true, Hide: false,
 			DataLink: &table.DataLink{
-				URL:        "/projects/metal-maintenance-operator/dashboards/bmc-detail?var-node=${__data.fields[\"name\"]}",
+				URL:        "/projects/" + cfg.ProjectName + "/dashboards/bmc-detail?var-node=${__data.fields[\"name\"]}",
 				Title:      "Open BMC Detail",
 				OpenNewTab: false,
 			}},
@@ -63,7 +63,7 @@ func main() {
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("bmc-telemetry",
 		dashboard.Name("BMC Fleet Overview"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		// ── Variables ──────────────────────────────────────────────────────────────
 
@@ -377,7 +377,7 @@ func main() {
 					table.WithColumnSettings(inventoryCols),
 				),
 				panel.Description("Per-BMC inventory showing hardware identity and topology. Select a node from the Node variable above and click the panel link icon to open the BMC Detail dashboard for that host."),
-				panel.AddLink("/projects/metal-maintenance-operator/dashboards/bmc-detail",
+				panel.AddLink("/projects/"+cfg.ProjectName+"/dashboards/bmc-detail",
 					link.Name("BMC Detail"),
 					link.RenderVariable(true),
 				),

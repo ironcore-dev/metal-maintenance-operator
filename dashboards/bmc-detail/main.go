@@ -41,7 +41,7 @@ func main() {
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("bmc-detail",
 		dashboard.Name("BMC Detail"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		// ── Variables ──────────────────────────────────────────────────────────────
 
