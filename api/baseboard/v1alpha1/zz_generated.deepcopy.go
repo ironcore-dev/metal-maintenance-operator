@@ -620,6 +620,11 @@ func (in *BMCUserStatus) DeepCopyInto(out *BMCUserStatus) {
 		in, out := &in.PasswordExpiration, &out.PasswordExpiration
 		*out = (*in).DeepCopy()
 	}
+	if in.AccountEnabled != nil {
+		in, out := &in.AccountEnabled, &out.AccountEnabled
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

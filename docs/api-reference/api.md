@@ -465,6 +465,8 @@ _Appears in:_
 | `lastRotation` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | LastRotation is the timestamp of the last password rotation. |  |  |
 | `passwordExpiration` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | PasswordExpiration is the timestamp when the password will expire. |  |  |
 | `id` _string_ | ID is the identifier of the user in the BMC system. |  |  |
+| `accountEnabled` _boolean_ | AccountEnabled reflects whether the BMC account is enabled on the hardware.<br />Nil means the state has not been observed yet. |  |  |
+| `accountLocked` _boolean_ | AccountLocked reflects whether the BMC has locked the account (e.g. after<br />repeated authentication failures). |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions reflects the current state of the BMCUser. |  |  |
 | `factoryAccountHandled` _boolean_ | FactoryAccountHandled records whether the factory account on this user's BMC has been<br />successfully handled (e.g. rotated) after bootstrap. Set by the BMCUserSet controller<br />once the FactoryBootstrap rotation succeeds. |  |  |
 
