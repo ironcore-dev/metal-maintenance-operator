@@ -59,6 +59,8 @@
 #
 # ── Display name and label key configuration ──────────────────────────────────
 
+projectName: "metal-maintenance-operator"
+
 topology:
   region:
     displayName: Region

@@ -34,7 +34,15 @@ type TopologyConfig struct {
 
 // DashboardConfig is the root of the config.yaml schema shared across MMO dashboards.
 type DashboardConfig struct {
-	Topology TopologyConfig `yaml:"topology"`
+	// ProjectName is the Perses project the dashboards belong to. It controls both
+	// the project metadata embedded in each built dashboard JSON and the cross-dashboard
+	// link URLs (e.g. the bmc-detail drilldown from the Fleet Inventory table).
+	// Override via your deployment config when the published project name differs from
+	// the default (e.g. "foundation-metal-maintenance-operator" for SAP deployments).
+	// Prerequisite: the named Perses project must already exist before applying
+	// dashboards — percli/the dashboard operator does not create missing projects.
+	ProjectName string         `yaml:"projectName"`
+	Topology    TopologyConfig `yaml:"topology"`
 }
 
 //go:embed config.yaml
@@ -57,6 +65,9 @@ func LoadConfig(path string) (DashboardConfig, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config file: %w", err)
+	}
+	if cfg.ProjectName == "" {
+		return cfg, fmt.Errorf("config file %q sets projectName to an empty string: dashboards must belong to a named project", path)
 	}
 	return cfg, nil
 }
