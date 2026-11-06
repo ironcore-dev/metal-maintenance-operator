@@ -28,6 +28,9 @@ const (
 	BMCUserRotationTriggerAnnotation       BMCUserRotationTrigger = "Annotation"
 	BMCUserRotationTriggerExpiry           BMCUserRotationTrigger = "PasswordExpiry"
 	BMCUserRotationTriggerFactoryBootstrap BMCUserRotationTrigger = "FactoryBootstrap"
+	// BMCUserRotationTriggerTTLExpiry is used when a TTL-gated ServiceAccount user expires.
+	// The rotation invalidates the old credential before the account is disabled.
+	BMCUserRotationTriggerTTLExpiry BMCUserRotationTrigger = "TTLExpiry"
 )
 
 // BMCUserRotationSpec defines the desired state of BMCUserRotation.
@@ -56,7 +59,7 @@ type BMCUserRotationStatus struct {
 	TriggeredAt *metav1.Time `json:"triggeredAt,omitempty"`
 
 	// TriggerReason describes what caused this rotation.
-	// +kubebuilder:validation:Enum=RotationPeriod;Annotation;PasswordExpiry;FactoryBootstrap
+	// +kubebuilder:validation:Enum=RotationPeriod;Annotation;PasswordExpiry;FactoryBootstrap;TTLExpiry
 	// +optional
 	TriggerReason BMCUserRotationTrigger `json:"triggerReason,omitempty"`
 
