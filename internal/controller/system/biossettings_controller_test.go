@@ -5,12 +5,15 @@ package system
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
 	"time"
 
+	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/controller-utils/metautils"
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
@@ -20,8 +23,10 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
+	"github.com/stmcginnis/gofish/schemas"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -1975,6 +1980,92 @@ var _ = Describe("BIOSSettings Sequence Controller", func() {
 		By("Deleting the BIOSSetting")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+})
+
+type fakeBIOSReadBMC struct {
+	bmc.BMC
+
+	attrs schemas.SettingsAttributes
+	err   error
+}
+
+func (f *fakeBIOSReadBMC) GetBiosAttributeValues(_ context.Context, _ string, _ []string) (schemas.SettingsAttributes, error) {
+	return f.attrs, f.err
+}
+
+var _ = Describe("handleSettingInProgressState verification", func() {
+	const (
+		resyncInterval  = 15 * time.Second
+		desiredAssetTag = "new"
+	)
+
+	var (
+		r        *BIOSSettingsReconciler
+		settings *systemv1alpha1.BIOSSettings
+		server   *metalv1alpha1.Server
+	)
+
+	BeforeEach(func() {
+		maintenance := &maintenancev1alpha1.ServerMaintenance{ObjectMeta: metav1.ObjectMeta{Name: "maintenance", Namespace: "default"}}
+		maintenance.Status.State = maintenancev1alpha1.ServerMaintenanceStateInMaintenance
+		server = &metalv1alpha1.Server{ObjectMeta: metav1.ObjectMeta{Name: "server"}}
+		settings = &systemv1alpha1.BIOSSettings{ObjectMeta: metav1.ObjectMeta{Name: "settings"}}
+		settings.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{Name: maintenance.Name, Namespace: maintenance.Namespace}
+		settings.Spec.SettingsFlow = []api.SettingsFlowItem{{Name: "flow", Priority: 1, Settings: map[string]string{"AssetTag": desiredAssetTag}}}
+		settings.Status.State = systemv1alpha1.BIOSSettingsStateInProgress
+		settings.Status.Conditions = []metav1.Condition{
+			{Type: constants.ConditionServerMaintenanceCreated, Status: metav1.ConditionTrue, Reason: constants.ReasonMaintenanceCreated, LastTransitionTime: metav1.Now()},
+			{Type: constants.ConditionServerMaintenanceWaiting, Status: metav1.ConditionFalse, Reason: constants.ReasonMaintenanceApproved, LastTransitionTime: metav1.Now()},
+			{Type: constants.ConditionResetIssued, Status: metav1.ConditionTrue, Reason: constants.ReasonResetIssued, LastTransitionTime: metav1.Now()},
+		}
+		settings.Status.FlowState = []systemv1alpha1.BIOSSettingsFlowStatus{{
+			Name:     "flow",
+			Priority: 1,
+			State:    systemv1alpha1.BIOSSettingsFlowStateInProgress,
+			Conditions: []metav1.Condition{
+				{Type: ConditionSettingsUpdateStartTime, Status: metav1.ConditionTrue, Reason: ReasonSettingsUpdateStarted, LastTransitionTime: metav1.Now()},
+				{Type: ConditionSettingsServerPowerOn, Status: metav1.ConditionTrue, Reason: ReasonSettingsServerPoweredOn, LastTransitionTime: metav1.Now()},
+				{Type: ConditionSettingsRebootPostUpdate, Status: metav1.ConditionFalse, Reason: ReasonSettingsRebootNeeded, LastTransitionTime: metav1.Now()},
+				{Type: ConditionSettingsUpdateIssued, Status: metav1.ConditionTrue, Reason: ReasonSettingsUpdateIssued, LastTransitionTime: metav1.Now()},
+				{Type: ConditionSettingsRebootPowerOn, Status: metav1.ConditionTrue, Reason: ReasonSettingsRebootPowerOn, LastTransitionTime: metav1.Now()},
+				{Type: ConditionSettingsVerify, Status: metav1.ConditionFalse, Reason: ReasonSettingsVerificationNotDone, LastTransitionTime: metav1.Now()},
+			},
+		}}
+		r = &BIOSSettingsReconciler{
+			Client: fake.NewClientBuilder().
+				WithScheme(k8sClient.Scheme()).
+				WithObjects(settings, server, maintenance).
+				WithStatusSubresource(settings).
+				Build(),
+			Conditions:          conditionutils.NewAccessor(conditionutils.AccessorOptions{}),
+			ResyncInterval:      resyncInterval,
+			TimeoutExpiry:       time.Hour,
+			RebootTimeoutExpiry: time.Hour,
+		}
+	})
+
+	It("returns the error when reading the BIOS attributes fails", func(ctx SpecContext) {
+		readErr := errors.New("503 Service Unavailable")
+
+		result, err := r.handleSettingInProgressState(ctx, &fakeBIOSReadBMC{err: readErr}, settings, server)
+		Expect(err).To(MatchError(readErr))
+		Expect(result.RequeueAfter).To(BeZero())
+		Expect(settings.Status.FlowState[0].State).To(Equal(systemv1alpha1.BIOSSettingsFlowStateInProgress))
+	})
+
+	It("requeues while the BIOS still reports the old value", func(ctx SpecContext) {
+		result, err := r.handleSettingInProgressState(ctx, &fakeBIOSReadBMC{attrs: schemas.SettingsAttributes{"AssetTag": "old"}}, settings, server)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(resyncInterval))
+		Expect(settings.Status.FlowState[0].State).To(Equal(systemv1alpha1.BIOSSettingsFlowStateInProgress))
+	})
+
+	It("marks the flow Applied once the BIOS reports the new value", func(ctx SpecContext) {
+		result, err := r.handleSettingInProgressState(ctx, &fakeBIOSReadBMC{attrs: schemas.SettingsAttributes{"AssetTag": desiredAssetTag}}, settings, server)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeZero())
+		Expect(settings.Status.FlowState[0].State).To(Equal(systemv1alpha1.BIOSSettingsFlowStateApplied))
 	})
 })
 
