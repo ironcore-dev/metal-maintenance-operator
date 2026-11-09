@@ -626,9 +626,11 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 		}
 
 		if ok, err := r.applySettingUpdate(ctx, bmcClient, settings, &settingsFlowItem, currentSettingsFlowStatus, server); ok && err == nil {
-			if requeue, err := r.verifySettingsUpdateComplete(ctx, bmcClient, settings, &settingsFlowItem, currentSettingsFlowStatus, server); requeue && err == nil {
+			requeue, err := r.verifySettingsUpdateComplete(ctx, bmcClient, settings, &settingsFlowItem, currentSettingsFlowStatus, server)
+			if requeue && err == nil {
 				return ctrl.Result{RequeueAfter: r.ResyncInterval}, err
 			}
+
 			return ctrl.Result{}, err
 		} else if err == nil {
 			// Still waiting on a live BMC condition (e.g. power-on or reboot confirmation).
