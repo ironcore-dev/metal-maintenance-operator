@@ -84,6 +84,7 @@ type Client interface {
 		destination string,
 		eventType schemas.EventFormatType,
 		protocol schemas.DeliveryRetryPolicy,
+		httpHeaders map[string]string,
 	) (string, error)
 	DeleteEventSubscription(ctx context.Context, uri string) error
 	ListEventSubscriptions(ctx context.Context) ([]Subscription, error)

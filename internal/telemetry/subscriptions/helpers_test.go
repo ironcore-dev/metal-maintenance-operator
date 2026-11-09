@@ -77,7 +77,7 @@ type createCall struct {
 	format schemas.EventFormatType
 }
 
-func (c *fakeClient) CreateEventSubscription(_ context.Context, dest string, format schemas.EventFormatType, _ schemas.DeliveryRetryPolicy) (string, error) {
+func (c *fakeClient) CreateEventSubscription(_ context.Context, dest string, format schemas.EventFormatType, _ schemas.DeliveryRetryPolicy, _ map[string]string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.createCalls = append(c.createCalls, createCall{dest: dest, format: format})

@@ -179,6 +179,7 @@ func main() {
 		telemetryInsecureTLS           bool
 		telemetryEnableCriticalHandler bool
 		telemetrySubscriberID          string
+		telemetrySharedSecretName      string
 	)
 	flag.BoolVar(&enableTelemetry, "enable-telemetry", false,
 		"Enable the BMC event-push pipeline: subscribes for Event-format pushes on event-eligible BMCs, "+
@@ -206,6 +207,19 @@ func main() {
 			"Becomes the <subscriberID> segment in /serverevents/<subscriberID>/alerts/<bmcName>. "+
 			"Empty defaults to \"metal-maintenance-operator\" — set explicitly only when running "+
 			"alongside another subscriber against the same BMCs.")
+	flag.StringVar(&telemetrySharedSecretName, "telemetry-events-shared-secret-name", "",
+		"Name of a Kubernetes Secret (in the telemetry ConfigMap namespace) holding a 32-byte shared key "+
+			"used to authenticate incoming Redfish event POSTs. The Secret is created automatically "+
+			"on first start if it does not exist. When set, BMCs must include "+
+			"\"Authorization: Bearer <hex(key)>\" in every event POST — configure the same value in "+
+			"the Redfish subscription HttpHeaders. When empty, the event receiver accepts unauthenticated POSTs.")
+
+	var sdBearerTokenFile string
+	flag.StringVar(&sdBearerTokenFile, "sd-bearer-token-file", "",
+		"Path to a file containing the bearer token required to access the /sd/bmcs service-discovery endpoint. "+
+			"When set, every GET /sd/bmcs must carry \"Authorization: Bearer <token>\" matching the file's content. "+
+			"Omit only when the metrics server itself enforces authentication (--metrics-secure=true). "+
+			"Prometheus http_sd_configs supports bearer_token_file for the matching scrape credential.")
 
 	opts := zap.Options{
 		Development: true,
@@ -214,6 +228,20 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	var sdBearerToken string
+	if sdBearerTokenFile != "" {
+		raw, err := os.ReadFile(sdBearerTokenFile)
+		if err != nil {
+			setupLog.Error(err, "Failed to read --sd-bearer-token-file")
+			os.Exit(1)
+		}
+		sdBearerToken = strings.TrimRight(string(raw), "\r\n")
+		if sdBearerToken == "" {
+			setupLog.Error(nil, "--sd-bearer-token-file is empty; refusing to start with unauthenticated /sd/bmcs")
+			os.Exit(1)
+		}
+	}
 
 	if maxRepositoryPasses < 1 || maxRepositoryPasses > maxRepositoryPassesLimit {
 		setupLog.Error(
@@ -643,6 +671,7 @@ func main() {
 			InsecureTLS:                telemetryInsecureTLS,
 			SubscriberID:               telemetrySubscriberID,
 			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
+			SharedSecretName:           telemetrySharedSecretName,
 		}
 		if err := telemetryruntime.AddTo(mgr, &telemetryOpts); err != nil {
 			setupLog.Error(err, "Failed to add telemetry pipeline")
@@ -660,6 +689,7 @@ func main() {
 			Log:                    ctrl.Log.WithName("discovery"),
 			SubscribedBMCs:         telemetryOpts.ActiveSubscriptions,
 			UnsubscribedBMCReasons: telemetryOpts.UnsubscribedBMCReasons,
+			BearerToken:            sdBearerToken,
 		}
 		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
 			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)
@@ -669,8 +699,9 @@ func main() {
 		// Telemetry disabled: register the SD endpoint without subscription
 		// filtering — the exporter scrapes all BMCs.
 		sdHandler := &discovery.Handler{
-			Client: mgr.GetClient(),
-			Log:    ctrl.Log.WithName("discovery"),
+			Client:      mgr.GetClient(),
+			Log:         ctrl.Log.WithName("discovery"),
+			BearerToken: sdBearerToken,
 		}
 		if err := mgr.AddMetricsServerExtraHandler(discovery.Path, sdHandler); err != nil {
 			setupLog.Error(err, "Failed to register BMC service discovery handler", "path", discovery.Path)

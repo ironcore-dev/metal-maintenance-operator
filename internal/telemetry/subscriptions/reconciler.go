@@ -99,6 +99,12 @@ type BMCReconciler struct {
 	// share BMCs (the maintenance operator and an external redfish-exporter).
 	SubscriberID string
 
+	// SubscriptionHeaders are optional HTTP headers included in every
+	// CreateEventSubscription call. BMCs include these headers verbatim in
+	// their event POSTs, enabling bearer-token authentication on the receiver.
+	// Nil means no extra headers (backward compatible).
+	SubscriptionHeaders map[string]string
+
 	// ReconcileInterval is the fallback re-sweep cadence used as
 	// RequeueAfter when the live ConfigMap doesn't set
 	// subscriptionReconcileInterval.
@@ -484,6 +490,7 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 			ctx, dest,
 			schemas.MetricReportEventFormatType,
 			schemas.RetryForeverDeliveryRetryPolicy,
+			r.SubscriptionHeaders,
 		)
 		if err != nil {
 			ok = false
@@ -501,6 +508,7 @@ func (r *BMCReconciler) ensureSubscriptions(ctx context.Context, c Client, bmcNa
 			ctx, dest,
 			schemas.EventEventFormatType,
 			schemas.RetryForeverDeliveryRetryPolicy,
+			r.SubscriptionHeaders,
 		)
 		if err != nil {
 			ok = false

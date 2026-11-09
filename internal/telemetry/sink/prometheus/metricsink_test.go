@@ -5,9 +5,11 @@ package prometheus_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	psink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
@@ -296,4 +298,101 @@ func TestMetricReportSink_ConcurrentPublishIsRaceFree(t *testing.T) {
 		}
 	})
 	wg.Wait()
+}
+
+// -- Cardinality cap tests --
+
+func TestMetricReportSink_MaxBMCsCap_DropsUnknownBMC(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewMetricReportSinkWithOptions(reg, logr.Discard(), 2, 1000)
+	if err != nil {
+		t.Fatalf("NewMetricReportSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishSamples(context.Background(), "bmc-a", []sink.Sample{{MetricID: metricPower, Value: 100, Unit: "W"}})
+	_ = s.PublishSamples(context.Background(), "bmc-b", []sink.Sample{{MetricID: metricPower, Value: 200, Unit: "W"}})
+	// Third BMC exceeds cap — must be silently dropped.
+	_ = s.PublishSamples(context.Background(), "bmc-c", []sink.Sample{{MetricID: metricPower, Value: 300, Unit: "W"}})
+
+	if got := gatherMetricCount(t, reg); got != 2 {
+		t.Errorf("series count: got %d, want 2 (bmc-c dropped)", got)
+	}
+	if _, ok := gatherMetricValue(t, reg, metricMatch{hostname: "bmc-c"}); ok {
+		t.Error("bmc-c series present despite BMC cap")
+	}
+}
+
+func TestMetricReportSink_MaxBMCsCap_KnownBMCAlwaysAccepted(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewMetricReportSinkWithOptions(reg, logr.Discard(), 1, 1000)
+	if err != nil {
+		t.Fatalf("NewMetricReportSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishSamples(context.Background(), bmc1, []sink.Sample{{MetricID: metricPower, Value: 100, Unit: "W"}})
+	// Second publish to the same BMC must succeed even though cap==1.
+	_ = s.PublishSamples(context.Background(), bmc1, []sink.Sample{{MetricID: metricInletID, Value: 22, Unit: unitCel}})
+	if got := gatherMetricCount(t, reg); got != 2 {
+		t.Errorf("series count: got %d, want 2 (same BMC, two label tuples)", got)
+	}
+}
+
+func TestMetricReportSink_MaxSeriesPerBMC_DropsNewTuples(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewMetricReportSinkWithOptions(reg, logr.Discard(), 10, 3)
+	if err != nil {
+		t.Fatalf("NewMetricReportSinkWithOptions: %v", err)
+	}
+
+	for i := range 5 {
+		id := fmt.Sprintf("sensor-%d", i)
+		_ = s.PublishSamples(context.Background(), bmc1, []sink.Sample{
+			{MetricID: id, Value: float64(i), Unit: "W"},
+		})
+	}
+	// Only first 3 label tuples minted; 4th and 5th dropped.
+	if got := gatherMetricCount(t, reg); got != 3 {
+		t.Errorf("series count: got %d, want 3 (cap=3)", got)
+	}
+}
+
+func TestMetricReportSink_MaxSeriesPerBMC_ExistingTupleAlwaysUpdated(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewMetricReportSinkWithOptions(reg, logr.Discard(), 10, 1)
+	if err != nil {
+		t.Fatalf("NewMetricReportSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishSamples(context.Background(), bmc1, []sink.Sample{{MetricID: metricPower, Value: 100, Unit: "W"}})
+	// Same label tuple, new value — must update gauge even though cap==1.
+	_ = s.PublishSamples(context.Background(), bmc1, []sink.Sample{{MetricID: metricPower, Value: 250, Unit: "W"}})
+	if got := gatherMetricCount(t, reg); got != 1 {
+		t.Errorf("series count: got %d, want 1", got)
+	}
+	if v, ok := gatherMetricValue(t, reg, metricMatch{hostname: bmc1, metricID: metricPower}); !ok || v != 250 {
+		t.Errorf("gauge: got %v ok=%v, want 250", v, ok)
+	}
+}
+
+func TestMetricReportSink_MaxBMCsCap_ForgetMakesRoomForNewBMC(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewMetricReportSinkWithOptions(reg, logr.Discard(), 1, 1000)
+	if err != nil {
+		t.Fatalf("NewMetricReportSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishSamples(context.Background(), bmc1, []sink.Sample{{MetricID: metricPower, Value: 100, Unit: "W"}})
+	_ = s.PublishSamples(context.Background(), "bmc-2", []sink.Sample{{MetricID: metricPower, Value: 200, Unit: "W"}})
+	if got := gatherMetricCount(t, reg); got != 1 {
+		t.Errorf("before Forget: series count: got %d, want 1", got)
+	}
+
+	s.Forget(bmc1)
+	_ = s.PublishSamples(context.Background(), "bmc-2", []sink.Sample{{MetricID: metricPower, Value: 200, Unit: "W"}})
+	if got := gatherMetricCount(t, reg); got != 1 {
+		t.Errorf("after Forget+retry: series count: got %d, want 1 (bmc-2 accepted)", got)
+	}
+	if v, ok := gatherMetricValue(t, reg, metricMatch{hostname: "bmc-2", metricID: metricPower}); !ok || v != 200 {
+		t.Errorf("bmc-2 after Forget: got %v ok=%v, want 200", v, ok)
+	}
 }
