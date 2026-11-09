@@ -92,6 +92,16 @@ type BMCUserStatus struct {
 	// ID is the identifier of the user in the BMC system.
 	ID string `json:"id,omitempty"`
 
+	// AccountEnabled reflects whether the BMC account is enabled on the hardware.
+	// Nil means the state has not been observed yet.
+	// +optional
+	AccountEnabled *bool `json:"accountEnabled,omitempty"`
+
+	// AccountLocked reflects whether the BMC has locked the account (e.g. after
+	// repeated authentication failures).
+	// +optional
+	AccountLocked bool `json:"accountLocked,omitempty"`
+
 	// Conditions reflects the current state of the BMCUser.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 

@@ -2803,6 +2803,16 @@ spec:
           status:
             description: BMCUserStatus defines the observed state of BMCUser.
             properties:
+              accountEnabled:
+                description: |-
+                  AccountEnabled reflects whether the BMC account is enabled on the hardware.
+                  Nil means the state has not been observed yet.
+                type: boolean
+              accountLocked:
+                description: |-
+                  AccountLocked reflects whether the BMC has locked the account (e.g. after
+                  repeated authentication failures).
+                type: boolean
               bootstrapSecretRef:
                 description: |-
                   BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.
@@ -3031,12 +3041,15 @@ spec:
                   left untouched.
                 properties:
                   action:
-                    default: Rotate
+                    default: Disable
                     description: |-
-                      Action specifies what to do with the factory account.
-                      Only Rotate is supported at this time.
+                      Action specifies what to do with the factory account once both operator accounts are proven.
+                      Rotate changes the password (risky if interrupted). Disable sets Enabled=false on the BMC
+                      (idempotent, reversible, recommended for production). None leaves the account untouched.
                     enum:
                     - Rotate
+                    - Disable
+                    - None
                     type: string
                   ignoreVendors:
                     description: |-

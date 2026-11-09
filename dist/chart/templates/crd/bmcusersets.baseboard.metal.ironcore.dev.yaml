@@ -113,12 +113,15 @@ spec:
                   left untouched.
                 properties:
                   action:
-                    default: Rotate
+                    default: Disable
                     description: |-
-                      Action specifies what to do with the factory account.
-                      Only Rotate is supported at this time.
+                      Action specifies what to do with the factory account once both operator accounts are proven.
+                      Rotate changes the password (risky if interrupted). Disable sets Enabled=false on the BMC
+                      (idempotent, reversible, recommended for production). None leaves the account untouched.
                     enum:
                     - Rotate
+                    - Disable
+                    - None
                     type: string
                   ignoreVendors:
                     description: |-

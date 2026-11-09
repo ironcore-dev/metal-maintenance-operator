@@ -582,6 +582,11 @@ func main() {
 			os.Exit(1)
 		}
 
+		if err = webhookbaseboardv1alpha1.SetupBMCUserWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up BMCUser webhook")
+			os.Exit(1)
+		}
+
 		if err = webhooksystemv1alpha1.SetupBIOSSettingsWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to set up BIOSSettings webhook")
 			os.Exit(1)
