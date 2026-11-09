@@ -36,11 +36,12 @@ func main() {
 	}
 
 	bb, _, _ := mmo.TopologyMetricLabels(cfg)
+	region := mmo.TopologyRegionLabel(cfg)
 
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("bmc-detail",
 		dashboard.Name("BMC Detail"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		// ── Variables ──────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ func main() {
 		),
 		dashboard.AddVariable("region",
 			listvariable.List(
-				labelvalues.PrometheusLabelValues("region",
+				labelvalues.PrometheusLabelValues(region,
 					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`kube_ironcore_bmc_info`),
 				),
@@ -65,7 +66,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues(bb,
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -77,7 +78,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("name",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb"}`),
 				),
 				listvariable.DisplayName("Node"),
 			),
@@ -90,6 +91,7 @@ func main() {
 			panelgroup.PanelHeight(3),
 			panelgroup.AddPanel("BMC Info",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithColumnSettings([]table.ColumnSettings{
 						{Name: "name", Header: "BMC", EnableSorting: true, Hide: false},
@@ -103,7 +105,7 @@ func main() {
 				panel.Description("Hardware identity and topology for the selected BMC."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`kube_ironcore_bmc_info{name=~"$node"}`,
+						mmo.NormaliseTopologyLabels(cfg, `kube_ironcore_bmc_info{`+region+`=~"$region",name=~"$node"}`),
 						"$datasource",
 					),
 				),

@@ -56,9 +56,15 @@
 #     * on(bmc) group_left(bb, nodename, zone)
 #     kube_ironcore_info{customresource_kind="BMC"}
 #
+#
 # ── Display name and label key configuration ──────────────────────────────────
 
+projectName: "metal-maintenance-operator"
+
 topology:
+  region:
+    displayName: Region
+    labelKey: "region" # override in your deployment config if applicable
   bb:
     displayName: Building Block
     labelKey: "buildingBlock"
@@ -71,4 +77,4 @@ topology:
     labelKey: "topology_kubernetes_io_zone"
   type:
     displayName: Server Type
-    labelKey: ""  # override in your deployment config if applicable
+    labelKey: "" # override in your deployment config if applicable

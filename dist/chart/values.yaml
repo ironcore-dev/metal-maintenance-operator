@@ -303,24 +303,41 @@ telemetry:
     ## Timeout for the health check round-trip. Bounds: 5s – 5m.
     ##
     testEventTimeout: ""
-    ## Vendor/model rows that opt into event-based subscription.
+    ## Vendor/model rows that opt OUT of event-based subscription (exclusions).
     ## See config/telemetry/configmap.yaml for full field documentation.
     ##
-    eventBasedHardware: []
-    ## Example:
-    # eventBasedHardware:
-    #   - vendor: "Dell Inc."
-    #     models: ["PowerEdge R760", "PowerEdge R660"]
-    #     testMessageId: "FAN0001"
-    #     testSeverity: "Informational"
-    #   - vendor: "HPE"
-    #     models: ["*"]
-    #     testMessageId: "iLOEvents.1.0.TestAlert"
-    #     testSeverity: "OK"
-    #     testOriginOfCondition: "/redfish/v1/Managers/1"
-    #   - vendor: "Lenovo"
-    #     models: ["*"]
-    #     testMessageId: "EventRegistry.1.0.0.FQXSPCA0012I"
+    excludeHardware: []
+    ## Named map of vendor/model rows that opt into event-based subscription.
+    ## Keys are arbitrary identifiers used only for Helm merge; they do not
+    ## appear in the rendered ConfigMap.  Because Helm merges maps (unlike
+    ## lists, which are replaced), end-users can add entries in their own
+    ## values.yaml without repeating the defaults:
+    ##
+    ##   testEventOverrides:
+    ##     dell-r840:
+    ##       vendor: "Dell Inc."
+    ##       models: ["PowerEdge R840"]
+    ##       testMessageId: "Storage.1.0.DriveFailed"
+    ##       testSeverity: "Informational"
+    ##
+    ## See config/telemetry/configmap.yaml for full field documentation.
+    ##
+    testEventOverrides:
+      dell:
+        vendor: "Dell Inc."
+        models: ["*"]
+        testMessageId: "FAN.1.0.FAN0001"
+        testSeverity: "Informational"
+      hpe:
+        vendor: "HPE"
+        models: ["*"]
+        testMessageId: "iLOEvents.1.0.TestAlert"
+        testSeverity: "OK"
+        testOriginOfCondition: "/redfish/v1/Managers/1"
+      lenovo:
+        vendor: "Lenovo"
+        models: ["*"]
+        testMessageId: "EventRegistry.1.0.0.FQXSPCA0012I"
 
 ## Additional Secret resources to render in the release namespace.
 ## Useful for operator-pattern credentials (e.g. Gardener token-requestor secrets).

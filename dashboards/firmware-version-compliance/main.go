@@ -145,11 +145,12 @@ func main() {
 	}
 
 	bb, _, _ := mmo.TopologyMetricLabels(cfg)
+	region := mmo.TopologyRegionLabel(cfg)
 
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("firmware-version-compliance",
 		dashboard.Name("Firmware Version Compliance"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		dashboard.AddVariable("datasource",
 			listvariable.List(
@@ -158,7 +159,7 @@ func main() {
 		),
 		dashboard.AddVariable("region",
 			listvariable.List(
-				labelvalues.PrometheusLabelValues("region",
+				labelvalues.PrometheusLabelValues(region,
 					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`kube_ironcore_bmc_info`),
 				),
@@ -172,7 +173,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues(bb,
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -184,7 +185,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("manufacturer",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -208,7 +209,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"$manufacturer"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -259,6 +260,7 @@ func main() {
 			panelgroup.PanelHeight(10),
 			panelgroup.AddPanel("All Servers — Desired vs Observed BIOS Version",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithColumnSettings(biosVersionColumns(cfg)),
 					table.WithEnableFiltering(true),
@@ -315,6 +317,7 @@ func main() {
 			panelgroup.PanelHeight(10),
 			panelgroup.AddPanel("All Servers — Desired vs Observed BMC Version",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithColumnSettings(bmcVersionColumns(cfg)),
 					table.WithEnableFiltering(true),

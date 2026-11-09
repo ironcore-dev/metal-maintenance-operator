@@ -37,7 +37,7 @@ var knownVendors = map[bmc.Manufacturer]struct{}{
 }
 
 // supportedVendorList returns the canonical vendor strings in a stable
-// order for use in error messages. Built once, not allocated per error.
+// order for use in error messages.
 var supportedVendorList = []string{
 	string(bmc.ManufacturerDell),
 	string(bmc.ManufacturerHPE),
@@ -107,48 +107,57 @@ func Validate(cfg *Config) field.ErrorList {
 			fmt.Sprintf("must be between %s and %s when set", minTestEventTimeout, maxTestEventTimeout)))
 	}
 
-	// metrics — no allow-list validated here. The collector publishes every
-	// numeric value from every MetricReport on the BMC; metric selection
-	// happens at Prometheus scrape time via metric_relabel_configs.
-
-	// eventBasedHardware — vendor must be a canonical metal-operator
-	// bmc.Manufacturer value, models non-empty (and individually
-	// non-blank), valid semver for MinFirmware. Multiple rows per vendor
-	// are allowed to support per-model overrides (e.g. different
-	// testMessageId for old vs new firmware).
-	for i, hw := range cfg.EventBasedHardware {
-		hwPath := root.Child("eventBasedHardware").Index(i)
-		vendor := strings.TrimSpace(hw.Vendor)
+	// excludeHardware — vendor must be a canonical metal-operator bmc.Manufacturer value,
+	// models non-empty. MinFirmware, if set, must be valid semver.
+	for i, ex := range cfg.ExcludeHardware {
+		exPath := root.Child("excludeHardware").Index(i)
+		vendor := strings.TrimSpace(ex.Vendor)
 		switch {
 		case vendor == "":
-			errs = append(errs, field.Required(hwPath.Child("vendor"), ""))
-		case hw.Vendor != vendor || !isKnownVendor(vendor):
-			// Reject non-canonical values up front. hw.Vendor != vendor
-			// catches whitespace-padded forms (e.g. " Dell Inc. ") that
-			// would pass validation but never match the exact-compare
-			// runtime path in vendorMatches.
-			errs = append(errs, field.NotSupported(hwPath.Child("vendor"), hw.Vendor, supportedVendorList))
+			errs = append(errs, field.Required(exPath.Child("vendor"), ""))
+		case ex.Vendor != vendor || !isKnownVendor(vendor):
+			errs = append(errs, field.NotSupported(exPath.Child("vendor"), ex.Vendor, supportedVendorList))
 		}
-		if len(hw.Models) == 0 {
-			errs = append(errs, field.Required(hwPath.Child("models"), "at least one model or \"*\" required"))
+		if len(ex.Models) == 0 {
+			errs = append(errs, field.Required(exPath.Child("models"), "at least one model or \"*\" required"))
 		} else {
-			for j, model := range hw.Models {
+			for j, model := range ex.Models {
 				if strings.TrimSpace(model) == "" {
-					errs = append(errs, field.Invalid(hwPath.Child("models").Index(j), model,
+					errs = append(errs, field.Invalid(exPath.Child("models").Index(j), model,
 						"model entries must not be blank"))
 				}
 			}
 		}
-		if hw.MinFirmware != "" {
-			if _, err := semver.ParseTolerant(hw.MinFirmware); err != nil {
-				errs = append(errs, field.Invalid(hwPath.Child("minFirmware"), hw.MinFirmware,
+		if ex.MinFirmware != "" {
+			if _, err := semver.ParseTolerant(ex.MinFirmware); err != nil {
+				errs = append(errs, field.Invalid(exPath.Child("minFirmware"), ex.MinFirmware,
 					fmt.Sprintf("must be a valid semver: %v", err)))
 			}
 		}
-		if cfg.TestEventInterval > 0 && hw.TestMessageId == "" {
-			errs = append(errs, field.Required(hwPath.Child("testMessageId"),
-				"required when testEventInterval is set"))
+	}
+
+	// testEventOverrides — vendor must be canonical, models non-empty.
+	// testMessageId is optional (auto-discovered at runtime when absent).
+	for i, ov := range cfg.TestEventOverrides {
+		ovPath := root.Child("testEventOverrides").Index(i)
+		vendor := strings.TrimSpace(ov.Vendor)
+		switch {
+		case vendor == "":
+			errs = append(errs, field.Required(ovPath.Child("vendor"), ""))
+		case ov.Vendor != vendor || !isKnownVendor(vendor):
+			errs = append(errs, field.NotSupported(ovPath.Child("vendor"), ov.Vendor, supportedVendorList))
+		}
+		if len(ov.Models) == 0 {
+			errs = append(errs, field.Required(ovPath.Child("models"), "at least one model or \"*\" required"))
+		} else {
+			for j, model := range ov.Models {
+				if strings.TrimSpace(model) == "" {
+					errs = append(errs, field.Invalid(ovPath.Child("models").Index(j), model,
+						"model entries must not be blank"))
+				}
+			}
 		}
 	}
+
 	return errs
 }

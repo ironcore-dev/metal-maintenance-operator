@@ -60,12 +60,14 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 	if err := v.client.List(ctx, &biosvList); err != nil {
 		ch <- prometheus.NewInvalidMetric(biosFirmwareDesc, err)
 	} else {
+		coveredServers := make(map[string]struct{}, len(biosvList.Items))
 		for i := range biosvList.Items {
 			bv := &biosvList.Items[i]
 			if bv.Spec.ServerRef == nil {
 				continue
 			}
 			serverName := bv.Spec.ServerRef.Name
+			coveredServers[serverName] = struct{}{}
 			observedVersion := ""
 			var srv metalv1alpha1.Server
 			if getErr := v.client.Get(ctx, client.ObjectKey{Name: serverName}, &srv); getErr == nil {
@@ -81,18 +83,37 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 			}
 			ch <- m
 		}
+
+		var allServers metalv1alpha1.ServerList
+		if v.client.List(ctx, &allServers) == nil {
+			for i := range allServers.Items {
+				srv := &allServers.Items[i]
+				if _, ok := coveredServers[srv.Name]; ok {
+					continue
+				}
+				m, metricErr := prometheus.NewConstMetric(biosFirmwareDesc, prometheus.GaugeValue, 1,
+					"", srv.Name, srv.Status.Manufacturer, srv.Status.Model, "NotDefined", srv.Status.BIOSVersion, "NotDefined")
+				if metricErr != nil {
+					ch <- prometheus.NewInvalidMetric(biosFirmwareDesc, metricErr)
+					continue
+				}
+				ch <- m
+			}
+		}
 	}
 
 	var bmcvList baseboardv1alpha1.BMCVersionList
 	if err := v.client.List(ctx, &bmcvList); err != nil {
 		ch <- prometheus.NewInvalidMetric(bmcFirmwareDesc, err)
 	} else {
+		coveredBMCs := make(map[string]struct{}, len(bmcvList.Items))
 		for i := range bmcvList.Items {
 			bv := &bmcvList.Items[i]
 			if bv.Spec.BMCRef == nil {
 				continue
 			}
 			bmcName := bv.Spec.BMCRef.Name
+			coveredBMCs[bmcName] = struct{}{}
 			observedVersion := ""
 			var bmc metalv1alpha1.BMC
 			if getErr := v.client.Get(ctx, client.ObjectKey{Name: bmcName}, &bmc); getErr == nil {
@@ -107,6 +128,23 @@ func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 			ch <- m
+		}
+
+		var allBMCs metalv1alpha1.BMCList
+		if v.client.List(ctx, &allBMCs) == nil {
+			for i := range allBMCs.Items {
+				bmc := &allBMCs.Items[i]
+				if _, ok := coveredBMCs[bmc.Name]; ok {
+					continue
+				}
+				m, metricErr := prometheus.NewConstMetric(bmcFirmwareDesc, prometheus.GaugeValue, 1,
+					"", bmc.Name, bmc.Status.Manufacturer, bmc.Status.Model, "NotDefined", bmc.Status.FirmwareVersion, "NotDefined")
+				if metricErr != nil {
+					ch <- prometheus.NewInvalidMetric(bmcFirmwareDesc, metricErr)
+					continue
+				}
+				ch <- m
+			}
 		}
 	}
 }

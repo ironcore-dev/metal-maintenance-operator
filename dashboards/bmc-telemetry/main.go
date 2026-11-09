@@ -37,13 +37,14 @@ func main() {
 	}
 
 	bb, _, _ := mmo.TopologyMetricLabels(cfg)
+	region := mmo.TopologyRegionLabel(cfg)
 	typeLabel := mmo.TypeMetricLabel(cfg)
 	typeHeader := mmo.TypeDisplayName(cfg)
 
 	inventoryCols := []table.ColumnSettings{
 		{Name: "name", Header: "BMC Name", EnableSorting: true, Hide: false,
 			DataLink: &table.DataLink{
-				URL:        "/projects/metal-maintenance-operator/dashboards/bmc-detail?var-node=${__data.fields[\"name\"]}",
+				URL:        "/projects/" + cfg.ProjectName + "/dashboards/bmc-detail?var-node=${__data.fields[\"name\"]}",
 				Title:      "Open BMC Detail",
 				OpenNewTab: false,
 			}},
@@ -55,14 +56,26 @@ func main() {
 	}
 	inventoryCols = append(inventoryCols,
 		table.ColumnSettings{Name: "firmware_version", Header: "Firmware", EnableSorting: true, Hide: false},
-		table.ColumnSettings{Name: "region", Header: "Region", EnableSorting: true, Hide: false},
+		table.ColumnSettings{Name: region, Header: "Region", EnableSorting: true, Hide: false},
 		table.ColumnSettings{Name: bb, Header: cfg.Topology.BB.DisplayName, EnableSorting: true, Hide: false},
+		table.ColumnSettings{Name: "telemetry", Header: "Telemetry", EnableSorting: true, Sort: table.AscSort, Hide: false,
+			CellSettings: []table.CellSettings{
+				{
+					Condition: table.Condition{Kind: table.RegexConditionKind, Spec: &table.RegexConditionSpec{Expr: "^Reporting$"}},
+					TextColor: "#73BF69",
+				},
+				{
+					Condition: table.Condition{Kind: table.RegexConditionKind, Spec: &table.RegexConditionSpec{Expr: ".+"}},
+					TextColor: "#F2495C",
+				},
+			},
+		},
 	)
 
 	exec := sdk.NewExec()
 	builder, buildErr := dashboard.New("bmc-telemetry",
 		dashboard.Name("BMC Fleet Overview"),
-		dashboard.ProjectName("metal-maintenance-operator"),
+		dashboard.ProjectName(cfg.ProjectName),
 
 		// ── Variables ──────────────────────────────────────────────────────────────
 
@@ -73,7 +86,7 @@ func main() {
 		),
 		dashboard.AddVariable("region",
 			listvariable.List(
-				labelvalues.PrometheusLabelValues("region",
+				labelvalues.PrometheusLabelValues(region,
 					labelvalues.Datasource("$datasource"),
 					labelvalues.Matchers(`kube_ironcore_bmc_info`),
 				),
@@ -87,7 +100,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues(bb,
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -99,7 +112,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("name",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb"}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb"}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -111,7 +124,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("manufacturer",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer!=""}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer!=""}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -123,7 +136,7 @@ func main() {
 			listvariable.List(
 				labelvalues.PrometheusLabelValues("model",
 					labelvalues.Datasource("$datasource"),
-					labelvalues.Matchers(`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model!=""}`),
+					labelvalues.Matchers(`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model!=""}`),
 				),
 				listvariable.AllowAllValue(true),
 				listvariable.AllowMultiple(true),
@@ -152,7 +165,7 @@ func main() {
 				panel.Description("Total BMC resources managed in the selected region and building block. Compare with the reporting count above to identify telemetry coverage gaps."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -169,7 +182,7 @@ func main() {
 				panel.Description("Total Dell BMCs in the selected region and building block."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"Dell.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"Dell.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -179,7 +192,7 @@ func main() {
 				panel.Description("Total HPE BMCs in the selected region and building block."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"HPE.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"HPE.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -189,7 +202,7 @@ func main() {
 				panel.Description("Total Lenovo BMCs in the selected region and building block."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"Lenovo.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"Lenovo.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -199,7 +212,7 @@ func main() {
 				panel.Description("Total BULL (Atos/Eviden) BMCs in the selected region and building block."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"BULL.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"BULL.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -209,7 +222,7 @@ func main() {
 				panel.Description("Total Fujitsu (Fsas) BMCs in the selected region and building block."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",manufacturer=~"Fsas.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",manufacturer=~"Fsas.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -226,7 +239,7 @@ func main() {
 				panel.Description("Dell BMCs running iDRAC 9 era firmware (16G generation). These expose telemetry via MetricReport push."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",model=~"16G.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",model=~"16G.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -236,7 +249,7 @@ func main() {
 				panel.Description("Dell BMCs running iDRAC 10 era firmware (17G generation). These expose telemetry via MetricReport push."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",model=~"17G.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",model=~"17G.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -246,7 +259,7 @@ func main() {
 				panel.Description("HPE BMCs running iLO 6 firmware (Gen10 Plus / Gen11 servers)."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",model=~"iLO 6.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",model=~"iLO 6.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -256,7 +269,7 @@ func main() {
 				panel.Description("HPE BMCs running iLO 7 firmware (Gen12 servers)."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",model=~"iLO 7.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",model=~"iLO 7.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -266,7 +279,7 @@ func main() {
 				panel.Description("Fujitsu BMCs running iRMC S6 (integrated Remote Management Controller generation 6)."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",model=~"iRMC S6.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",model=~"iRMC S6.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -276,7 +289,7 @@ func main() {
 				panel.Description("BMCs running OpenBMC firmware (open-source BMC stack, used by some BULL/Atos servers)."),
 				panel.AddQuery(
 					mmo.PromQL(
-						`count(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",model=~"OpenBmc.*"}) or vector(0)`,
+						`count(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",model=~"OpenBmc.*"}) or vector(0)`,
 						"$datasource",
 					),
 				),
@@ -290,6 +303,7 @@ func main() {
 			panelgroup.PanelHeight(8),
 			panelgroup.AddPanel("Telemetry Coverage by Manufacturer / Model",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithColumnSettings([]table.ColumnSettings{
 						{Name: "manufacturer", Header: "Manufacturer", EnableSorting: true, Hide: false},
@@ -327,7 +341,7 @@ func main() {
 				// Query A: total BMC count per manufacturer/model
 				panel.AddQuery(
 					mmo.PromQL(
-						`count by(manufacturer,model)(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""})`,
+						`count by(manufacturer,model)(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""})`,
 						"$datasource",
 					),
 				),
@@ -337,24 +351,24 @@ func main() {
 						`count by(manufacturer,model)(`+
 							`count by(hostname)(redfish_monitor_reading)`+
 							` * on(hostname) group_left(manufacturer,model)`+
-							` label_replace(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""},"hostname","$1","name","(.*)")`+
+							` label_replace(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""},"hostname","$1","name","(.*)")`+
 							`)`+
-							` or count by(manufacturer,model)(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""}) * 0`,
+							` or count by(manufacturer,model)(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""}) * 0`,
 						"$datasource",
 					),
 				),
 				// Query C: not-reporting count (total - reporting); drives sort and highlighting
 				panel.AddQuery(
 					mmo.PromQL(
-						`count by(manufacturer,model)(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""})`+
+						`count by(manufacturer,model)(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""})`+
 							` - on(manufacturer,model) group_left()`+
 							` (`+
 							`count by(manufacturer,model)(`+
 							`count by(hostname)(redfish_monitor_reading)`+
 							` * on(hostname) group_left(manufacturer,model)`+
-							` label_replace(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""},"hostname","$1","name","(.*)")`+
+							` label_replace(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""},"hostname","$1","name","(.*)")`+
 							`)`+
-							` or count by(manufacturer,model)(kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""}) * 0`+
+							` or count by(manufacturer,model)(kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model",manufacturer!=""}) * 0`+
 							`)`,
 						"$datasource",
 					),
@@ -369,18 +383,38 @@ func main() {
 			panelgroup.PanelHeight(12),
 			panelgroup.AddPanel("BMC Inventory",
 				table.Table(
+					table.WithEnableSorting(true),
 					table.WithDefaultColumnHidden(true),
 					table.WithEnableFiltering(true),
 					table.WithColumnSettings(inventoryCols),
 				),
-				panel.Description("Per-BMC inventory showing hardware identity and topology. Select a node from the Node variable above and click the panel link icon to open the BMC Detail dashboard for that host."),
-				panel.AddLink("/projects/metal-maintenance-operator/dashboards/bmc-detail",
+				panel.Description("Per-BMC inventory showing hardware identity, topology and telemetry status. The Telemetry column shows green (Reporting) when the BMC is actively pushing redfish_monitor_reading metrics and red (Not Reporting) when no readings are present. Non-reporting BMCs sort to the top by default. Click the BMC Name link to open the BMC Detail dashboard for that host."),
+				panel.AddLink("/projects/"+cfg.ProjectName+"/dashboards/bmc-detail",
 					link.Name("BMC Detail"),
 					link.RenderVariable(true),
 				),
+				// Single query: bmc_info on the left so all its labels are preserved.
+				// The two arms are mutually exclusive (reporting vs not-reporting), so or never
+				// produces duplicate rows for the same BMC.
 				panel.AddQuery(
 					mmo.PromQL(
-						`kube_ironcore_bmc_info{region=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`,
+						// BBJoin scopes readings to the selected region/bb/node/manufacturer/model
+						// by joining redfish_monitor_reading with kube_ironcore_bmc_info on hostname.
+						// This prevents readings from a same-named BMC in a different building block
+						// (e.g. in a federated Prometheus) from affecting the telemetry status shown here.
+						`label_replace(`+
+							`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` * on(name) group_left()`+
+							` label_replace((`+mmo.BBJoin(cfg, `count by(hostname)(redfish_monitor_reading)`)+`) > bool 0, "name", "$1", "hostname", "(.*)"),`+
+							` "telemetry", "Reporting", "name", ".*"`+
+							`)`+
+							` or`+
+							` label_replace(`+
+							`kube_ironcore_bmc_info{`+region+`=~"$region",`+bb+`=~"$bb",name=~"$node",manufacturer=~"$manufacturer",model=~"$model"}`+
+							` unless on(name)`+
+							` label_replace(`+mmo.BBJoin(cfg, `count by(hostname)(redfish_monitor_reading)`)+`, "name", "$1", "hostname", "(.*)"),`+
+							` "telemetry", "Not Reporting", "name", ".*"`+
+							`)`,
 						"$datasource",
 					),
 				),
