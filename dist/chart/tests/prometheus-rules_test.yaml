@@ -1,0 +1,176 @@
+# SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+suite: prometheusRules
+templates:
+  - extras/recording-rules.yaml
+tests:
+
+  # ── Global gate ──────────────────────────────────────────────────────────────
+
+  - it: renders nothing when prometheusRules.enabled is false
+    set:
+      prometheusRules.enabled: false
+      prometheusRules.labels.prometheus: test
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing when both recording and alerts are disabled
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # ── Recording rules ───────────────────────────────────────────────────────────
+
+  - it: renders one PrometheusRule for recording rules when enabled
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: true
+      prometheusRules.alerts.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PrometheusRule
+      - equal:
+          path: metadata.name
+          value: mmo-rules-redfish-canonical
+      - equal:
+          path: metadata.labels.prometheus
+          value: test
+      - isNotEmpty:
+          path: spec.groups[0].rules
+
+  - it: does not render recording rules when recording.enabled is false
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - matchRegex:
+          path: metadata.name
+          pattern: "^mmo-alert-"
+
+  # ── Alert rules: global gate ─────────────────────────────────────────────────
+
+  - it: renders no alert PrometheusRules when alerts.enabled is false
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders both alert PrometheusRules when alerts.enabled is true
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  # ── redfishHardwareAlert ──────────────────────────────────────────────────────
+
+  - it: renders redfishHardwareAlert with correct name and rule
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+      prometheusRules.alerts.redfishUnmappedMetricId.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: mmo-alert-redfish-hardware-alert
+      - equal:
+          path: spec.groups[0].rules[0].alert
+          value: RedfishHardwareAlert
+
+  - it: does not render redfishHardwareAlert when its enabled flag is false
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+      prometheusRules.alerts.redfishHardwareAlert.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: mmo-alert-redfish-unmapped-metric-id
+
+  # ── redfishUnmappedMetricId ───────────────────────────────────────────────────
+
+  - it: renders redfishUnmappedMetricId with correct name and rule
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+      prometheusRules.alerts.redfishHardwareAlert.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: mmo-alert-redfish-unmapped-metric-id
+      - equal:
+          path: spec.groups[0].rules[0].alert
+          value: RedfishUnmappedMetricId
+
+  - it: does not render redfishUnmappedMetricId when its enabled flag is false
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+      prometheusRules.alerts.redfishUnmappedMetricId.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: mmo-alert-redfish-hardware-alert
+
+  # ── Labels ────────────────────────────────────────────────────────────────────
+
+  - it: applies the prometheus label to alert PrometheusRules
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: obs-metrics-platform
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+      prometheusRules.alerts.redfishUnmappedMetricId.enabled: false
+    asserts:
+      - equal:
+          path: metadata.labels.prometheus
+          value: obs-metrics-platform
+
+  - it: applies extraLabels to alert PrometheusRules
+    set:
+      prometheusRules.enabled: true
+      prometheusRules.labels.prometheus: test
+      prometheusRules.extraLabels.team: foundation
+      prometheusRules.recording.enabled: false
+      prometheusRules.alerts.enabled: true
+      prometheusRules.alerts.redfishUnmappedMetricId.enabled: false
+    asserts:
+      - equal:
+          path: metadata.labels.team
+          value: foundation

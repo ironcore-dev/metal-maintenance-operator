@@ -24,12 +24,13 @@ spec:
 {{- end }}
 {{- end }}
 {{- if .Values.prometheusRules.alerts.enabled }}
-{{- range $path, $bytes := .Files.Glob "rules/redfish-canonical-alerts.rules" }}
+{{- range $name, $cfg := .Values.prometheusRules.alerts }}
+{{- if and (ne $name "enabled") $cfg.enabled }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: {{ printf "mmo-%s" $path | replace "/" "-" | replace ".rules" "" }}
+  name: {{ printf "mmo-alert-%s" ($name | kebabcase) }}
   namespace: {{ $.Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ $commonMeta.service }}
@@ -40,7 +41,8 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-{{ printf "%s" $bytes | indent 2 }}
+{{ $.Files.Get (printf "rules/alert-%s.rules" $name) | indent 2 }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

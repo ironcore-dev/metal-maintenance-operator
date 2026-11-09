@@ -410,6 +410,10 @@ helm-deploy: install-helm ## Deploy manager to the K8s cluster via Helm. Specify
 helm-uninstall: ## Uninstall the Helm release from the K8s cluster.
 	$(HELM) uninstall $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)
 
+.PHONY: helm-test
+helm-test: ## Run Helm unit tests (requires helm-unittest plugin).
+	$(HELM) unittest "$(HELM_CHART_DIR)" $(HELM_EXTRA_ARGS)
+
 .PHONY: helm-status
 helm-status: ## Show Helm release status.
 	$(HELM) status $(HELM_RELEASE) --namespace $(HELM_NAMESPACE)

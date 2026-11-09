@@ -1,0 +1,10 @@
+groups:
+  - name: redfish_canonical_alerts
+    rules:
+    - alert: RedfishHardwareAlert
+      expr: |
+        increase(redfish_event_alert_total[5m]) > 0
+      for: 0m
+      annotations:
+        summary: >
+          BMC {{ $labels.hostname }} received a Redfish {{ $labels.severity }} alert [{{ $labels.message_id }}]
