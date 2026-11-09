@@ -230,9 +230,15 @@ prometheusRules:
   recording:
     enabled: true
 
-  ## Deploy unmapped MetricId alert (redfish-canonical-alerts.rules).
+  ## Alerting rules. The global enabled flag is the primary on/off switch;
+  ## individual alerts can be disabled independently via their own enabled flag.
+  ## Each key (camelCase) maps to a rules/alert-<key>.rules file.
   alerts:
-    enabled: true
+    enabled: false
+    redfishUnmappedMetricId:
+      enabled: true
+    redfishHardwareAlert:
+      enabled: true
 
   ## Labels applied to all generated PrometheusRule CRs.
   ## The prometheus label must match the ruleSelector on the target Prometheus instance.
