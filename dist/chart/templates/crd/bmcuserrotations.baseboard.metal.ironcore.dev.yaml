@@ -208,6 +208,7 @@ spec:
                 - Annotation
                 - PasswordExpiry
                 - FactoryBootstrap
+                - TTLExpiry
                 type: string
               triggeredAt:
                 description: |-
