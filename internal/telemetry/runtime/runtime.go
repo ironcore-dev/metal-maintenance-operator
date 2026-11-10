@@ -137,6 +137,10 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 		// every Critical event writes the CriticalEventReceived condition,
 		// emits a Kubernetes Event, and sets the alert gauge to 1.
 		eventSink.OnCritical = handler.HandleCritical
+		// Wire the OK/Info clear path through the same sink so EventID
+		// deduplication applies — a resent OK cannot clear a condition
+		// set by a newer fault.
+		eventSink.OnClear = handler.HandleClear
 		criticalHandler = handler
 
 		// Pre-warm the gauge after the cache syncs so the metric is correct

@@ -40,6 +40,12 @@ type OnCriticalFunc func(ctx context.Context, bmcName string, event sink.Event) 
 // counter mutation.
 type OnWarningFunc func(ctx context.Context, bmcName string, event sink.Event) error
 
+// OnClearFunc is invoked when an OK/Info-severity event arrives from a BMC,
+// indicating a previously-reported hardware fault has resolved. The EventID is
+// deduplicated the same way as Critical/Warning so a resent OK event cannot
+// clear a condition set by a newer fault.
+type OnClearFunc func(ctx context.Context, bmcName string) error
+
 // maxSeenIDsPerBMC bounds dedup state per BMC. Once exceeded, oldest
 // entry evicts FIFO so EventIDs reused after a BMC reset/firmware-update
 // become eligible to be counted again — process-lifetime memory would
@@ -60,6 +66,8 @@ type alertLabelKey struct {
 // same active event don't double-count. Optionally fires OnCritical for
 // every Critical-severity event and OnWarning for every Warning-severity
 // event so downstream handlers can attach without a wrapper layer.
+// OnClear fires for OK/Info-severity events; the EventID is deduped so a
+// resent OK cannot clear a condition set by a newer fault.
 //
 // Label set matches metal-operator's production schema:
 // {hostname, severity, message_id, component}. component is derived from
@@ -70,6 +78,7 @@ type EventSink struct {
 
 	OnCritical OnCriticalFunc
 	OnWarning  OnWarningFunc
+	OnClear    OnClearFunc
 
 	mu         sync.Mutex
 	seenForBMC map[string]*seenSet
@@ -145,6 +154,7 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 	type dispatchEntry struct {
 		event      sink.Event
 		isCritical bool
+		isClear    bool
 	}
 	var toDispatch []dispatchEntry
 	for _, ev := range events {
@@ -162,7 +172,17 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 		// vendor-specific severities (e.g. "Fatal") are kept — they
 		// represent real alerts outside the standard Redfish enum.
 		sev := canonicalSeverity(ev.Severity)
-		if sev == "" || sev == "OK" || sev == "Info" {
+		if sev == "" {
+			continue
+		}
+		if sev == "OK" || sev == "Info" {
+			if s.OnClear != nil {
+				// Defer commit until OnClear succeeds — same pattern as
+				// OnCritical. This deduplicates OK/Info EventIDs so a BMC
+				// resending a previously-delivered OK cannot clear a
+				// condition set by a newer fault.
+				toDispatch = append(toDispatch, dispatchEntry{event: ev, isClear: true})
+			}
 			continue
 		}
 		if s.OnCritical != nil && sev == severityCritical {
@@ -183,22 +203,32 @@ func (s *EventSink) PublishEvents(ctx context.Context, bmcName string, events []
 	var failed []error
 	for _, entry := range toDispatch {
 		var err error
-		if entry.isCritical {
+		switch {
+		case entry.isCritical:
 			err = s.OnCritical(ctx, bmcName, entry.event)
-		} else {
+		case entry.isClear:
+			err = s.OnClear(ctx, bmcName)
+		default:
 			err = s.OnWarning(ctx, bmcName, entry.event)
 		}
 		if err != nil {
 			severity := "warning"
-			if entry.isCritical {
+			switch {
+			case entry.isCritical:
 				severity = "critical"
+			case entry.isClear:
+				severity = "clear"
 			}
 			s.log.Error(err, "Event handler failed; event will be retried on the next BMC push",
 				"hostname", bmcName, "eventID", entry.event.EventID, "severity", severity)
 			failed = append(failed, fmt.Errorf("%s event %q: %w", severity, entry.event.EventID, err))
 			continue
 		}
-		s.commitCritical(bmcName, entry.event)
+		if entry.isClear {
+			s.commitClear(bmcName, entry.event)
+		} else {
+			s.commitCritical(bmcName, entry.event)
+		}
 	}
 	if len(failed) > 0 {
 		return errors.Join(failed...)
@@ -220,6 +250,19 @@ func (s *EventSink) commitCritical(bmcName string, ev sink.Event) {
 	}
 	seenIDs.add(ev.EventID)
 	s.recordEventLocked(bmcName, ev, keys)
+}
+
+// commitClear re-acquires the mutex to add a successfully-dispatched OK/Info
+// event to the dedup set. Does NOT increment the counter — OK/Info events are
+// not actionable alerts.
+func (s *EventSink) commitClear(bmcName string, ev sink.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seenIDs := s.ensureSeenSet(bmcName)
+	if seenIDs.contains(ev.EventID) {
+		return
+	}
+	seenIDs.add(ev.EventID)
 }
 
 // ensureSeenSet returns the bounded EventID set for the BMC, creating

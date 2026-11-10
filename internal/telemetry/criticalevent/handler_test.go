@@ -14,6 +14,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/criticalevent"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -256,6 +257,225 @@ func TestHandleCritical_PropagatesListError(t *testing.T) {
 	if !strings.Contains(err.Error(), "apiserver down") {
 		t.Errorf("error doesn't wrap underlying cause: %v", err)
 	}
+}
+
+// -- HandleClear tests --
+
+func TestHandleClear_SingleMatchingServer_ClearsCondition(t *testing.T) {
+	s := server(testServerName, "bmc-1")
+	c := newClient(t, s)
+	h := &criticalevent.ConditionHandler{Client: c, Log: logr.Discard()}
+
+	if err := h.HandleCritical(context.Background(), "bmc-1", criticalEvent("E1")); err != nil {
+		t.Fatalf("HandleCritical: %v", err)
+	}
+	if err := h.HandleClear(context.Background(), "bmc-1"); err != nil {
+		t.Fatalf("HandleClear: %v", err)
+	}
+
+	got := &metalv1alpha1.Server{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: testServerName}, got); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	cond := findCondition(got)
+	if cond == nil {
+		t.Fatal("condition missing after clear")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("status: got %v, want False", cond.Status)
+	}
+	if cond.Reason != "OKEventReceived" {
+		t.Errorf("reason: got %q, want OKEventReceived", cond.Reason)
+	}
+}
+
+func TestHandleClear_MultipleMatchingServers_ClearsAll(t *testing.T) {
+	s1 := server(testServerName, "bmc-1")
+	s2 := server("srv-2", "bmc-1")
+	other := server("srv-3", "bmc-other")
+	c := newClient(t, s1, s2, other)
+	h := &criticalevent.ConditionHandler{Client: c, Log: logr.Discard()}
+
+	if err := h.HandleCritical(context.Background(), "bmc-1", criticalEvent("E1")); err != nil {
+		t.Fatalf("HandleCritical: %v", err)
+	}
+	if err := h.HandleClear(context.Background(), "bmc-1"); err != nil {
+		t.Fatalf("HandleClear: %v", err)
+	}
+
+	for _, name := range []string{testServerName, "srv-2"} {
+		got := &metalv1alpha1.Server{}
+		_ = c.Get(context.Background(), client.ObjectKey{Name: name}, got)
+		cond := findCondition(got)
+		if cond == nil {
+			t.Errorf("%s: condition missing", name)
+			continue
+		}
+		if cond.Status != metav1.ConditionFalse {
+			t.Errorf("%s: status: got %v, want False", name, cond.Status)
+		}
+	}
+	// srv-3 (different BMC) must remain unaffected.
+	got := &metalv1alpha1.Server{}
+	_ = c.Get(context.Background(), client.ObjectKey{Name: "srv-3"}, got)
+	if findCondition(got) != nil {
+		t.Error("srv-3 (different BMC) should not be touched")
+	}
+}
+
+func TestHandleClear_NoMatchingServers_IsNoop(t *testing.T) {
+	c := newClient(t)
+	h := &criticalevent.ConditionHandler{Client: c, Log: logr.Discard()}
+
+	if err := h.HandleClear(context.Background(), "bmc-nobody"); err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
+func TestHandleClear_EmptyBMCName_IsNoop(t *testing.T) {
+	s := server(testServerName, "bmc-1")
+	c := newClient(t, s)
+	h := &criticalevent.ConditionHandler{Client: c, Log: logr.Discard()}
+
+	if err := h.HandleClear(context.Background(), ""); err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
+func TestHandleClear_WithoutPriorCritical_IsNoop(t *testing.T) {
+	s := server(testServerName, "bmc-1")
+	c := newClient(t, s)
+	h := &criticalevent.ConditionHandler{Client: c, Log: logr.Discard()}
+
+	// ClearCriticalAlert on a server with no existing critical condition
+	// should not error — apimeta.SetStatusCondition short-circuits.
+	if err := h.HandleClear(context.Background(), "bmc-1"); err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
+func TestHandleClear_GaugeResetsToZeroOnSuccess(t *testing.T) {
+	gauge := criticalevent.NewCriticalAlertGauge()
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(gauge); err != nil {
+		t.Fatalf("register gauge: %v", err)
+	}
+
+	s := server(testServerName, "bmc-1")
+	c := newClient(t, s)
+	h := &criticalevent.ConditionHandler{Client: c, Log: logr.Discard(), AlertGauge: gauge}
+
+	if err := h.HandleCritical(context.Background(), "bmc-1", criticalEvent("E1")); err != nil {
+		t.Fatalf("HandleCritical: %v", err)
+	}
+	if got := readGaugeValue(t, reg, "bmc-1"); got != 1 {
+		t.Errorf("gauge after HandleCritical: got %v, want 1", got)
+	}
+
+	if err := h.HandleClear(context.Background(), "bmc-1"); err != nil {
+		t.Fatalf("HandleClear: %v", err)
+	}
+	if got := readGaugeValue(t, reg, "bmc-1"); got != 0 {
+		t.Errorf("gauge after HandleClear: got %v, want 0", got)
+	}
+}
+
+func TestHandleClear_PartialPatchFailure_GaugeStaysActive(t *testing.T) {
+	gauge := criticalevent.NewCriticalAlertGauge()
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(gauge); err != nil {
+		t.Fatalf("register gauge: %v", err)
+	}
+
+	s1 := server(testServerName, "bmc-1")
+	s2 := server("srv-2", "bmc-1")
+	inner := newClient(t, s1, s2)
+	h := &criticalevent.ConditionHandler{Client: inner, Log: logr.Discard(), AlertGauge: gauge}
+
+	if err := h.HandleCritical(context.Background(), "bmc-1", criticalEvent("E1")); err != nil {
+		t.Fatalf("HandleCritical: %v", err)
+	}
+
+	// Inject a Status().Patch() failure for srv-2 so only one server clears.
+	h.Client = &statusPatchErrorClient{
+		Client:     inner,
+		failOnName: "srv-2",
+		patchErr:   errors.New("injected patch error"),
+	}
+
+	if err := h.HandleClear(context.Background(), "bmc-1"); err == nil {
+		t.Fatal("expected error from partial patch failure")
+	}
+
+	// Gauge must remain 1: srv-2 still has an active fault condition.
+	if got := readGaugeValue(t, reg, "bmc-1"); got != 1 {
+		t.Errorf("gauge after partial failure: got %v, want 1", got)
+	}
+}
+
+// readGaugeValue reads the redfish_server_critical_alert gauge value for the
+// given hostname label, returning -1 if the series is not found.
+func readGaugeValue(t *testing.T, reg prometheus.Gatherer, hostname string) float64 {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != criticalevent.AlertGaugeMetricName {
+			continue
+		}
+		for _, m := range mf.Metric {
+			for _, l := range m.Label {
+				if l.GetName() == "hostname" && l.GetValue() == hostname {
+					return m.Gauge.GetValue()
+				}
+			}
+		}
+	}
+	t.Errorf("gauge series not found for hostname %q", hostname)
+	return -1
+}
+
+// statusPatchErrorClient wraps a client.Client and injects a Status().Patch()
+// error for the object whose name matches failOnName.
+type statusPatchErrorClient struct {
+	client.Client
+	failOnName string
+	patchErr   error
+}
+
+func (c *statusPatchErrorClient) Status() client.SubResourceWriter {
+	return &failingStatusWriter{
+		real:       c.Client.Status(),
+		failOnName: c.failOnName,
+		err:        c.patchErr,
+	}
+}
+
+type failingStatusWriter struct {
+	real       client.SubResourceWriter
+	failOnName string
+	err        error
+}
+
+func (w *failingStatusWriter) Create(ctx context.Context, obj client.Object, sub client.Object, opts ...client.SubResourceCreateOption) error {
+	return w.real.Create(ctx, obj, sub, opts...)
+}
+
+func (w *failingStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	return w.real.Update(ctx, obj, opts...)
+}
+
+func (w *failingStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	if obj.GetName() == w.failOnName {
+		return w.err
+	}
+	return w.real.Patch(ctx, obj, patch, opts...)
+}
+
+func (w *failingStatusWriter) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+	return w.real.Apply(ctx, obj, opts...)
 }
 
 // erroringClient is a client.Client that injects a controllable List error.
