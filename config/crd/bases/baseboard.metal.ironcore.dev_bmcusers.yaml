@@ -143,6 +143,16 @@ spec:
           status:
             description: BMCUserStatus defines the observed state of BMCUser.
             properties:
+              accountEnabled:
+                description: |-
+                  AccountEnabled reflects whether the BMC account is enabled on the hardware.
+                  Nil means the state has not been observed yet.
+                type: boolean
+              accountLocked:
+                description: |-
+                  AccountLocked reflects whether the BMC has locked the account (e.g. after
+                  repeated authentication failures).
+                type: boolean
               bootstrapSecretRef:
                 description: |-
                   BootstrapSecretRef records the BMCSecret that was used for first contact with this BMC.

@@ -27,23 +27,34 @@ const (
 )
 
 // FactoryAccountAction specifies what to do with the factory/default BMC account after bootstrap.
-// +kubebuilder:validation:Enum=Rotate
+// +kubebuilder:validation:Enum=Rotate;Disable;None
 type FactoryAccountAction string
 
 const (
 	// FactoryAccountActionRotate changes the factory account's password to a new random one.
-	// Disable and Delete require a SetAccountPassword/DisableAccount extension to the bmc.BMC
-	// interface in metal-operator and are planned for a future release.
+	// The original password is retained as a break-glass BMCSecret when RetainCredential is true.
+	// Use with caution: if the rotation is interrupted, the factory account may be left in an
+	// inconsistent state. Prefer Disable for production environments.
 	FactoryAccountActionRotate FactoryAccountAction = "Rotate"
+
+	// FactoryAccountActionDisable disables the factory account on the BMC via Redfish
+	// (sets Enabled=false). The account remains on the BMC but cannot be used to log in.
+	// This is the safest option: it is idempotent, reversible, and requires no credential rotation.
+	FactoryAccountActionDisable FactoryAccountAction = "Disable"
+
+	// FactoryAccountActionNone leaves the factory account completely untouched.
+	// Use when the factory account is managed externally or should not be modified.
+	FactoryAccountActionNone FactoryAccountAction = "None"
 )
 
 // FactoryAccount configures how the factory/default BMC account is handled once both
 // operator admin accounts (DualAccount) are proven and BMC.Spec.BMCSecretRef points at
 // an operator-owned credential.
 type FactoryAccount struct {
-	// Action specifies what to do with the factory account.
-	// Only Rotate is supported at this time.
-	// +kubebuilder:default=Rotate
+	// Action specifies what to do with the factory account once both operator accounts are proven.
+	// Rotate changes the password (risky if interrupted). Disable sets Enabled=false on the BMC
+	// (idempotent, reversible, recommended for production). None leaves the account untouched.
+	// +kubebuilder:default=Disable
 	// +optional
 	Action FactoryAccountAction `json:"action,omitempty"`
 
