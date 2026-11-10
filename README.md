@@ -71,6 +71,17 @@ make uninstall
 make undeploy
 ```
 
+## Upgrade Notes
+
+### BMCSettings variable sources must be labelled
+
+A `secretKeyRef` or `configMapKeyRef` in `spec.variables` of a `BMCSettings` (or `spec.bmcSettingsTemplate.variables`
+of a `BMCSettingsSet`) is only resolved if the
+referenced `Secret` or `ConfigMap` carries the label `metal.ironcore.dev/bmcsettings-variable-source: "true"`. Label
+existing objects before upgrading, or the affected `BMCSettings` stop progressing. The optional
+`--secret-cache-namespaces` and `--configmap-cache-namespaces` flags additionally limit which namespaces the operator
+can read. See [Variable Sources](docs/concepts/bmcsettings.md#variable-sources).
+
 ## Project Distribution
 
 Following the options to release and provide this solution to the users.

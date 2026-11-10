@@ -16,6 +16,9 @@ objects, by creating and managing one child [`BMCSettings`](bmcsettings.md) per 
   child, so the whole fleet can participate in a manual [Readiness Gates](readiness-gates.md) chain; since each
   child targets a distinct `BMC`, using the same `completionConditionType` across all children is safe (no
   collision, as each is patched onto that child's own servers).
+- `spec.bmcSettingsTemplate.variables` are copied to every child like the rest of the template. A `secretKeyRef` or
+  `configMapKeyRef` in them only resolves if the referenced object carries the opt-in label — see
+  [Variable Sources](bmcsettings.md#variable-sources).
 
 ## Workflow
 

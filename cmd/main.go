@@ -7,7 +7,9 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -98,6 +100,7 @@ func main() {
 	var sanitizedServerAddress string
 	var managerNamespace string
 	var configMapCacheNamespaces string
+	var secretCacheNamespaces string
 	var defaultProtocol string
 	var skipCertValidation bool
 	var resyncInterval time.Duration
@@ -143,6 +146,11 @@ func main() {
 	flag.StringVar(&configMapCacheNamespaces, "configmap-cache-namespaces", "",
 		"Comma-separated white-list of additional namespaces the manager's ConfigMap cache watches, "+
 			"on top of the telemetry ConfigMap.")
+	flag.StringVar(&secretCacheNamespaces, "secret-cache-namespaces", "",
+		"Comma-separated white-list of namespaces the manager's Secret cache watches. When set, reads of Secrets "+
+			"outside these namespaces through the manager client fail. "+
+			"--manager-namespace and --sanitization-namespace are added automatically. "+
+			"A non-empty value must name at least one namespace. Empty leaves the cache unrestricted.")
 	flag.StringVar(&defaultProtocol, "default-protocol", string(metalv1alpha1.HTTPProtocolScheme),
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
@@ -247,6 +255,11 @@ func main() {
 		setupLog.Error(nil, "Manager configuration omitted --manager-namespace and POD_NAMESPACE is not set")
 		os.Exit(1)
 	}
+	secretCacheNS, err := parseSecretCacheNamespaces(secretCacheNamespaces)
+	if err != nil {
+		setupLog.Error(err, "Invalid --secret-cache-namespaces")
+		os.Exit(1)
+	}
 
 	if enableTelemetry && telemetryConfigNamespace == "" {
 		telemetryConfigNamespace = os.Getenv("POD_NAMESPACE")
@@ -331,11 +344,17 @@ func main() {
 		LeaderElectionID:        "88d880f0.metal.ironcore.dev",
 		LeaderElectionNamespace: leaderElectionNamespace,
 		Cache: cache.Options{
-			ByObject: configMapCacheByObject(
-				splitAndTrim(configMapCacheNamespaces),
-				namedConfigMapRefs(
-					enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
-				)...,
+			ByObject: cacheByObject(
+				configMapCacheByObject(
+					splitAndTrim(configMapCacheNamespaces),
+					namedConfigMapRefs(
+						enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
+					)...,
+				),
+				secretCacheByObject(
+					secretCacheNS,
+					managerNamespace, sanitizationNamespace,
+				),
 			),
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
@@ -772,6 +791,48 @@ func configMapCacheByObject(extraNamespaces []string, namedRefs ...namedConfigMa
 			Namespaces: namespaces,
 		},
 	}
+}
+
+// secretCacheByObject restricts the manager's Secret informer to extraNamespaces plus alwaysNamespaces
+// (the namespaces the operator itself needs). A Secret outside them cannot be read through the
+// manager's client. An empty extraNamespaces means no restriction, so existing setups keep working.
+func secretCacheByObject(extraNamespaces []string, alwaysNamespaces ...string) map[client.Object]cache.ByObject {
+	if len(extraNamespaces) == 0 {
+		return nil
+	}
+	namespaces := map[string]cache.Config{}
+	for _, ns := range append(slices.Clone(extraNamespaces), alwaysNamespaces...) {
+		if ns != "" {
+			namespaces[ns] = cache.Config{}
+		}
+	}
+	return map[client.Object]cache.ByObject{
+		&corev1.Secret{}: {Namespaces: namespaces},
+	}
+}
+
+// cacheByObject merges ByObject maps, skipping nil ones; it returns nil if all are nil.
+func cacheByObject(maps ...map[client.Object]cache.ByObject) map[client.Object]cache.ByObject {
+	var merged map[client.Object]cache.ByObject
+	for _, m := range maps {
+		for obj, byObject := range m {
+			if merged == nil {
+				merged = map[client.Object]cache.ByObject{}
+			}
+			merged[obj] = byObject
+		}
+	}
+	return merged
+}
+
+// parseSecretCacheNamespaces parses --secret-cache-namespaces. A non-empty value that names no namespace is
+// rejected so a typo cannot silently leave the Secret cache unrestricted.
+func parseSecretCacheNamespaces(s string) ([]string, error) {
+	namespaces := splitAndTrim(s)
+	if s != "" && len(namespaces) == 0 {
+		return nil, fmt.Errorf("value %q names no namespace; leave the flag empty to keep the Secret cache unrestricted", s)
+	}
+	return namespaces, nil
 }
 
 // splitAndTrim splits a comma-separated list, trims whitespace from each

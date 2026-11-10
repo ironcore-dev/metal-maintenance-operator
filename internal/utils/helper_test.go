@@ -21,7 +21,10 @@ import (
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
 	"github.com/stmcginnis/gofish/schemas"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestUtils(t *testing.T) {
@@ -633,6 +636,97 @@ var _ = Describe("SortedSettingsFlowGroups", func() {
 		}
 		_ = utils.SortedSettingsFlowGroups(flow)
 		Expect(flow[0].Name).To(Equal("b"))
+	})
+})
+
+var _ = Describe("ResolveVariables label requirement", func() {
+	const key = "value"
+	const ns = "ns"
+	labelled := map[string]string{constants.VariableSourceLabel: constants.VariableSourceLabelValue}
+
+	secretVar := func(name string) []api.Variable {
+		return []api.Variable{{Key: "V", ValueFrom: &api.VariableSourceValueFrom{
+			SecretKeyRef: &api.NamespacedKeySelector{Namespace: ns, Name: name, Key: key},
+		}}}
+	}
+	configMapVar := func(name string) []api.Variable {
+		return []api.Variable{{Key: "V", ValueFrom: &api.VariableSourceValueFrom{
+			ConfigMapKeyRef: &api.NamespacedKeySelector{Namespace: ns, Name: name, Key: key},
+		}}}
+	}
+	resolve := func(vars []api.Variable, objs ...client.Object) (map[string]string, error) {
+		c := fake.NewClientBuilder().WithObjects(objs...).Build()
+		return utils.ResolveVariables(context.Background(), c, &corev1.ConfigMap{}, vars)
+	}
+
+	It("reads a labelled Secret and ConfigMap", func() {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "s", Labels: labelled},
+			Data:       map[string][]byte{key: []byte("from-secret")},
+		}
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "c", Labels: labelled},
+			Data:       map[string]string{key: "from-configmap"},
+		}
+
+		got, err := resolve(secretVar("s"), secret, cm)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveKeyWithValue("V", "from-secret"))
+
+		got, err = resolve(configMapVar("c"), secret, cm)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveKeyWithValue("V", "from-configmap"))
+	})
+
+	It("refuses a Secret or ConfigMap without the label", func() {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "s"},
+			Data:       map[string][]byte{key: []byte("top-secret")},
+		}
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "c", Labels: map[string]string{constants.VariableSourceLabel: "false"}},
+			Data:       map[string]string{key: "hidden"},
+		}
+
+		_, err := resolve(secretVar("s"), secret, cm)
+		Expect(err).To(MatchError(ContainSubstring("not found or not labelled")))
+		Expect(err.Error()).NotTo(ContainSubstring("top-secret"))
+
+		_, err = resolve(configMapVar("c"), secret, cm)
+		Expect(err).To(MatchError(ContainSubstring("not found or not labelled")))
+	})
+
+	It("reports a missing object the same way as an unlabelled one", func() {
+		unlabelled := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "exists"}}
+
+		_, errMissing := resolve(secretVar("missing"), unlabelled)
+		_, errUnlabelled := resolve(secretVar("exists"), unlabelled)
+		Expect(errMissing).To(HaveOccurred())
+		Expect(errUnlabelled).To(HaveOccurred())
+		Expect(errMissing.Error()).To(ContainSubstring("not found or not labelled"))
+		Expect(errUnlabelled.Error()).To(ContainSubstring("not found or not labelled"))
+	})
+})
+
+var _ = Describe("InvalidBMCSettingsSummary", func() {
+	const secretValue = "s3cr3t-from-a-secret"
+
+	It("lists settings by name and reason without the rejected value", func() {
+		err := errors.Join(
+			&bmc.InvalidBMCSettingsError{SettingName: "B.Attr", SettingValue: secretValue, Message: "attributes value is unknown"},
+			&bmc.InvalidBMCSettingsError{SettingName: "A.Attr", SettingValue: secretValue, Message: "attribute not found or is immutable/hidden"},
+		)
+
+		summary, ok := utils.InvalidBMCSettingsSummary(fmt.Errorf("check failed: %w", err))
+		Expect(ok).To(BeTrue())
+		Expect(summary).To(Equal("A.Attr: attribute not found or is immutable/hidden; B.Attr: attributes value is unknown"))
+		Expect(summary).NotTo(ContainSubstring(secretValue))
+	})
+
+	It("reports false for errors that hold no invalid-setting error", func() {
+		summary, ok := utils.InvalidBMCSettingsSummary(errors.New("connection refused"))
+		Expect(ok).To(BeFalse())
+		Expect(summary).To(BeEmpty())
 	})
 })
 

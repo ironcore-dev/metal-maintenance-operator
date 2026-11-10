@@ -988,6 +988,23 @@ func GetImageCredentialsForSecretRef(ctx context.Context, c client.Client, secre
 
 // --- Variable resolution helpers ---
 
+// getVariableSource fetches a Secret or ConfigMap that a variable refers to, and refuses it unless
+// it is labelled as a variable source. BMCSettings is cluster-scoped and the operator can read
+// objects in any namespace its cache covers, so the reference alone must never grant access. A
+// missing object and an unlabelled one return the same error so the reference cannot be used to
+// probe for objects.
+func getVariableSource(ctx context.Context, c client.Client, kind, namespace, name string, obj client.Object) error {
+	err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, obj)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get %s %s/%s: %w", kind, namespace, name, err)
+	}
+	if err != nil || obj.GetLabels()[constants.VariableSourceLabel] != constants.VariableSourceLabelValue {
+		return fmt.Errorf("%s %s/%s not found or not labelled %s=%s",
+			kind, namespace, name, constants.VariableSourceLabel, constants.VariableSourceLabelValue)
+	}
+	return nil
+}
+
 // ResolveVariables resolves the Variables list into a flat key→value map.
 func ResolveVariables(
 	ctx context.Context,
@@ -1091,8 +1108,8 @@ func resolveVariable(
 		namespace := SubstituteVars(ref.Namespace, resolved)
 		key := SubstituteVars(ref.Key, resolved)
 		secret := &corev1.Secret{}
-		if err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, secret); err != nil {
-			return "", fmt.Errorf("failed to get secret %s/%s: %w", namespace, name, err)
+		if err := getVariableSource(ctx, c, "secret", namespace, name, secret); err != nil {
+			return "", err
 		}
 		val, ok := secret.Data[key]
 		if !ok {
@@ -1105,8 +1122,8 @@ func resolveVariable(
 		namespace := SubstituteVars(ref.Namespace, resolved)
 		key := SubstituteVars(ref.Key, resolved)
 		cm := &corev1.ConfigMap{}
-		if err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, cm); err != nil {
-			return "", fmt.Errorf("failed to get configmap %s/%s: %w", namespace, name, err)
+		if err := getVariableSource(ctx, c, "configmap", namespace, name, cm); err != nil {
+			return "", err
 		}
 		val, ok := cm.Data[key]
 		if !ok {
@@ -1159,6 +1176,33 @@ func ResolveFieldRef(obj client.Object, fieldPath string) (string, error) {
 		return "", fmt.Errorf("fieldPath %q not found on object %s", fieldPath, obj.GetName())
 	}
 	return val, nil
+}
+
+// InvalidBMCSettingsSummary lists every rejected BMC setting by name and reason. It leaves out the
+// rejected value, which may have been read from a Secret through a variable, so the text is safe
+// for status conditions and logs. The second result is false if err holds no InvalidBMCSettingsError.
+func InvalidBMCSettingsSummary(err error) (string, bool) {
+	var parts []string
+	var walk func(error)
+	walk = func(e error) {
+		switch x := e.(type) {
+		case nil:
+		case *bmc.InvalidBMCSettingsError:
+			parts = append(parts, fmt.Sprintf("%s: %s", x.SettingName, x.Message))
+		case interface{ Unwrap() []error }:
+			for _, inner := range x.Unwrap() {
+				walk(inner)
+			}
+		case interface{ Unwrap() error }:
+			walk(x.Unwrap())
+		}
+	}
+	walk(err)
+	if len(parts) == 0 {
+		return "", false
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, "; "), true
 }
 
 // SettingKeys returns only the map keys of a SettingsAttributes map for safe logging.
