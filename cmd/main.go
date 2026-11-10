@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -146,10 +147,10 @@ func main() {
 		"Comma-separated white-list of additional namespaces the manager's ConfigMap cache watches, "+
 			"on top of the telemetry ConfigMap.")
 	flag.StringVar(&secretCacheNamespaces, "secret-cache-namespaces", "",
-		"Comma-separated white-list of namespaces the manager's Secret cache watches. When set, Secrets "+
-			"outside these namespaces cannot be read at all, "+
-			"references Secrets in; --manager-namespace and --sanitization-namespace are added automatically. "+
-			"Empty leaves the cache unrestricted.")
+		"Comma-separated white-list of namespaces the manager's Secret cache watches. When set, reads of Secrets "+
+			"outside these namespaces through the manager client fail. "+
+			"--manager-namespace and --sanitization-namespace are added automatically. "+
+			"A non-empty value must name at least one namespace. Empty leaves the cache unrestricted.")
 	flag.StringVar(&defaultProtocol, "default-protocol", string(metalv1alpha1.HTTPProtocolScheme),
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
@@ -254,6 +255,11 @@ func main() {
 		setupLog.Error(nil, "Manager configuration omitted --manager-namespace and POD_NAMESPACE is not set")
 		os.Exit(1)
 	}
+	secretCacheNS, err := parseSecretCacheNamespaces(secretCacheNamespaces)
+	if err != nil {
+		setupLog.Error(err, "Invalid --secret-cache-namespaces")
+		os.Exit(1)
+	}
 
 	if enableTelemetry && telemetryConfigNamespace == "" {
 		telemetryConfigNamespace = os.Getenv("POD_NAMESPACE")
@@ -346,7 +352,7 @@ func main() {
 					)...,
 				),
 				secretCacheByObject(
-					splitAndTrim(secretCacheNamespaces),
+					secretCacheNS,
 					managerNamespace, sanitizationNamespace,
 				),
 			),
@@ -812,6 +818,16 @@ func cacheByObject(maps ...map[client.Object]cache.ByObject) map[client.Object]c
 		}
 	}
 	return merged
+}
+
+// parseSecretCacheNamespaces parses --secret-cache-namespaces. A non-empty value that names no namespace is
+// rejected so a typo cannot silently leave the Secret cache unrestricted.
+func parseSecretCacheNamespaces(s string) ([]string, error) {
+	namespaces := splitAndTrim(s)
+	if s != "" && len(namespaces) == 0 {
+		return nil, fmt.Errorf("value %q names no namespace; leave the flag empty to keep the Secret cache unrestricted", s)
+	}
+	return namespaces, nil
 }
 
 // splitAndTrim splits a comma-separated list, trims whitespace from each

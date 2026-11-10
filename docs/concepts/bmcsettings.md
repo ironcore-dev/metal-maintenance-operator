@@ -72,13 +72,20 @@ grant access. Two controls apply:
 
 - **Label (always):** the controller reads a `Secret` or `ConfigMap` only if it carries the label
   `metal.ironcore.dev/bmcsettings-variable-source: "true"`. A missing object and an unlabelled one produce the same
-  error, so a reference cannot be used to probe for objects. Only label objects that are meant to be written to
-  BMCs, and keep them in a namespace that holds nothing else.
+  error, so that error cannot be used to tell them apart. A reference to a labelled object with a missing key returns
+  a distinct "key not found" error, which reveals that the labelled object exists. Only label objects that are meant
+  to be written to BMCs, and keep them in a namespace that holds nothing else.
 - **Namespaces (opt-in):** `--secret-cache-namespaces` and `--configmap-cache-namespaces` limit the namespaces the
-  operator's cache covers, so an object outside them cannot be read at all. `--secret-cache-namespaces` also applies
-  to every other Secret the operator reads (credential and image references, sanitization), so list every
-  namespace those use. `--manager-namespace` and `--sanitization-namespace` are added automatically. If the flag is
-  empty, the Secret cache is not restricted.
+  operator's manager cache covers, so an object outside them cannot be read through the manager client.
+  - Secrets: `--secret-cache-namespaces` also applies to every other Secret the operator reads (credential and image
+    references, sanitization), so list every namespace those use. `--manager-namespace` and
+    `--sanitization-namespace` are added automatically. If the flag is empty, the Secret cache is not restricted; a
+    non-empty value must name at least one namespace.
+  - ConfigMaps: only the namespaces in `--configmap-cache-namespaces` are readable, plus the telemetry ConfigMap
+    (by name) when telemetry is enabled. The manager and sanitization namespaces are not added automatically, so list
+    the namespace of every labelled ConfigMap you reference (for example `kube-system` below). If the flag is empty
+    and telemetry is disabled, the ConfigMap cache is not restricted; if telemetry is enabled, only the telemetry
+    ConfigMap is readable.
 
 Resolved values are not stored in `status` (only a keyed hash of applied values is). When the BMC rejects a setting
 during validation, the `SettingsValidationFailed` condition lists the setting name and the reason only, not the

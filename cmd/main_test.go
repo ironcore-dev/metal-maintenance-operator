@@ -45,6 +45,22 @@ func TestSecretCacheByObject_AddsOperatorNamespaces(t *testing.T) {
 	}
 }
 
+func TestParseSecretCacheNamespaces(t *testing.T) {
+	got, err := parseSecretCacheNamespaces("")
+	if err != nil || got != nil {
+		t.Fatalf("empty flag must stay unrestricted, got %v, %v", got, err)
+	}
+	got, err = parseSecretCacheNamespaces(" a , b ")
+	if err != nil || !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	for _, in := range []string{",", " ", " , ,"} {
+		if _, err := parseSecretCacheNamespaces(in); err == nil {
+			t.Fatalf("expected an error for %q", in)
+		}
+	}
+}
+
 func TestCacheByObject_MergesAndSkipsNil(t *testing.T) {
 	if got := cacheByObject(nil, nil); got != nil {
 		t.Fatalf("expected nil when every input is nil, got %v", got)
