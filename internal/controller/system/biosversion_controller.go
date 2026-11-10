@@ -475,31 +475,11 @@ func (r *BIOSVersionReconciler) processInProgressState(ctx context.Context, bmcC
 	if completedCondition.Status != metav1.ConditionTrue {
 		log.V(1).Info("Check BIOS version upgrade task status")
 		requeue, err := r.checkUpdateBiosUpgradeStatus(ctx, bmcClient, biosVersion, server, completedCondition)
-		if _, ok := errors.AsType[*utils.BMCTaskFetchFailedError](err); ok {
-			log.V(1).Info("Failed to fetch BIOS upgrade task status from BMC", "error", err)
-			// some vendor detele the task details once upgrade is completed.
-			// check the current version and then proceed if version is as per spec
-			currentBiosVersion, errVersionFetch := r.getBIOSVersionFromBMC(ctx, bmcClient, server)
-			if errVersionFetch != nil {
-				// need to give time if BMC is not responding, hence requeue
-				log.Error(errors.Join(err, errVersionFetch), "Failed to fetch current BIOS version from BMC after upgrade task fetch failure")
-				return true, nil
-			}
-			if currentBiosVersion == biosVersion.Spec.Version {
-				// mark as completed, and procced with the workflow as the task might have been deleted post successful upgrade
-				log.V(1).Info("BIOS version shows upgraded successfully even though task fetch failure", "Version", currentBiosVersion)
-				if err := r.Conditions.Update(
-					completedCondition,
-					conditionutils.UpdateStatus(corev1.ConditionTrue),
-					conditionutils.UpdateReason(constants.ReasonUpgradeTaskCompleted),
-					conditionutils.UpdateMessage("Upgrade Task is missing. BIOS version successfully upgraded to: "+biosVersion.Spec.Version),
-				); err != nil {
-					return false, fmt.Errorf("failed to update upgrade complete conditions: %w", err)
-				}
-				return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, biosVersion.Status.UpgradeTask, completedCondition)
-			}
-			log.V(1).Info("BIOS version not updated yet, need to wait for task details", "Version", currentBiosVersion, "DesiredVersion", biosVersion.Spec.Version)
-			return requeue, err
+		if fetchErr, ok := errors.AsType[*utils.BMCTaskFetchFailedError](err); ok {
+			return r.handleUpgradeTaskFetchFailure(ctx, bmcClient, biosVersion, server, completedCondition, fetchErr, requeue)
+		}
+		if err == nil {
+			r.recordUpgradeTaskNotFound(ctx, biosVersion, false, constants.ReasonUpgradeTaskFound, "Upgrade task found on the BMC")
 		}
 		return requeue, err
 	}
@@ -1130,6 +1110,62 @@ func (r *BIOSVersionReconciler) requestServerMaintenance(ctx context.Context, bi
 
 	log.V(1).Info("Patched ServerMaintenance on BIOSVersion")
 	return true, nil
+}
+
+// handleUpgradeTaskFetchFailure handles the BMC not returning the upgrade task. A task the BMC
+// cannot find is recorded in the UpgradeTaskNotFound condition. Some vendors delete the task once
+// the upgrade is done, so the current version is checked and the workflow proceeds if it matches.
+func (r *BIOSVersionReconciler) handleUpgradeTaskFetchFailure(
+	ctx context.Context,
+	bmcClient bmc.BMC,
+	biosVersion *systemv1alpha1.BIOSVersion,
+	server *metalv1alpha1.Server,
+	completedCondition *metav1.Condition,
+	fetchErr *utils.BMCTaskFetchFailedError,
+	requeue bool,
+) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	log.V(1).Info("Failed to fetch BIOS upgrade task status from BMC", "error", fetchErr)
+	if fetchErr.NotFound() {
+		r.recordUpgradeTaskNotFound(ctx, biosVersion, true, constants.ReasonUpgradeTaskNotFound, fetchErr.NotFoundMessage())
+	}
+
+	currentBiosVersion, errVersionFetch := r.getBIOSVersionFromBMC(ctx, bmcClient, server)
+	if errVersionFetch != nil {
+		// need to give time if BMC is not responding, hence requeue
+		log.Error(errors.Join(fetchErr, errVersionFetch), "Failed to fetch current BIOS version from BMC after upgrade task fetch failure")
+		return true, nil
+	}
+	if currentBiosVersion != biosVersion.Spec.Version {
+		log.V(1).Info("BIOS version not updated yet, need to wait for task details", "Version", currentBiosVersion, "DesiredVersion", biosVersion.Spec.Version)
+		return requeue, fetchErr
+	}
+
+	// mark as completed, and procced with the workflow as the task might have been deleted post successful upgrade
+	log.V(1).Info("BIOS version shows upgraded successfully even though task fetch failure", "Version", currentBiosVersion)
+	r.recordUpgradeTaskNotFound(ctx, biosVersion, false, constants.ReasonUpgradeTaskNotRequired, "BIOS version already matches the requested version")
+	if err := r.Conditions.Update(
+		completedCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonUpgradeTaskCompleted),
+		conditionutils.UpdateMessage("Upgrade Task is missing. BIOS version successfully upgraded to: "+biosVersion.Spec.Version),
+	); err != nil {
+		return false, fmt.Errorf("failed to update upgrade complete conditions: %w", err)
+	}
+	return false, r.updateStatus(ctx, biosVersion, biosVersion.Status.State, biosVersion.Status.UpgradeTask, completedCondition)
+}
+
+// recordUpgradeTaskNotFound sets or clears the UpgradeTaskNotFound condition and persists it only
+// when it changed. It is informational only: a failure is logged and never alters the reconcile flow.
+func (r *BIOSVersionReconciler) recordUpgradeTaskNotFound(ctx context.Context, biosVersion *systemv1alpha1.BIOSVersion, notFound bool, reason, message string) {
+	base := biosVersion.DeepCopy()
+	changed, err := utils.SetUpgradeTaskNotFound(r.Conditions, &biosVersion.Status.Conditions, notFound, reason, message)
+	if err == nil && changed {
+		err = r.Status().Patch(ctx, biosVersion, client.MergeFrom(base))
+	}
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "Failed to record the UpgradeTaskNotFound condition")
+	}
 }
 
 func (r *BIOSVersionReconciler) checkUpdateBiosUpgradeStatus(

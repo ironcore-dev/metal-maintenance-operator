@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -726,5 +727,104 @@ var _ = Describe("InvalidBMCSettingsSummary", func() {
 		summary, ok := utils.InvalidBMCSettingsSummary(errors.New("connection refused"))
 		Expect(ok).To(BeFalse())
 		Expect(summary).To(BeEmpty())
+	})
+})
+
+var _ = Describe("BMCTaskFetchFailedError", func() {
+	It("reports not found when no task URI was recorded", func() {
+		err := utils.BMCTaskFetchFailedError{Err: errors.New("invalid task URI")}
+		Expect(err.NotFound()).To(BeTrue())
+		Expect(err.NotFoundMessage()).To(ContainSubstring("No upgrade task is recorded"))
+	})
+
+	It("reports not found when the BMC answers 404", func() {
+		err := utils.BMCTaskFetchFailedError{
+			TaskURI: "/redfish/v1/TaskService/Tasks/1",
+			Err:     fmt.Errorf("get task: %w", &schemas.Error{HTTPReturnedStatusCode: http.StatusNotFound}),
+		}
+		Expect(err.NotFound()).To(BeTrue())
+		Expect(err.NotFoundMessage()).To(ContainSubstring("/redfish/v1/TaskService/Tasks/1"))
+	})
+
+	It("does not report not found for other failures", func() {
+		for _, cause := range []error{
+			errors.New("connection refused"),
+			&schemas.Error{HTTPReturnedStatusCode: http.StatusInternalServerError},
+		} {
+			err := utils.BMCTaskFetchFailedError{TaskURI: "/redfish/v1/TaskService/Tasks/1", Err: cause}
+			Expect(err.NotFound()).To(BeFalse(), cause.Error())
+		}
+	})
+})
+
+var _ = Describe("SetUpgradeTaskNotFound", func() {
+	var (
+		acc   *conditionutils.Accessor
+		conds []metav1.Condition
+	)
+
+	BeforeEach(func() {
+		acc = conditionutils.NewAccessor(conditionutils.AccessorOptions{})
+		conds = nil
+	})
+
+	find := func() *metav1.Condition {
+		for i := range conds {
+			if conds[i].Type == constants.ConditionUpgradeTaskNotFound {
+				return &conds[i]
+			}
+		}
+		return nil
+	}
+
+	It("adds the condition as True when the task is not found", func() {
+		changed, err := utils.SetUpgradeTaskNotFound(acc, &conds, true, constants.ReasonUpgradeTaskNotFound, "missing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(find()).To(SatisfyAll(
+			HaveField("Status", metav1.ConditionTrue),
+			HaveField("Reason", constants.ReasonUpgradeTaskNotFound),
+			HaveField("Message", "missing"),
+		))
+	})
+
+	It("does not change anything when the same state is set again", func() {
+		_, err := utils.SetUpgradeTaskNotFound(acc, &conds, true, constants.ReasonUpgradeTaskNotFound, "missing")
+		Expect(err).NotTo(HaveOccurred())
+
+		changed, err := utils.SetUpgradeTaskNotFound(acc, &conds, true, constants.ReasonUpgradeTaskNotFound, "missing")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse())
+	})
+
+	It("sets an existing condition to False when the task is found", func() {
+		_, err := utils.SetUpgradeTaskNotFound(acc, &conds, true, constants.ReasonUpgradeTaskNotFound, "missing")
+		Expect(err).NotTo(HaveOccurred())
+
+		changed, err := utils.SetUpgradeTaskNotFound(acc, &conds, false, constants.ReasonUpgradeTaskFound, "found")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(find()).To(SatisfyAll(
+			HaveField("Status", metav1.ConditionFalse),
+			HaveField("Reason", constants.ReasonUpgradeTaskFound),
+		))
+	})
+
+	It("never adds the condition on a healthy upgrade", func() {
+		changed, err := utils.SetUpgradeTaskNotFound(acc, &conds, false, constants.ReasonUpgradeTaskFound, "found")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse())
+		Expect(conds).To(BeEmpty())
+	})
+
+	It("leaves a condition that is already False untouched", func() {
+		_, err := utils.SetUpgradeTaskNotFound(acc, &conds, true, constants.ReasonUpgradeTaskNotFound, "missing")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = utils.SetUpgradeTaskNotFound(acc, &conds, false, constants.ReasonUpgradeTaskFound, "found")
+		Expect(err).NotTo(HaveOccurred())
+
+		changed, err := utils.SetUpgradeTaskNotFound(acc, &conds, false, constants.ReasonUpgradeTaskNotRequired, "not needed")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse())
 	})
 })
