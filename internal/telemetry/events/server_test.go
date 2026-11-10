@@ -657,3 +657,77 @@ func TestAlerts_SetTestNotifier_WiresCorrectly(t *testing.T) {
 		t.Errorf("expected 1 notify call after SetTestNotifier, got %d", len(calls))
 	}
 }
+
+// recordingAlertHandler is a test double for events.ActiveAlertHandler.
+type recordingAlertHandler struct {
+	mu    sync.Mutex
+	calls []struct {
+		bmcName string
+		events  []sink.Event
+	}
+}
+
+func (h *recordingAlertHandler) HandleEvents(bmcName string, evs []sink.Event) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, struct {
+		bmcName string
+		events  []sink.Event
+	}{bmcName, evs})
+}
+
+func (h *recordingAlertHandler) callCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.calls)
+}
+
+// TestAlerts_NilActiveAlertTracker_NoPanic confirms that when
+// ActiveAlertTracker is not set (nil interface), alert handling proceeds
+// normally without panicking. This guards against the typed-nil-to-interface
+// pitfall where a *T nil pointer stored in an interface field passes != nil
+// checks and causes a nil-receiver panic.
+func TestAlerts_NilActiveAlertTracker_NoPanic(t *testing.T) {
+	eSink := &recordingEventSink{}
+	cfg := events.Config{Addr: ":0", EventSink: eSink}
+	// ActiveAlertTracker is deliberately left as the zero value (nil interface).
+	r, err := events.New(cfg)
+	if err != nil {
+		t.Fatalf("events.New: %v", err)
+	}
+	res := doPost(t, r.Handler(), "/serverevents/alerts/bmc-1",
+		`{"Events":[{"EventId":"E1","Severity":"Warning","Message":"fan"}]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
+	}
+	if len(eSink.calls) != 1 {
+		t.Errorf("expected 1 sink call, got %d", len(eSink.calls))
+	}
+}
+
+// TestAlerts_ActiveAlertTracker_IsCalledBeforeSink confirms that when
+// ActiveAlertTracker is set, HandleEvents is called for every event batch
+// before the event sink publishes them.
+func TestAlerts_ActiveAlertTracker_IsCalledBeforeSink(t *testing.T) {
+	eSink := &recordingEventSink{}
+	tracker := &recordingAlertHandler{}
+	r, err := events.New(events.Config{
+		Addr:               ":0",
+		EventSink:          eSink,
+		ActiveAlertTracker: tracker,
+	})
+	if err != nil {
+		t.Fatalf("events.New: %v", err)
+	}
+	res := doPost(t, r.Handler(), "/serverevents/alerts/bmc-42",
+		`{"Events":[{"EventId":"W1","Severity":"Warning","Message":"hot"}]}`)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want 200", res.StatusCode)
+	}
+	if tracker.callCount() != 1 {
+		t.Errorf("expected tracker.HandleEvents called once, got %d", tracker.callCount())
+	}
+	if len(eSink.calls) != 1 {
+		t.Errorf("expected sink called once, got %d", len(eSink.calls))
+	}
+}

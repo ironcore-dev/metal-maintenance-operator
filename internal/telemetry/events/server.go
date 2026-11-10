@@ -60,7 +60,11 @@ type Config struct {
 	// subscription reconciler can correlate SubmitTestEvent round-trips.
 	// Nil disables notification (backward compatible).
 	TestNotifier TestEventNotifier
-	Log          logr.Logger
+	// ActiveAlertTracker maintains stateful active-fault gauges. Called
+	// before EventSink so it sees all events including OK/Info clears.
+	// Nil disables tracking (backward compatible).
+	ActiveAlertTracker ActiveAlertHandler
+	Log                logr.Logger
 }
 
 // TestEventNotifier is notified when an alert event arrives at the receiver.
@@ -68,6 +72,13 @@ type Config struct {
 // round-trips by matching the messageId it sent with what arrives here.
 type TestEventNotifier interface {
 	NotifyTestEvent(bmcName, messageId string)
+}
+
+// ActiveAlertHandler maintains stateful active-fault gauges. It is called
+// before EventSink.PublishEvents so it sees all events including OK/Info
+// clearing events that the sink drops.
+type ActiveAlertHandler interface {
+	HandleEvents(bmcName string, events []sink.Event)
 }
 
 // Receiver is an HTTP server that decodes Redfish event POSTs and
@@ -216,6 +227,9 @@ func (r *Receiver) handleAlerts(w http.ResponseWriter, req *http.Request) {
 	}
 
 	events := data.flatten()
+	if r.cfg.ActiveAlertTracker != nil {
+		r.cfg.ActiveAlertTracker.HandleEvents(bmcName, events)
+	}
 	if err := r.cfg.EventSink.PublishEvents(req.Context(), bmcName, events); err != nil {
 		r.log.Error(err, "Event sink publish failed", "bmc", bmcName)
 		http.Error(w, "Internal error", http.StatusInternalServerError)

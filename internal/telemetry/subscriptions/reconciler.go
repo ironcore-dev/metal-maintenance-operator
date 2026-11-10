@@ -90,6 +90,12 @@ type BMCReconciler struct {
 		Forget(hostname string)
 	}
 
+	// ActiveAlertHandler is optional. When set, Forget is called on BMC
+	// teardown to clean up redfish_event_active gauge series.
+	ActiveAlertHandler interface {
+		Forget(hostname string)
+	}
+
 	// ReceiverURL is the externally-reachable base URL the BMC POSTs to.
 	// Destination URLs are computed as
 	// "<ReceiverURL>/serverevents[/<SubscriberID>]/alerts/{bmcName}".
@@ -232,6 +238,9 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			if r.AlertHandler != nil {
 				r.AlertHandler.Forget(req.Name)
 			}
+			if r.ActiveAlertHandler != nil {
+				r.ActiveAlertHandler.Forget(req.Name)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get BMC %q: %w", req.Name, err)
@@ -256,6 +265,9 @@ func (r *BMCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 		if r.AlertHandler != nil {
 			r.AlertHandler.Forget(req.Name)
+		}
+		if r.ActiveAlertHandler != nil {
+			r.ActiveAlertHandler.Forget(req.Name)
 		}
 		if err := clientutils.PatchRemoveFinalizer(ctx, r.Client, bmc, bmcSubscriptionFinalizer); err != nil {
 			return ctrl.Result{}, fmt.Errorf("remove finalizer on BMC %q: %w", req.Name, err)

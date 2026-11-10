@@ -63,6 +63,15 @@ type Options struct {
 	// EnableCriticalEventHandler.
 	EnableWarningEventHandler bool
 
+	// EnableActiveAlertTracking turns on the redfish_event_active gauge,
+	// which stays at 1 while a BMC has an active fault and drops to 0 after
+	// a TTL with no new events or on receipt of an OK/Info clearing event.
+	EnableActiveAlertTracking bool
+
+	// ActiveAlertTTL is how long without a new event before a fault is
+	// auto-resolved. Defaults to 30 minutes when unset or zero.
+	ActiveAlertTTL time.Duration
+
 	// ActiveSubscriptions is populated by AddTo with a function that
 	// returns the current set of BMC names with active push subscriptions.
 	// Callers can pass this to discovery.Handler.SubscribedBMCs so the
@@ -118,6 +127,33 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 	statusSink, err := promsink.NewSubscriptionStatusSink(ctrlmetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("init subscription status sink: %w", err)
+	}
+
+	// Declare as interface types so the zero value is a proper nil interface.
+	// Assigning a typed nil *promsink.ActiveAlertTracker to an interface field
+	// would produce a non-nil interface value, defeating the != nil guards in
+	// the callers.
+	var (
+		eventsAlertTracker events.ActiveAlertHandler
+		subAlertHandler    interface{ Forget(string) }
+	)
+	if opts.EnableActiveAlertTracking {
+		ttl := opts.ActiveAlertTTL
+		if ttl <= 0 {
+			ttl = 30 * time.Minute
+		}
+		tracker, err := promsink.NewActiveAlertTracker(
+			ctrlmetrics.Registry, ttl,
+			ctrl.Log.WithName("telemetry").WithName("active-alerts"),
+		)
+		if err != nil {
+			return fmt.Errorf("init active alert tracker: %w", err)
+		}
+		if err := mgr.Add(tracker); err != nil {
+			return fmt.Errorf("add active alert tracker: %w", err)
+		}
+		eventsAlertTracker = tracker
+		subAlertHandler = tracker
 	}
 
 	var criticalHandler *criticalevent.ConditionHandler
@@ -184,12 +220,13 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 	)
 
 	receiver, err := events.New(events.Config{
-		Addr:             opts.EventsAddr,
-		EventSink:        eventSink,
-		MetricReportSink: metricSink,
-		MetricFetcher:    fetcher,
-		SubscriberID:     opts.SubscriberID,
-		Log:              ctrl.Log.WithName("telemetry").WithName("events"),
+		Addr:               opts.EventsAddr,
+		EventSink:          eventSink,
+		MetricReportSink:   metricSink,
+		MetricFetcher:      fetcher,
+		SubscriberID:       opts.SubscriberID,
+		ActiveAlertTracker: eventsAlertTracker,
+		Log:                ctrl.Log.WithName("telemetry").WithName("events"),
 	})
 	if err != nil {
 		return fmt.Errorf("init event receiver: %w", err)
@@ -202,17 +239,18 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 	// controller-runtime cache and converges each BMC's Redfish event
 	// subscriptions. See internal/telemetry/subscriptions/reconciler.go.
 	subReconciler := &subscriptions.BMCReconciler{
-		Client:           mgr.GetClient(),
-		Config:           loader.Config,
-		Resolver:         resolver,
-		Factory:          &subscriptionClientFactory{insecureTLS: opts.InsecureTLS},
-		Sink:             eventSink,
-		MetricReportSink: metricSink,
-		AlertHandler:     criticalHandler,
-		TestRecorder:     testSink,
-		StatusRecorder:   statusSink,
-		ReceiverURL:      opts.ReceiverURL,
-		SubscriberID:     opts.SubscriberID,
+		Client:             mgr.GetClient(),
+		Config:             loader.Config,
+		Resolver:           resolver,
+		Factory:            &subscriptionClientFactory{insecureTLS: opts.InsecureTLS},
+		Sink:               eventSink,
+		MetricReportSink:   metricSink,
+		AlertHandler:       criticalHandler,
+		ActiveAlertHandler: subAlertHandler,
+		TestRecorder:       testSink,
+		StatusRecorder:     statusSink,
+		ReceiverURL:        opts.ReceiverURL,
+		SubscriberID:       opts.SubscriberID,
 		// ReconcileInterval and PerBMCTimeout intentionally unset:
 		// the reconciler reads them from the live ConfigMap at use
 		// site, falling back to its internal defaults when the

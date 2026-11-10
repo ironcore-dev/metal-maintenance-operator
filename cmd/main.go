@@ -178,6 +178,8 @@ func main() {
 		telemetryEventsAddr            string
 		telemetryInsecureTLS           bool
 		telemetryEnableCriticalHandler bool
+		telemetryEnableActiveAlerts    bool
+		telemetryActiveAlertTTL        time.Duration
 		telemetrySubscriberID          string
 	)
 	flag.BoolVar(&enableTelemetry, "enable-telemetry", false,
@@ -200,6 +202,12 @@ func main() {
 		"When true, Critical-severity Redfish events set a CriticalEventReceived condition on the matching Server. "+
 			"The operator does not create any ServerReadinessRule; apply "+
 			"config/samples/serverreadinessrule-critical-event.yaml (or equivalent) by hand to consume the condition.")
+	flag.BoolVar(&telemetryEnableActiveAlerts, "telemetry-enable-active-alert-tracking", false,
+		"When true, publish redfish_event_active gauge: fires while a BMC has an active fault, drops to 0 "+
+			"after --telemetry-active-alert-ttl with no new events or on an OK/Info clearing event.")
+	flag.DurationVar(&telemetryActiveAlertTTL, "telemetry-active-alert-ttl", 30*time.Minute,
+		"How long without a new event from the BMC before a fault is auto-resolved. "+
+			"Only used when --telemetry-enable-active-alert-tracking is set. Default: 30m.")
 	flag.StringVar(&telemetrySubscriberID, "telemetry-subscriber-id", "",
 		"Single path segment that scopes this binary's subscriptions when multiple subscribers "+
 			"(e.g. the maintenance operator and an external redfish-exporter) share a BMC fleet. "+
@@ -643,6 +651,8 @@ func main() {
 			InsecureTLS:                telemetryInsecureTLS,
 			SubscriberID:               telemetrySubscriberID,
 			EnableCriticalEventHandler: telemetryEnableCriticalHandler,
+			EnableActiveAlertTracking:  telemetryEnableActiveAlerts,
+			ActiveAlertTTL:             telemetryActiveAlertTTL,
 		}
 		if err := telemetryruntime.AddTo(mgr, &telemetryOpts); err != nil {
 			setupLog.Error(err, "Failed to add telemetry pipeline")
