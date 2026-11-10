@@ -523,31 +523,11 @@ func (r *BMCVersionReconciler) handleUpgradeInProgressState(
 	if completedCondition.Status != metav1.ConditionTrue {
 		log.V(1).Info("Check upgrade task of BMC")
 		ctrlResult, err := r.checkBMCUpgradeStatus(ctx, bmcVersion, bmcClient, BMC, completedCondition)
-		if _, ok := errors.AsType[*utils.BMCTaskFetchFailedError](err); ok {
-			log.V(1).Info("Failed to fetch BMC upgrade task status from BMC", "error", err)
-			// some vendor detele the task details once upgrade is completed.
-			// check the current version and then proceed if version is as per spec
-			currentBMCVersion, errVersionFetch := r.getBMCVersionFromBMC(ctx, bmcClient, BMC)
-			if errVersionFetch != nil {
-				// need to give time if BMC is not responding, hence requeue
-				log.Error(errors.Join(err, errVersionFetch), "Failed to fetch current BMC version from BMC after upgrade task fetch failure")
-				return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
-			}
-			if currentBMCVersion == bmcVersion.Spec.Version {
-				// mark as completed, and procced with the workflow as the task might have been deleted post successful upgrade
-				log.V(1).Info("BMC version shows upgraded successfully even though task fetch failure", "Version", currentBMCVersion)
-				if err := r.Conditions.Update(
-					completedCondition,
-					conditionutils.UpdateStatus(corev1.ConditionTrue),
-					conditionutils.UpdateReason(constants.ReasonUpgradeTaskCompleted),
-					conditionutils.UpdateMessage("Upgrade Task is missing. BMC version successfully upgraded to: "+bmcVersion.Spec.Version),
-				); err != nil {
-					return ctrlResult, fmt.Errorf("failed to update conditions: %w", err)
-				}
-				return ctrlResult, r.patchBMCVersionStatusAndCondition(ctx, bmcVersion, bmcVersion.Status.State, bmcVersion.Status.UpgradeTask, completedCondition)
-			}
-			log.V(1).Info("BMC version not updated yet, need to wait for task details", "Version", currentBMCVersion, "DesiredVersion", bmcVersion.Spec.Version)
-			return ctrlResult, err
+		if fetchErr, ok := errors.AsType[*utils.BMCTaskFetchFailedError](err); ok {
+			return r.handleUpgradeTaskFetchFailure(ctx, bmcVersion, bmcClient, BMC, completedCondition, fetchErr, ctrlResult)
+		}
+		if err == nil {
+			r.recordUpgradeTaskNotFound(ctx, bmcVersion, false, constants.ReasonUpgradeTaskFound, "Upgrade task found on the BMC")
 		}
 		return ctrlResult, err
 	}
@@ -603,6 +583,62 @@ func (r *BMCVersionReconciler) handleUpgradeInProgressState(
 
 	log.V(1).Info("Unknown Conditions found", "Condition", condition.Type)
 	return ctrl.Result{}, nil
+}
+
+// handleUpgradeTaskFetchFailure handles the BMC not returning the upgrade task. A task the BMC
+// cannot find is recorded in the UpgradeTaskNotFound condition. Some vendors delete the task once
+// the upgrade is done, so the current version is checked and the workflow proceeds if it matches.
+func (r *BMCVersionReconciler) handleUpgradeTaskFetchFailure(
+	ctx context.Context,
+	bmcVersion *baseboardv1alpha1.BMCVersion,
+	bmcClient bmc.BMC,
+	BMC *metalv1alpha1.BMC,
+	completedCondition *metav1.Condition,
+	fetchErr *utils.BMCTaskFetchFailedError,
+	ctrlResult ctrl.Result,
+) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	log.V(1).Info("Failed to fetch BMC upgrade task status from BMC", "error", fetchErr)
+	if fetchErr.NotFound() {
+		r.recordUpgradeTaskNotFound(ctx, bmcVersion, true, constants.ReasonUpgradeTaskNotFound, fetchErr.NotFoundMessage())
+	}
+
+	currentBMCVersion, errVersionFetch := r.getBMCVersionFromBMC(ctx, bmcClient, BMC)
+	if errVersionFetch != nil {
+		// need to give time if BMC is not responding, hence requeue
+		log.Error(errors.Join(fetchErr, errVersionFetch), "Failed to fetch current BMC version from BMC after upgrade task fetch failure")
+		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+	}
+	if currentBMCVersion != bmcVersion.Spec.Version {
+		log.V(1).Info("BMC version not updated yet, need to wait for task details", "Version", currentBMCVersion, "DesiredVersion", bmcVersion.Spec.Version)
+		return ctrlResult, fetchErr
+	}
+
+	// mark as completed, and procced with the workflow as the task might have been deleted post successful upgrade
+	log.V(1).Info("BMC version shows upgraded successfully even though task fetch failure", "Version", currentBMCVersion)
+	r.recordUpgradeTaskNotFound(ctx, bmcVersion, false, constants.ReasonUpgradeTaskNotRequired, "BMC version already matches the requested version")
+	if err := r.Conditions.Update(
+		completedCondition,
+		conditionutils.UpdateStatus(corev1.ConditionTrue),
+		conditionutils.UpdateReason(constants.ReasonUpgradeTaskCompleted),
+		conditionutils.UpdateMessage("Upgrade Task is missing. BMC version successfully upgraded to: "+bmcVersion.Spec.Version),
+	); err != nil {
+		return ctrlResult, fmt.Errorf("failed to update conditions: %w", err)
+	}
+	return ctrlResult, r.patchBMCVersionStatusAndCondition(ctx, bmcVersion, bmcVersion.Status.State, bmcVersion.Status.UpgradeTask, completedCondition)
+}
+
+// recordUpgradeTaskNotFound sets or clears the UpgradeTaskNotFound condition and persists it only
+// when it changed. It is informational only: a failure is logged and never alters the reconcile flow.
+func (r *BMCVersionReconciler) recordUpgradeTaskNotFound(ctx context.Context, bmcVersion *baseboardv1alpha1.BMCVersion, notFound bool, reason, message string) {
+	base := bmcVersion.DeepCopy()
+	changed, err := utils.SetUpgradeTaskNotFound(r.Conditions, &bmcVersion.Status.Conditions, notFound, reason, message)
+	if err == nil && changed {
+		err = r.Status().Patch(ctx, bmcVersion, client.MergeFrom(base))
+	}
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "Failed to record the UpgradeTaskNotFound condition")
+	}
 }
 
 func (r *BMCVersionReconciler) handleFailedState(

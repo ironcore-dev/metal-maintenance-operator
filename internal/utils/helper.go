@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -51,6 +52,49 @@ type BMCTaskFetchFailedError struct {
 
 func (e BMCTaskFetchFailedError) Error() string {
 	return e.Err.Error()
+}
+
+// NotFound reports whether the BMC does not know the task: no task URI was recorded, or the BMC
+// answered 404 for it. Other failures, such as an unreachable BMC, are not "not found".
+func (e BMCTaskFetchFailedError) NotFound() bool {
+	if e.TaskURI == "" {
+		return true
+	}
+	var redfishErr *schemas.Error
+	return errors.As(e.Err, &redfishErr) && redfishErr.HTTPReturnedStatusCode == http.StatusNotFound
+}
+
+// NotFoundMessage describes a task that cannot be found, for the UpgradeTaskNotFound condition.
+func (e BMCTaskFetchFailedError) NotFoundMessage() string {
+	if e.TaskURI == "" {
+		return "No upgrade task is recorded in status.upgradeTask"
+	}
+	return fmt.Sprintf("BMC could not find upgrade task %s: %v", e.TaskURI, e.Err)
+}
+
+// SetUpgradeTaskNotFound sets constants.ConditionUpgradeTaskNotFound on conds and reports whether
+// conds changed. notFound=true sets it True. notFound=false only updates a condition that is
+// already True, to False with the given reason, so healthy upgrades never gain the condition.
+func SetUpgradeTaskNotFound(acc *conditionutils.Accessor, conds *[]metav1.Condition, notFound bool, reason, message string) (bool, error) {
+	existing := apimeta.FindStatusCondition(*conds, constants.ConditionUpgradeTaskNotFound)
+	status := metav1.ConditionTrue
+	if !notFound {
+		if existing == nil || existing.Status != metav1.ConditionTrue {
+			return false, nil
+		}
+		status = metav1.ConditionFalse
+	}
+	if existing != nil && existing.Status == status && existing.Reason == reason && existing.Message == message {
+		return false, nil
+	}
+	if err := acc.UpdateSlice(conds, constants.ConditionUpgradeTaskNotFound,
+		conditionutils.UpdateStatus(status),
+		conditionutils.UpdateReason(reason),
+		conditionutils.UpdateMessage(message),
+	); err != nil {
+		return false, fmt.Errorf("failed to update %s condition: %w", constants.ConditionUpgradeTaskNotFound, err)
+	}
+	return true, nil
 }
 
 // MultiErrorTracker wraps multiple errors with an identifier.
