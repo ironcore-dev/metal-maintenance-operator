@@ -1176,6 +1176,14 @@ var _ = Describe("BMCSettings Controller", func() {
 			)),
 		)
 
+		// Clearing the ServerMaintenance refs bumps the generation, which resets and re-applies the settings once.
+		By("Waiting for the post-completion maintenance cleanup to settle")
+		Eventually(Object(settings)).Should(Satisfy(func(s *baseboardv1alpha1.BMCSettings) bool {
+			return len(s.Spec.ServerMaintenanceRefs) == 0 &&
+				s.Status.State == baseboardv1alpha1.BMCSettingsStateApplied &&
+				s.Status.ObservedGeneration == s.Generation
+		}))
+
 		By("Ensuring the BMCSettings is stably Applied before flipping the gate")
 		Consistently(Object(settings)).Should(
 			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateApplied),
