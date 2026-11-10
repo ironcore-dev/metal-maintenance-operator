@@ -585,24 +585,29 @@ func (r *BMCSettingsReconciler) updateSettingsAndVerify(ctx context.Context, set
 
 			resetBMCReq, err := bmcClient.CheckBMCAttributes(ctx, bmcObj.Spec.BMCUUID, groupDiff)
 			if err != nil {
-				log.Error(err, "could not validate settings and determine if reboot needed")
-				if _, ok := errors.AsType[*bmc.InvalidBMCSettingsError](err); ok {
-					inValidSettings, errCond := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCSettingsValidationFailed)
-					if errCond != nil {
-						return ctrl.Result{}, fmt.Errorf("failed to get Condition for invalid BMC settings %v", errors.Join(err, errCond))
-					}
-					if errCond := r.Conditions.Update(
-						inValidSettings,
-						conditionutils.UpdateStatus(corev1.ConditionTrue),
-						conditionutils.UpdateReason(ReasonBMCSettingsValidationFailed),
-						conditionutils.UpdateMessage(fmt.Sprintf("Settings provided is invalid. error: %v", err)),
-					); errCond != nil {
-						return ctrl.Result{}, fmt.Errorf("failed to update Invalid Settings condition: %w", errors.Join(err, errCond))
-					}
-					err := r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateFailed, inValidSettings)
-					return ctrl.Result{}, err
+				// err must not be logged or persisted as is: an InvalidBMCSettingsError prints the
+				// rejected value, which may have been read from a Secret through a variable.
+				summary, invalid := utils.InvalidBMCSettingsSummary(err)
+				if !invalid {
+					log.Error(err, "could not validate settings and determine if reboot needed")
+					return ctrl.Result{}, fmt.Errorf("failed to check BMC settings provided: %w", err)
 				}
-				return ctrl.Result{}, fmt.Errorf("failed to check BMC settings provided: %w", err)
+				validationErr := errors.New(summary)
+				log.Error(validationErr, "could not validate settings and determine if reboot needed")
+				inValidSettings, errCond := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionBMCSettingsValidationFailed)
+				if errCond != nil {
+					return ctrl.Result{}, fmt.Errorf("failed to get Condition for invalid BMC settings %v", errors.Join(validationErr, errCond))
+				}
+				if errCond := r.Conditions.Update(
+					inValidSettings,
+					conditionutils.UpdateStatus(corev1.ConditionTrue),
+					conditionutils.UpdateReason(ReasonBMCSettingsValidationFailed),
+					conditionutils.UpdateMessage(fmt.Sprintf("Settings provided is invalid. error: %s", summary)),
+				); errCond != nil {
+					return ctrl.Result{}, fmt.Errorf("failed to update Invalid Settings condition: %w", errors.Join(validationErr, errCond))
+				}
+				err := r.updateBMCSettingsStatus(ctx, settings, baseboardv1alpha1.BMCSettingsStateFailed, inValidSettings)
+				return ctrl.Result{}, err
 			}
 
 			applyResults, err := bmcClient.SetBMCAttributesImmediately(ctx, bmcObj.Spec.BMCUUID, groupDiff)

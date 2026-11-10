@@ -10,7 +10,8 @@
 - Settings are only applied once the BMC's current firmware version matches `spec.version`; otherwise the object
   waits in `Pending`.
 - `spec.settingsFlow` holds the BMC settings to apply. Values may reference `spec.variables` using `$(VarName)` syntax,
-  resolved against the `BMCSettings` object itself, the referenced `BMC`, `ConfigMap`s, or `Secret`s.
+  resolved against the `BMCSettings` object itself, the referenced `BMC`, `ConfigMap`s, or `Secret`s. A `ConfigMap` or
+  `Secret` can only be read if it is opted in — see [Variable Sources](#variable-sources).
 - `spec.serverMaintenancePolicy` controls how maintenance is requested for the affected servers:
   - **Enforced:** maintenance starts immediately, without owner approval.
   - **OwnerApproval:** requires the `metal.ironcore.dev/maintenance-approved: "true"` label on the servers'
@@ -62,6 +63,67 @@ spec:
         bootMode: "UEFI"
         hyperThreading: "Enabled"
 ```
+
+## Variable Sources
+
+`spec.variables[].valueFrom.secretKeyRef` and `configMapKeyRef` name an object by namespace and name. `BMCSettings` is
+cluster-scoped and the operator can read objects in any namespace its cache covers, so the reference alone does not
+grant access. Two controls apply:
+
+- **Label (always):** the controller reads a `Secret` or `ConfigMap` only if it carries the label
+  `metal.ironcore.dev/bmcsettings-variable-source: "true"`. A missing object and an unlabelled one produce the same
+  error, so a reference cannot be used to probe for objects. Only label objects that are meant to be written to
+  BMCs, and keep them in a namespace that holds nothing else.
+- **Namespaces (opt-in):** `--secret-cache-namespaces` and `--configmap-cache-namespaces` limit the namespaces the
+  operator's cache covers, so an object outside them cannot be read at all. `--secret-cache-namespaces` also applies
+  to every other Secret the operator reads (credential and image references, sanitization), so list every
+  namespace those use. `--manager-namespace` and `--sanitization-namespace` are added automatically. If the flag is
+  empty, the Secret cache is not restricted.
+
+Resolved values are not stored in `status` (only a keyed hash of applied values is). When the BMC rejects a setting
+during validation, the `SettingsValidationFailed` condition lists the setting name and the reason only, not the
+rejected value.
+
+**Example** — a syslog server read from an opted-in `ConfigMap`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bmc-settings-config
+  namespace: kube-system
+  labels:
+    metal.ironcore.dev/bmcsettings-variable-source: "true"
+data:
+  syslogServer: remotesyslog.example.com
+---
+apiVersion: baseboard.metal.ironcore.dev/v1alpha1
+kind: BMCSettings
+metadata:
+  name: bmc-settings-syslog
+spec:
+  bmcRef:
+    name: endpoint-sample
+  version: 1.45.455b66-rev4
+  serverMaintenancePolicy: Enforced
+  variables:
+    - key: SyslogServer
+      valueFrom:
+        configMapKeyRef:
+          name: bmc-settings-config
+          namespace: kube-system
+          key: syslogServer
+  settingsFlow:
+    - name: main
+      priority: 1
+      settings:
+        SysLog.1.Server1: "$(SyslogServer)"
+```
+
+**Upgrading:** add the label to every `Secret` and `ConfigMap` your `BMCSettings` and `BMCSettingsSet` variables
+already reference *before* rolling out a version with this check. Without it, resolution fails with
+`... not found or not labelled metal.ironcore.dev/bmcsettings-variable-source=true` and the affected `BMCSettings`
+stop progressing.
 
 ## Settings Flow
 

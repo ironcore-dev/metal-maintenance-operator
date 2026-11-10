@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -98,6 +99,7 @@ func main() {
 	var sanitizedServerAddress string
 	var managerNamespace string
 	var configMapCacheNamespaces string
+	var secretCacheNamespaces string
 	var defaultProtocol string
 	var skipCertValidation bool
 	var resyncInterval time.Duration
@@ -143,6 +145,11 @@ func main() {
 	flag.StringVar(&configMapCacheNamespaces, "configmap-cache-namespaces", "",
 		"Comma-separated white-list of additional namespaces the manager's ConfigMap cache watches, "+
 			"on top of the telemetry ConfigMap.")
+	flag.StringVar(&secretCacheNamespaces, "secret-cache-namespaces", "",
+		"Comma-separated white-list of namespaces the manager's Secret cache watches. When set, Secrets "+
+			"outside these namespaces cannot be read at all, "+
+			"references Secrets in; --manager-namespace and --sanitization-namespace are added automatically. "+
+			"Empty leaves the cache unrestricted.")
 	flag.StringVar(&defaultProtocol, "default-protocol", string(metalv1alpha1.HTTPProtocolScheme),
 		"Default BMC protocol scheme (e.g. https).")
 	flag.BoolVar(&skipCertValidation, "skip-cert-validation", false,
@@ -331,11 +338,17 @@ func main() {
 		LeaderElectionID:        "88d880f0.metal.ironcore.dev",
 		LeaderElectionNamespace: leaderElectionNamespace,
 		Cache: cache.Options{
-			ByObject: configMapCacheByObject(
-				splitAndTrim(configMapCacheNamespaces),
-				namedConfigMapRefs(
-					enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
-				)...,
+			ByObject: cacheByObject(
+				configMapCacheByObject(
+					splitAndTrim(configMapCacheNamespaces),
+					namedConfigMapRefs(
+						enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
+					)...,
+				),
+				secretCacheByObject(
+					splitAndTrim(secretCacheNamespaces),
+					managerNamespace, sanitizationNamespace,
+				),
 			),
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
@@ -767,6 +780,38 @@ func configMapCacheByObject(extraNamespaces []string, namedRefs ...namedConfigMa
 			Namespaces: namespaces,
 		},
 	}
+}
+
+// secretCacheByObject restricts the manager's Secret informer to extraNamespaces plus alwaysNamespaces
+// (the namespaces the operator itself needs). A Secret outside them cannot be read through the
+// manager's client. An empty extraNamespaces means no restriction, so existing setups keep working.
+func secretCacheByObject(extraNamespaces []string, alwaysNamespaces ...string) map[client.Object]cache.ByObject {
+	if len(extraNamespaces) == 0 {
+		return nil
+	}
+	namespaces := map[string]cache.Config{}
+	for _, ns := range append(slices.Clone(extraNamespaces), alwaysNamespaces...) {
+		if ns != "" {
+			namespaces[ns] = cache.Config{}
+		}
+	}
+	return map[client.Object]cache.ByObject{
+		&corev1.Secret{}: {Namespaces: namespaces},
+	}
+}
+
+// cacheByObject merges ByObject maps, skipping nil ones; it returns nil if all are nil.
+func cacheByObject(maps ...map[client.Object]cache.ByObject) map[client.Object]cache.ByObject {
+	var merged map[client.Object]cache.ByObject
+	for _, m := range maps {
+		for obj, byObject := range m {
+			if merged == nil {
+				merged = map[client.Object]cache.ByObject{}
+			}
+			merged[obj] = byObject
+		}
+	}
+	return merged
 }
 
 // splitAndTrim splits a comma-separated list, trims whitespace from each

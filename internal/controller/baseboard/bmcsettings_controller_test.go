@@ -670,6 +670,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
 				GenerateName: "test-var-secret-",
+				Labels:       map[string]string{constants.VariableSourceLabel: constants.VariableSourceLabelValue},
 			},
 			Data: map[string][]byte{
 				"bmc-setting": []byte("changed-via-secret"),
@@ -724,6 +725,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
 				GenerateName: "test-var-cm-",
+				Labels:       map[string]string{constants.VariableSourceLabel: constants.VariableSourceLabelValue},
 			},
 			Data: map[string]string{
 				"bmc-setting": "changed-via-configmap",
@@ -818,6 +820,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
 				GenerateName: "test-var-domain-cm-",
+				Labels:       map[string]string{constants.VariableSourceLabel: constants.VariableSourceLabelValue},
 			},
 			Data: map[string]string{
 				"search-domain": "example.com",
@@ -890,6 +893,7 @@ var _ = Describe("BMCSettings Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:    ns.Name,
 				GenerateName: "test-licenses-cm-",
+				Labels:       map[string]string{constants.VariableSourceLabel: constants.VariableSourceLabelValue},
 			},
 			// The key is the BMC object name; value is the license string.
 			Data: map[string]string{

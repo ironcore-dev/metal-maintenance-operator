@@ -33,7 +33,7 @@ func bbJoin(cfg mmo.DashboardConfig, expr string) string {
 	region := mmo.TopologyRegionLabel(cfg)
 	bb, nodename, _ := mmo.TopologyMetricLabels(cfg)
 	ksmJoin := `label_replace(kube_ironcore_bmc_info{` +
-		region+`=~"$region",` +
+		region + `=~"$region",` +
 		bb + `=~"$bb",` + nodename + `=~"$node",` +
 		`manufacturer=~"$manufacturer",model=~"$model"}, "hostname", "$1", "name", "(.*)")`
 	return expr + ` * on(hostname) group_left() ` + ksmJoin

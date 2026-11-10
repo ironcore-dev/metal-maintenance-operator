@@ -200,10 +200,14 @@ type VariableSourceValueFrom struct {
 	ObjectFieldRef *ObjectFieldRefSelector `json:"objectFieldRef,omitempty"`
 
 	// ConfigMapKeyRef points to a namespaced ConfigMap key.
+	// The ConfigMap must carry the label metal.ironcore.dev/bmcsettings-variable-source=true,
+	// otherwise the reference is rejected.
 	// +optional
 	ConfigMapKeyRef *NamespacedKeySelector `json:"configMapKeyRef,omitempty"`
 
 	// SecretKeyRef points to a namespaced Secret key.
+	// The Secret must carry the label metal.ironcore.dev/bmcsettings-variable-source=true,
+	// otherwise the reference is rejected.
 	// +optional
 	SecretKeyRef *NamespacedKeySelector `json:"secretKeyRef,omitempty"`
 }

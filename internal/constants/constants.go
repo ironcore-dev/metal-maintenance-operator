@@ -6,6 +6,13 @@ package constants
 
 const SanitizedLabel = "maintenance.metal.ironcore.dev/sanitized"
 
+// VariableSourceLabel must be set to VariableSourceLabelValue on a Secret or ConfigMap before a
+// BMCSettings variable may read it through secretKeyRef or configMapKeyRef.
+const (
+	VariableSourceLabel      = "metal.ironcore.dev/bmcsettings-variable-source"
+	VariableSourceLabelValue = "true"
+)
+
 // Index field keys for controller-runtime field indexers.
 const (
 	ServerRefField = "spec.serverRef.name"

@@ -213,8 +213,10 @@ spec:
                         variable value.
                       properties:
                         configMapKeyRef:
-                          description: ConfigMapKeyRef points to a namespaced ConfigMap
-                            key.
+                          description: |-
+                            ConfigMapKeyRef points to a namespaced ConfigMap key.
+                            The ConfigMap must carry the label metal.ironcore.dev/bmcsettings-variable-source=true,
+                            otherwise the reference is rejected.
                           properties:
                             key:
                               description: Key is the key within the referenced object.
@@ -284,8 +286,10 @@ spec:
                           - name
                           type: object
                         secretKeyRef:
-                          description: SecretKeyRef points to a namespaced Secret
-                            key.
+                          description: |-
+                            SecretKeyRef points to a namespaced Secret key.
+                            The Secret must carry the label metal.ironcore.dev/bmcsettings-variable-source=true,
+                            otherwise the reference is rejected.
                           properties:
                             key:
                               description: Key is the key within the referenced object.
