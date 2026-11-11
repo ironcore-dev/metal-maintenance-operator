@@ -95,7 +95,7 @@ rules:
 - apiGroups:
   - discovery.metal.ironcore.dev
   resources:
-  - metadatas
+  - metadata
   verbs:
   - create
   - delete

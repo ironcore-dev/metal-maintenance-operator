@@ -41,7 +41,7 @@ type ServerDiscoveryReconciler struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=serverclaims,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=discovery.metal.ironcore.dev,resources=metadatas,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=discovery.metal.ironcore.dev,resources=metadata,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
