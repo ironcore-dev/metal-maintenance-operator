@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -315,7 +316,11 @@ func main() {
 				setupLog.Error(nil, "Must specify --registry-url or REGISTRY_ADDRESS when discovery is enabled")
 				os.Exit(1)
 			}
-			registryURL = fmt.Sprintf("http://%s%s", registryAddr, registryBindAddress)
+			registryURL, err = registryFallbackURL(registryAddr, registryBindAddress)
+			if err != nil {
+				setupLog.Error(err, "Invalid --registry-bind-address")
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -907,6 +912,14 @@ func cacheByObject(maps ...map[client.Object]cache.ByObject) map[client.Object]c
 		}
 	}
 	return merged
+}
+
+func registryFallbackURL(host, bindAddress string) (string, error) {
+	_, port, err := net.SplitHostPort(bindAddress)
+	if err != nil {
+		return "", err
+	}
+	return "http://" + net.JoinHostPort(host, port), nil
 }
 
 // parseSecretCacheNamespaces parses --secret-cache-namespaces. A non-empty value that names no namespace is
