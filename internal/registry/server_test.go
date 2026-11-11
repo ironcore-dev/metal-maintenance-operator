@@ -61,6 +61,34 @@ func TestRegisterRoundtrip(t *testing.T) {
 	}
 }
 
+func TestIsFresh(t *testing.T) {
+	now := time.Now()
+	maxAge := time.Minute
+	for _, tt := range []struct {
+		name string
+		age  time.Duration
+		want bool
+	}{
+		{"current", 0, true},
+		{"recent", maxAge - time.Nanosecond, true},
+		{"stale boundary", maxAge, false},
+		{"stale", maxAge + time.Second, false},
+		{"future within tolerance", -MaxClockSkew / 2, true},
+		{"future boundary", -MaxClockSkew, true},
+		{"future beyond tolerance", -MaxClockSkew - time.Nanosecond, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			timestamp := metav1.NewTime(now.Add(-tt.age))
+			if got := IsFresh(&timestamp, now, maxAge); got != tt.want {
+				t.Fatalf("IsFresh = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if IsFresh(nil, now, maxAge) {
+		t.Fatal("missing timestamp must not be fresh")
+	}
+}
+
 func TestSweep(t *testing.T) {
 	srv := NewServer(logr.Discard(), ":0")
 
@@ -69,6 +97,10 @@ func TestSweep(t *testing.T) {
 	srv.Store("fresh-uuid", discoveryv1alpha1.Metadata{Timestamp: &fresh})
 	srv.Store("stale-uuid", discoveryv1alpha1.Metadata{Timestamp: &stale})
 	srv.Store("no-timestamp-uuid", discoveryv1alpha1.Metadata{})
+	nearFuture := metav1.NewTime(time.Now().Add(MaxClockSkew / 2))
+	farFuture := metav1.NewTime(time.Now().Add(MaxClockSkew + time.Minute))
+	srv.Store("near-future-uuid", discoveryv1alpha1.Metadata{Timestamp: &nearFuture})
+	srv.Store("far-future-uuid", discoveryv1alpha1.Metadata{Timestamp: &farFuture})
 
 	srv.sweep()
 
@@ -80,6 +112,12 @@ func TestSweep(t *testing.T) {
 	}
 	if _, ok := srv.Load("no-timestamp-uuid"); ok {
 		t.Fatal("expected entry without timestamp to be swept")
+	}
+	if _, ok := srv.Load("near-future-uuid"); !ok {
+		t.Fatal("expected timestamp within clock-skew tolerance to survive sweep")
+	}
+	if _, ok := srv.Load("far-future-uuid"); ok {
+		t.Fatal("expected timestamp beyond clock-skew tolerance to be swept")
 	}
 }
 

@@ -87,8 +87,8 @@ func (r *ServerDiscoveryReconciler) reconcile(ctx context.Context, server *metal
 		log.V(1).Info("Server agent did not post discovery data to registry yet")
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
-	if data.Timestamp == nil || time.Since(data.Timestamp.Time) >= r.RegistryDataMaxAge {
-		log.V(1).Info("Registry data is stale, waiting for fresh update")
+	if !registry.IsFresh(data.Timestamp, time.Now(), r.RegistryDataMaxAge) {
+		log.V(1).Info("Registry timestamp is missing, stale, or too far in the future, waiting for fresh update")
 		return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
 	}
 	log.V(1).Info("Received fresh discovery data from registry")

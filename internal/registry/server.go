@@ -17,11 +17,24 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
 )
 
 const DefaultStaleEntryTTL = 10 * time.Minute
+
+// MaxClockSkew allows small differences between the probe and manager clocks.
+const MaxClockSkew = 30 * time.Second
+
+// IsFresh reports whether a payload timestamp is recent and not too far in the future.
+func IsFresh(timestamp *metav1.Time, now time.Time, maxAge time.Duration) bool {
+	if timestamp == nil {
+		return false
+	}
+	age := now.Sub(timestamp.Time)
+	return age >= -MaxClockSkew && age < maxAge
+}
 
 // RegistryServer serves the /register endpoint and holds the registered discovery data.
 type RegistryServer struct {
@@ -86,15 +99,15 @@ func (s *RegistryServer) Delete(systemUUID string) {
 	delete(s.data, systemUUID)
 }
 
-// sweep removes entries whose payload timestamp is older than staleEntryTTL.
+// sweep removes entries with missing, stale, or excessively future-dated timestamps.
 func (s *RegistryServer) sweep() {
-	cutoff := time.Now().Add(-s.staleEntryTTL)
+	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for uuid, data := range s.data {
-		if data.Timestamp == nil || data.Timestamp.Time.Before(cutoff) {
+		if !IsFresh(data.Timestamp, now, s.staleEntryTTL) {
 			delete(s.data, uuid)
-			s.log.V(1).Info("Swept stale registry entry", "uuid", uuid)
+			s.log.V(1).Info("Swept registry entry with invalid timestamp", "uuid", uuid)
 		}
 	}
 }
