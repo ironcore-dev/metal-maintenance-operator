@@ -73,9 +73,7 @@ func (a *Agent) Init(ctx context.Context) error {
 
 	blockDevices, err := collectStorageInfoData()
 	if err != nil {
-		a.log.Error(err, "Storage info collection skipped")
-		// Continue without storage info
-		blockDevices = []registry.BlockDevice{}
+		a.log.Error(err, "Storage info collection incomplete", "collectedDevices", len(blockDevices))
 	}
 
 	memoryDevices, err := collectMemoryInfoData()

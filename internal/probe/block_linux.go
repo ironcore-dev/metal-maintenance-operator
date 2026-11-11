@@ -4,13 +4,16 @@
 package probe
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/registry"
 	"github.com/jaypipes/ghw"
+	"github.com/jaypipes/ghw/pkg/block"
 )
 
 func collectStorageInfoData() ([]registry.BlockDevice, error) {
@@ -19,24 +22,32 @@ func collectStorageInfoData() ([]registry.BlockDevice, error) {
 	if err != nil {
 		return blockDevices, fmt.Errorf("failed to get block devices: %w", err)
 	}
-	for _, b := range blockStorage.Disks {
-		rota, err := ToBool(fmt.Sprintf("/sys/class/block/%s/queue/rotational", b.Name))
+	return collectStorageDevices(blockStorage.Disks, "/sys/class/block")
+}
+
+func collectStorageDevices(disks []*block.Disk, sysfsRoot string) ([]registry.BlockDevice, error) {
+	blockDevices := make([]registry.BlockDevice, 0, len(disks))
+	var errs []error
+	for _, b := range disks {
+		rota, err := ToBool(filepath.Join(sysfsRoot, b.Name, "queue/rotational"))
 		if err != nil {
-			// TODO: just log this or exit?
-			return blockDevices, fmt.Errorf("failed to read rotational state for: %s; %w", b.Name, err)
+			errs = append(errs, fmt.Errorf("failed to read rotational state for %s: %w", b.Name, err))
+			continue
 		}
-		ro, err := ToBool(fmt.Sprintf("/sys/class/block/%s/ro", b.Name))
+		ro, err := ToBool(filepath.Join(sysfsRoot, b.Name, "ro"))
 		if err != nil {
-			// TODO: just log this or exit?
-			return blockDevices, fmt.Errorf("failed to read readonly state for: %s: %w", b.Name, err)
+			errs = append(errs, fmt.Errorf("failed to read readonly state for %s: %w", b.Name, err))
+			continue
 		}
-		lbsz, err := ToInt(fmt.Sprintf("/sys/class/block/%s/queue/logical_block_size", b.Name))
+		lbsz, err := ToInt(filepath.Join(sysfsRoot, b.Name, "queue/logical_block_size"))
 		if err != nil {
-			return blockDevices, fmt.Errorf("failed to read logical block size for %s: %w", b.Name, err)
+			errs = append(errs, fmt.Errorf("failed to read logical block size for %s: %w", b.Name, err))
+			continue
 		}
-		secsz, err := ToInt(fmt.Sprintf("/sys/class/block/%s/queue/hw_sector_size", b.Name))
+		secsz, err := ToInt(filepath.Join(sysfsRoot, b.Name, "queue/hw_sector_size"))
 		if err != nil {
-			return blockDevices, fmt.Errorf("failed to read hardware sector size for %s: %w", b.Name, err)
+			errs = append(errs, fmt.Errorf("failed to read hardware sector size for %s: %w", b.Name, err))
+			continue
 		}
 		blockDevices = append(blockDevices, registry.BlockDevice{
 			Path:              b.BusPath,
@@ -55,7 +66,7 @@ func collectStorageInfoData() ([]registry.BlockDevice, error) {
 			NUMANodeID:        int32(b.NUMANodeID),
 		})
 	}
-	return blockDevices, nil
+	return blockDevices, errors.Join(errs...)
 }
 
 func ToString(path string) (string, error) {
