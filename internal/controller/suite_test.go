@@ -24,8 +24,10 @@ import (
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/baseboard"
+	fwconfig "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	maintenancectrl "github.com/ironcore-dev/metal-maintenance-operator/internal/controller/maintenance"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/system"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/testutil/simcontrollers"
@@ -235,18 +237,26 @@ func SetupTest(redfishMockServers []netip.AddrPort, mockServerOpts ...mockserver
 			Scheme: k8sManager.GetScheme(),
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
+		firmwareUpdateResyncInterval := 10 * time.Millisecond
+		firmwareUpdateScheduledJobPowerOnTimeout := 1000 * time.Millisecond
+		firmwareUpdateDefaultFailedAutoRetryCount := int32(0)
+		firmwareUpdateMinBMCResetInterval := time.Duration(0)
+		firmwareUpdateConfigLoader := &configloader.Loader[fwconfig.FirmwareUpdateConfig]{}
+		firmwareUpdateConfigLoader.Set(&fwconfig.FirmwareUpdateConfig{
+			ResyncInterval:              &firmwareUpdateResyncInterval,
+			ScheduledJobPowerOnTimeout:  &firmwareUpdateScheduledJobPowerOnTimeout,
+			DefaultFailedAutoRetryCount: &firmwareUpdateDefaultFailedAutoRetryCount,
+			MinBMCResetInterval:         &firmwareUpdateMinBMCResetInterval,
+		})
 		Expect((&system.FirmwareUpdateReconciler{
-			Client:                     k8sManager.GetClient(),
-			ManagerNamespace:           ns.Name,
-			DefaultProtocol:            metalv1alpha1.HTTPProtocolScheme,
-			SkipCertValidation:         true,
-			Scheme:                     k8sManager.GetScheme(),
-			ResyncInterval:             10 * time.Millisecond,
-			PollingInterval:            10 * time.Millisecond,
-			MaxRepositoryPasses:        5,
-			ScheduledJobPowerOnTimeout: 1000 * time.Millisecond,
-			Conditions:                 accessor,
-			BMCOptions:                 bmcOptions,
+			Client:             k8sManager.GetClient(),
+			ManagerNamespace:   ns.Name,
+			DefaultProtocol:    metalv1alpha1.HTTPProtocolScheme,
+			SkipCertValidation: true,
+			Scheme:             k8sManager.GetScheme(),
+			Conditions:         accessor,
+			BMCOptions:         bmcOptions,
+			ConfigLoader:       firmwareUpdateConfigLoader,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		// simcontrollers.BMCReconciler/ServerReconciler mimic metal-operator's real

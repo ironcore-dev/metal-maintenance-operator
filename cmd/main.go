@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/cli"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/discovery"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/server"
@@ -59,7 +61,6 @@ import (
 	// +kubebuilder:scaffold:imports
 )
 
-const maxRepositoryPassesLimit = 5
 const maxFailedAutoRetryCount = 10
 
 var (
@@ -106,8 +107,6 @@ func main() {
 	var resyncInterval time.Duration
 	var biosSettingsTimeoutExpiry time.Duration
 	var rebootTimeoutExpiry time.Duration
-	var scheduledJobPowerOnTimeout time.Duration
-	var maxRepositoryPasses int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -164,15 +163,29 @@ func main() {
 		"Timeout for BIOS settings application before the task is considered expired.")
 	flag.DurationVar(&rebootTimeoutExpiry, "reboot-timeout-expiry", 10*time.Minute,
 		"Timeout waiting for a server to complete a reboot/power-cycle before the task is considered expired.")
-	flag.IntVar(&maxRepositoryPasses, "max-repository-passes", maxRepositoryPassesLimit,
-		"Maximum number of check->apply->track->recheck passes a FirmwareUpdate may take before being marked Failed.")
 	var minBMCResetInterval time.Duration
 	flag.DurationVar(&minBMCResetInterval, "min-bmc-reset-interval", 24*time.Hour,
 		"Minimum time that must have passed since a BMC's last completed reset to reissue another reset.")
-	flag.DurationVar(&scheduledJobPowerOnTimeout, "scheduled-job-power-on-timeout", 30*time.Minute,
-		"How long a firmware upgrade job may remain in the \"Scheduled\" state (queued, awaiting a reboot/power "+
-			"cycle to execute) with the server powered off and no observed progress, before the controller powers the "+
-			"server back on to let the job proceed. A value <= 0 disables this check.")
+
+	// FirmwareUpdate ConfigMap flags. When --firmwareupdate-config-name is
+	// set, a live-reloading configloader.Loader watches the named ConfigMap
+	// and the FirmwareUpdateReconciler prefers its values over its own
+	// built-in defaults (ResyncInterval, DefaultFailedAutoRetryCount,
+	// MaxRepositoryPasses, MinBMCResetInterval, ScheduledJobPowerOnTimeout,
+	// RepositoryCheckInterval) for any field the ConfigMap sets, falling back
+	// to those defaults otherwise. Empty (the default) disables the feature
+	// entirely, leaving the FirmwareUpdate controller on its built-in
+	// defaults.
+	var (
+		firmwareUpdateConfigName      string
+		firmwareUpdateConfigNamespace string
+	)
+	flag.StringVar(&firmwareUpdateConfigName, "firmwareupdate-config-name", "",
+		"Name of the ConfigMap holding FirmwareUpdate controller overrides. Leave empty (the default) to disable "+
+			"ConfigMap-based overrides.")
+	flag.StringVar(&firmwareUpdateConfigNamespace, "firmwareupdate-config-namespace", "",
+		"Namespace of the FirmwareUpdate ConfigMap. Defaults to POD_NAMESPACE. Ignored when "+
+			"--firmwareupdate-config-name is empty.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -223,13 +236,6 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if maxRepositoryPasses < 1 || maxRepositoryPasses > maxRepositoryPassesLimit {
-		setupLog.Error(
-			nil, "Failed to start FirmwareUpdate controller: invalid --max-repository-passes value",
-			"value", maxRepositoryPasses, "min", 1, "max", maxRepositoryPassesLimit)
-		os.Exit(1)
-	}
-
 	if defaultFailedAutoRetryCountInt < 0 || defaultFailedAutoRetryCountInt > maxFailedAutoRetryCount {
 		setupLog.Error(nil, "Failed to start FirmwareUpdate controller: invalid --default-failed-auto-retry-count value",
 			"value", defaultFailedAutoRetryCountInt, "min", 0, "max", maxFailedAutoRetryCount)
@@ -266,6 +272,16 @@ func main() {
 		if telemetryConfigNamespace == "" {
 			setupLog.Error(nil,
 				"Telemetry ConfigMap namespace resolution failed: neither --telemetry-config-namespace nor POD_NAMESPACE is set")
+			os.Exit(1)
+		}
+	}
+
+	if firmwareUpdateConfigName != "" && firmwareUpdateConfigNamespace == "" {
+		firmwareUpdateConfigNamespace = os.Getenv("POD_NAMESPACE")
+		if firmwareUpdateConfigNamespace == "" {
+			setupLog.Error(nil,
+				"FirmwareUpdate ConfigMap namespace resolution failed: neither "+
+					"--firmwareupdate-config-namespace nor POD_NAMESPACE is set")
 			os.Exit(1)
 		}
 	}
@@ -349,6 +365,7 @@ func main() {
 					splitAndTrim(configMapCacheNamespaces),
 					namedConfigMapRefs(
 						enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
+						firmwareUpdateConfigNamespace, firmwareUpdateConfigName,
 					)...,
 				),
 				secretCacheByObject(
@@ -545,19 +562,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	var firmwareUpdateConfigLoader *configloader.Loader[config.FirmwareUpdateConfig]
+	if firmwareUpdateConfigName != "" && firmwareUpdateConfigNamespace != "" {
+		firmwareUpdateConfigLoader = &configloader.Loader[config.FirmwareUpdateConfig]{
+			Cache:     mgr.GetCache(),
+			Client:    mgr.GetClient(),
+			Namespace: firmwareUpdateConfigNamespace,
+			Name:      firmwareUpdateConfigName,
+			Parse:     config.ParseFirmwareUpdateConfig,
+			Log:       ctrl.Log.WithName("firmwareupdate-config-loader"),
+		}
+		if err := mgr.Add(firmwareUpdateConfigLoader); err != nil {
+			setupLog.Error(err, "Unable to register FirmwareUpdate ConfigMap loader")
+			os.Exit(1)
+		}
+		setupLog.Info("Enabled FirmwareUpdate ConfigMap overrides",
+			"configMap", firmwareUpdateConfigNamespace+"/"+firmwareUpdateConfigName)
+	}
+
 	if err = (&systemctrl.FirmwareUpdateReconciler{
-		Client:                      mgr.GetClient(),
-		ManagerNamespace:            managerNamespace,
-		DefaultProtocol:             protocol,
-		SkipCertValidation:          skipCertValidation,
-		Scheme:                      mgr.GetScheme(),
-		ResyncInterval:              resyncInterval,
-		Conditions:                  accessor,
-		BMCOptions:                  bmcOpts,
-		DefaultFailedAutoRetryCount: int32(defaultFailedAutoRetryCountInt),
-		MaxRepositoryPasses:         int32(maxRepositoryPasses),
-		MinBMCResetInterval:         minBMCResetInterval,
-		ScheduledJobPowerOnTimeout:  scheduledJobPowerOnTimeout,
+		Client:             mgr.GetClient(),
+		ManagerNamespace:   managerNamespace,
+		DefaultProtocol:    protocol,
+		SkipCertValidation: skipCertValidation,
+		Scheme:             mgr.GetScheme(),
+		Conditions:         accessor,
+		BMCOptions:         bmcOpts,
+		ConfigLoader:       firmwareUpdateConfigLoader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create FirmwareUpdate controller")
 		os.Exit(1)
@@ -741,10 +772,14 @@ type namedConfigMapRef struct {
 // "no restriction needed" for that entry).
 func namedConfigMapRefs(
 	telemetryEnabled bool, telemetryNS, telemetryName string,
+	firmwareUpdateConfigNS, firmwareUpdateConfigName string,
 ) []namedConfigMapRef {
 	var refs []namedConfigMapRef
 	if telemetryEnabled && telemetryNS != "" && telemetryName != "" {
 		refs = append(refs, namedConfigMapRef{Namespace: telemetryNS, Name: telemetryName})
+	}
+	if firmwareUpdateConfigName != "" && firmwareUpdateConfigNS != "" {
+		refs = append(refs, namedConfigMapRef{Namespace: firmwareUpdateConfigNS, Name: firmwareUpdateConfigName})
 	}
 	return refs
 }

@@ -16,7 +16,9 @@ import (
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
 	constants "github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -70,26 +72,7 @@ type FirmwareUpdateReconciler struct {
 	SkipCertValidation bool
 	Scheme             *runtime.Scheme
 	BMCOptions         bmc.Options
-	ResyncInterval     time.Duration
-	// PollingInterval is the requeue delay used while a firmware update is
-	// actively in progress (pending job polls, component tracking, etc.).
-	// Defaults to 2 minutes when unset or zero.
-	PollingInterval             time.Duration
-	Conditions                  *conditionutils.Accessor
-	DefaultFailedAutoRetryCount int32
-	// MaxRepositoryPasses bounds how many times a dry-run repository check may
-	// find further packages pending (and thus re-enter InProgress) before the
-	// FirmwareUpdate is marked Failed instead.
-	MaxRepositoryPasses int32
-	// MinBMCResetInterval is the minimum time that must have passed since a BMC's last
-	// completed reset. Set to 0 to always reset.
-	//  Has no effect for servers using an inline Spec.BMC (no managed BMC object to check).
-	MinBMCResetInterval time.Duration
-	// ScheduledJobPowerOnTimeout bounds how long a job may remain in the "Scheduled" state (queued, awaiting a reboot/power
-	// cycle to execute) with the server powered off and no observed progress,
-	// before the controller powers the server back on to let the job proceed.
-	// A value <= 0 disables this check.
-	ScheduledJobPowerOnTimeout time.Duration
+	Conditions         *conditionutils.Accessor
 	// ServerPowerOffTimeout bounds how long to wait for a graceful power-off to complete, before
 	// retrying a Failed resource, before escalating to a forced power-off. A value <= 0 disables
 	// escalation.
@@ -99,15 +82,84 @@ type FirmwareUpdateReconciler struct {
 	// before giving up on the retry. Giving up stops further automatic retries but does not
 	// release maintenance. A value <= 0 disables the give-up check.
 	ServerResetGiveUpTimeout time.Duration
+	// ConfigLoader, when set, supplies live-reloaded overrides (from a
+	// ConfigMap) for ResyncInterval, DefaultFailedAutoRetryCount,
+	// MaxRepositoryPasses, MinBMCResetInterval, ScheduledJobPowerOnTimeout, and
+	// RepositoryCheckInterval. Any field left unset in the loaded config (or
+	// the loader itself being nil, or not having loaded a config yet) falls
+	// back to the config package's built-in default constants (config.Default*).
+	ConfigLoader *configloader.Loader[config.FirmwareUpdateConfig]
 }
 
-const defaultFirmwarePollingInterval = 2 * time.Minute
-
-func (r *FirmwareUpdateReconciler) pollingInterval() time.Duration {
-	if r.PollingInterval > 0 {
-		return r.PollingInterval
+// resyncInterval returns the live ConfigMap-overridden ResyncInterval, or
+// config.DefaultResyncInterval when no override is set.
+func (r *FirmwareUpdateReconciler) resyncInterval() time.Duration {
+	if r.ConfigLoader != nil {
+		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.ResyncInterval != nil {
+			return *cfg.ResyncInterval
+		}
 	}
-	return defaultFirmwarePollingInterval
+	return config.DefaultResyncInterval
+}
+
+// defaultFailedAutoRetryCount returns the live ConfigMap-overridden
+// DefaultFailedAutoRetryCount, or config.DefaultDefaultFailedAutoRetryCount
+// when no override is set.
+func (r *FirmwareUpdateReconciler) defaultFailedAutoRetryCount() int32 {
+	if r.ConfigLoader != nil {
+		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.DefaultFailedAutoRetryCount != nil {
+			return *cfg.DefaultFailedAutoRetryCount
+		}
+	}
+	return config.DefaultDefaultFailedAutoRetryCount
+}
+
+// maxRepositoryPasses returns the live ConfigMap-overridden
+// MaxRepositoryPasses, or config.DefaultMaxRepositoryPasses when no override
+// is set.
+func (r *FirmwareUpdateReconciler) maxRepositoryPasses() int32 {
+	if r.ConfigLoader != nil {
+		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.MaxRepositoryPasses != nil {
+			return *cfg.MaxRepositoryPasses
+		}
+	}
+	return config.DefaultMaxRepositoryPasses
+}
+
+// minBMCResetInterval returns the live ConfigMap-overridden
+// MinBMCResetInterval, or config.DefaultMinBMCResetInterval when no override
+// is set.
+func (r *FirmwareUpdateReconciler) minBMCResetInterval() time.Duration {
+	if r.ConfigLoader != nil {
+		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.MinBMCResetInterval != nil {
+			return *cfg.MinBMCResetInterval
+		}
+	}
+	return config.DefaultMinBMCResetInterval
+}
+
+// scheduledJobPowerOnTimeout returns the live ConfigMap-overridden
+// ScheduledJobPowerOnTimeout, or config.DefaultScheduledJobPowerOnTimeout when
+// no override is set.
+func (r *FirmwareUpdateReconciler) scheduledJobPowerOnTimeout() time.Duration {
+	if r.ConfigLoader != nil {
+		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.ScheduledJobPowerOnTimeout != nil {
+			return *cfg.ScheduledJobPowerOnTimeout
+		}
+	}
+	return config.DefaultScheduledJobPowerOnTimeout
+}
+
+// repositoryCheckInterval returns the live ConfigMap-overridden
+// RepositoryCheckInterval, or config.DefaultRepositoryCheckInterval when no
+// override is set.
+func (r *FirmwareUpdateReconciler) repositoryCheckInterval() time.Duration {
+	if r.ConfigLoader != nil {
+		if cfg := r.ConfigLoader.Config(); cfg != nil && cfg.RepositoryCheckInterval != nil {
+			return *cfg.RepositoryCheckInterval
+		}
+	}
+	return config.DefaultRepositoryCheckInterval
 }
 
 // +kubebuilder:rbac:groups=system.metal.ironcore.dev,resources=firmwareupdates,verbs=get;list;watch;create;update;patch;delete
@@ -250,7 +302,7 @@ func (r *FirmwareUpdateReconciler) reconcile(ctx context.Context, fw *systemv1al
 		return ctrl.Result{}, err
 	}
 	if requeue {
-		return ctrl.Result{RequeueAfter: r.pollingInterval()}, nil
+		return ctrl.Result{RequeueAfter: r.resyncInterval()}, nil
 	}
 
 	log.V(1).Info("Reconciled FirmwareUpdate")
@@ -536,7 +588,7 @@ func (r *FirmwareUpdateReconciler) handleBMCReset(
 		// due to an earlier, unrelated reset falling within the cooldown.
 		SkipRecentlyResetCheck: conditionType == constants.ConditionRetryResetIssued,
 		RecentlyReset: func(ctx context.Context) (bool, error) {
-			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.MinBMCResetInterval)
+			return utils.BMCWasRecentlyReset(ctx, r.Client, server, r.minBMCResetInterval())
 		},
 		IssueReset: func(ctx context.Context) error {
 			return utils.ResetBMCOfServer(ctx, r.Client, server, bmcClient)
@@ -556,7 +608,10 @@ func (r *FirmwareUpdateReconciler) checkProgressDeadline(ctx context.Context, fw
 		return false, nil
 	}
 	deadline := time.Duration(*fw.Spec.ProgressDeadlineSeconds) * time.Second
-
+	// take the max of the two deadlines, so that the power-on recovery always gets a chance to run first.
+	if scheduledJobPowerOnTimeout := r.scheduledJobPowerOnTimeout(); scheduledJobPowerOnTimeout > 0 && scheduledJobPowerOnTimeout > deadline {
+		deadline = scheduledJobPowerOnTimeout
+	}
 	if time.Since(fw.Status.LastProgressTime.Time) <= deadline {
 		return false, nil
 	}
@@ -639,9 +694,9 @@ func (r *FirmwareUpdateReconciler) processFailedState(ctx context.Context, bmcCl
 	if fw.Spec.RetryPolicy != nil && fw.Spec.RetryPolicy.MaxAttempts != nil {
 		// if RetryPolicy is given (even if MaxAttempts is 0), do not use the default value.
 		maxAttempts = *fw.Spec.RetryPolicy.MaxAttempts
-	} else if r.DefaultFailedAutoRetryCount > 0 {
+	} else if defaultFailedAutoRetryCount := r.defaultFailedAutoRetryCount(); defaultFailedAutoRetryCount > 0 {
 		// set the retry to this, if the optional RetryPolicy is not given and default retry count is set on the reconciler.
-		maxAttempts = r.DefaultFailedAutoRetryCount
+		maxAttempts = defaultFailedAutoRetryCount
 	}
 	if maxAttempts > 0 {
 		if fw.Status.ObservedGeneration != fw.Generation {
