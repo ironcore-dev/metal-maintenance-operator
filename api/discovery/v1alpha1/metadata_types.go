@@ -203,6 +203,7 @@ type BlockDevice struct {
 
 // MemoryDevice describes a discovered memory device.
 type MemoryDevice struct {
+	// SizeBytes is the memory device size in bytes.
 	// +optional
 	SizeBytes int64 `json:"size,omitempty"`
 	// +optional

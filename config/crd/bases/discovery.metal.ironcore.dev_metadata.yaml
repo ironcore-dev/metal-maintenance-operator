@@ -127,6 +127,7 @@ spec:
                 serialNumber:
                   type: string
                 size:
+                  description: SizeBytes is the memory device size in bytes.
                   format: int64
                   type: integer
                 speed:

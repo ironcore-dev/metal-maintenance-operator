@@ -932,7 +932,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `size` _integer_ |  |  |  |
+| `size` _integer_ | SizeBytes is the memory device size in bytes. |  |  |
 | `deviceSet` _string_ |  |  |  |
 | `deviceLocator` _string_ |  |  |  |
 | `bankLocator` _string_ |  |  |  |
