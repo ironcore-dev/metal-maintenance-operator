@@ -31,9 +31,9 @@ func collectNICInfoData() ([]registry.NIC, error) {
 		if nic.PCIAddress != nil {
 			pci = *nic.PCIAddress
 		}
-		drvInfo, err := ethHandle.DriverInfo(nic.Name)
-		if err != nil {
-			return []registry.NIC{}, fmt.Errorf("failed to get driver info: %w", err)
+		firmwareVersion := ""
+		if drvInfo, err := ethHandle.DriverInfo(nic.Name); err == nil {
+			firmwareVersion = drvInfo.FwVersion
 		}
 		nics = append(nics, registry.NIC{
 			Name:            nic.Name,
@@ -42,7 +42,7 @@ func collectNICInfoData() ([]registry.NIC, error) {
 			Speed:           nic.Speed,
 			LinkModes:       nic.SupportedLinkModes,
 			SupportedPorts:  nic.SupportedPorts,
-			FirmwareVersion: drvInfo.FwVersion,
+			FirmwareVersion: firmwareVersion,
 		})
 	}
 	return nics, nil
