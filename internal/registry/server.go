@@ -24,6 +24,9 @@ import (
 
 const DefaultStaleEntryTTL = 10 * time.Minute
 
+// maxRegistryBodyBytes caps registration payloads at 1 MiB, matching telemetry events.
+const maxRegistryBodyBytes = 1 << 20
+
 // MaxClockSkew allows small differences between the probe and manager clocks.
 const MaxClockSkew = 30 * time.Second
 
@@ -62,6 +65,7 @@ func NewServer(logger logr.Logger, addr string) *RegistryServer {
 }
 
 func (s *RegistryServer) registerHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRegistryBodyBytes)
 	var reg RegistrationPayload
 	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

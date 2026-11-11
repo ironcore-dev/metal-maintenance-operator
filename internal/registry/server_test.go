@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +119,28 @@ func TestSweep(t *testing.T) {
 	}
 	if _, ok := srv.Load("far-future-uuid"); ok {
 		t.Fatal("expected timestamp beyond clock-skew tolerance to be swept")
+	}
+}
+
+func TestRegisterBodyLimit(t *testing.T) {
+	const prefix = `{"systemUUID":"test-uuid","data":{},"padding":"`
+	const suffix = `"}`
+	for _, extra := range []int{0, 1} {
+		srv := NewServer(logr.Discard(), ":0")
+		body := prefix + strings.Repeat("x", maxRegistryBodyBytes-len(prefix)-len(suffix)+extra) + suffix
+		rec := httptest.NewRecorder()
+		srv.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body)))
+		want := http.StatusCreated
+		if extra > 0 {
+			want = http.StatusBadRequest
+		}
+		if rec.Code != want {
+			t.Fatalf("body size %d: status = %d, want %d", len(body), rec.Code, want)
+		}
+		_, stored := srv.Load("test-uuid")
+		if stored != (extra == 0) {
+			t.Fatalf("body size %d: stored = %v", len(body), stored)
+		}
 	}
 }
 
