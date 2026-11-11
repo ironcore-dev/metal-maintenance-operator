@@ -14,11 +14,13 @@ import (
 
 type Reporter struct {
 	reportURL string
+	token     string
 }
 
-func New(reportURL string) *Reporter {
+func New(reportURL, token string) *Reporter {
 	return &Reporter{
 		reportURL: reportURL,
+		token:     token,
 	}
 }
 
@@ -48,6 +50,9 @@ func (r *Reporter) ReportResult(ctx context.Context, err error) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	if r.token != "" {
+		req.Header.Set("Authorization", "Bearer "+r.token)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("sending request: %w", err)
