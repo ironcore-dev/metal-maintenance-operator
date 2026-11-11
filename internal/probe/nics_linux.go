@@ -22,7 +22,7 @@ func collectNICInfoData() ([]registry.NIC, error) {
 
 	ethHandle, err := ethtool.NewEthtool()
 	if err != nil {
-		panic(err.Error())
+		return []registry.NIC{}, fmt.Errorf("could not create ethtool handle: %w", err)
 	}
 	defer ethHandle.Close()
 
