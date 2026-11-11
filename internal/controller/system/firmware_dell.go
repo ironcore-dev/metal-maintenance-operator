@@ -543,7 +543,13 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		return nil, nil
 	}
 
-	if fw.Status.LastProgressTime == nil || time.Since(fw.Status.LastProgressTime.Time) < scheduledJobPowerOnTimeout {
+	// Fire early enough to run before checkProgressDeadline fails the update; polls are a resync plus processing time apart.
+	powerOnAfter := scheduledJobPowerOnTimeout
+	if fw.Spec.ProgressDeadlineSeconds != nil {
+		deadline := time.Duration(*fw.Spec.ProgressDeadlineSeconds) * time.Second
+		powerOnAfter = max(min(powerOnAfter, deadline-2*r.resyncInterval()), 0)
+	}
+	if fw.Status.LastProgressTime == nil || time.Since(fw.Status.LastProgressTime.Time) < powerOnAfter {
 		return nil, nil
 	}
 
@@ -559,7 +565,7 @@ func (dh *dellHandler) handleStuckScheduledJob(
 		conditionutils.UpdateReason(ReasonScheduledJobStuckPowerOnIssued),
 		conditionutils.UpdateMessage(fmt.Sprintf(
 			"Job(s) %v remained Scheduled with server powered off for over %v with no progress; issued PowerOn",
-			scheduledJobIDs, scheduledJobPowerOnTimeout)),
+			scheduledJobIDs, powerOnAfter)),
 	); err != nil {
 		return nil, fmt.Errorf("failed to update ScheduledJobStuckPowerOnIssued condition: %w", err)
 	}

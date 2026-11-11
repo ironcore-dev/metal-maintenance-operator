@@ -608,10 +608,6 @@ func (r *FirmwareUpdateReconciler) checkProgressDeadline(ctx context.Context, fw
 		return false, nil
 	}
 	deadline := time.Duration(*fw.Spec.ProgressDeadlineSeconds) * time.Second
-	// take the max of the two deadlines, so that the power-on recovery always gets a chance to run first.
-	if scheduledJobPowerOnTimeout := r.scheduledJobPowerOnTimeout(); scheduledJobPowerOnTimeout > 0 && scheduledJobPowerOnTimeout > deadline {
-		deadline = scheduledJobPowerOnTimeout
-	}
 	if time.Since(fw.Status.LastProgressTime.Time) <= deadline {
 		return false, nil
 	}
