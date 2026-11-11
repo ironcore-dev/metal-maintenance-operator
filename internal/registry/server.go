@@ -119,7 +119,7 @@ func (s *RegistryServer) sweep() {
 // Start starts the HTTP server and shuts it down when ctx is done.
 func (s *RegistryServer) Start(ctx context.Context) error {
 	s.log.Info("Starting registry server", "address", s.addr)
-	srv := &http.Server{Addr: s.addr, Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: s.addr, Handler: s.mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
 
 	res := make(chan error, 1)
 	go func() {
