@@ -140,7 +140,7 @@ func (a *Agent) Start(ctx context.Context) error {
 			a.log.Info("Probe agent stopped")
 			return nil
 		case <-ticker.C:
-			// Only refresh LLDP info on subsequent runs, rest is static
+			// Recollect inventory if the LLDP-only refresh fails.
 			if a.Server == nil {
 				a.log.Info("Server uninitialized, initializing probe agent")
 				if err := a.Init(ctx); err != nil {
@@ -151,7 +151,11 @@ func (a *Agent) Start(ctx context.Context) error {
 			} else {
 				a.log.Info("Refreshing LLDP info")
 				if err := a.RefreshLLDP(ctx); err != nil {
-					a.log.Error(err, "Failed to refresh LLDP info, continuing with previous data")
+					a.log.Error(err, "Failed to refresh LLDP info, recollecting inventory")
+					if err := a.Init(ctx); err != nil {
+						a.log.Error(err, "Failed to recollect inventory on tick")
+						continue
+					}
 				}
 			}
 			a.log.Info("Re-registering Server")
