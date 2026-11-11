@@ -6,6 +6,7 @@ package probe
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"time"
@@ -23,20 +24,23 @@ func collectLLDPInfo(ctx context.Context, interval, duration time.Duration) (reg
 		return lldp, fmt.Errorf("lldpctl is not present: %w", err)
 	}
 
+	var lastErr error
 	if err := wait.PollUntilContextTimeout(ctx, interval, duration, true, func(ctx context.Context) (done bool, err error) {
 		out.Reset()
-		cmd := exec.Command(tool, "-f", "json")
+		cmd := exec.CommandContext(ctx, tool, "-f", "json")
 		cmd.Stdout = &out
 		err = cmd.Run()
 		if err != nil {
-			return false, fmt.Errorf("running lldpctl encountered a problem: %w", err)
+			lastErr = fmt.Errorf("running lldpctl encountered a problem: %w", err)
+			return false, nil
 		}
 		if len(out.Bytes()) == 0 {
 			return false, nil
 		}
 		parsed, err := registry.ParseLLDPCTL(out.Bytes())
 		if err != nil {
-			return false, fmt.Errorf("can't parse lldpctl output: %s: %w", out.String(), err)
+			lastErr = fmt.Errorf("can't parse lldpctl output: %s: %w", out.String(), err)
+			return false, nil
 		}
 		if len(parsed.Interfaces) == 0 {
 			return false, nil
@@ -44,7 +48,7 @@ func collectLLDPInfo(ctx context.Context, interval, duration time.Duration) (reg
 		lldp = parsed
 		return true, nil
 	}); err != nil {
-		return registry.LLDP{}, err
+		return registry.LLDP{}, errors.Join(err, lastErr)
 	}
 
 	return lldp, nil
