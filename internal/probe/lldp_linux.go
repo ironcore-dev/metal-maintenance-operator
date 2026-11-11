@@ -24,6 +24,7 @@ func collectLLDPInfo(ctx context.Context, interval, duration time.Duration) (reg
 	}
 
 	if err := wait.PollUntilContextTimeout(ctx, interval, duration, true, func(ctx context.Context) (done bool, err error) {
+		out.Reset()
 		cmd := exec.Command(tool, "-f", "json")
 		cmd.Stdout = &out
 		err = cmd.Run()
@@ -36,6 +37,9 @@ func collectLLDPInfo(ctx context.Context, interval, duration time.Duration) (reg
 		parsed, err := registry.ParseLLDPCTL(out.Bytes())
 		if err != nil {
 			return false, fmt.Errorf("can't parse lldpctl output: %s: %w", out.String(), err)
+		}
+		if len(parsed.Interfaces) == 0 {
+			return false, nil
 		}
 		lldp = parsed
 		return true, nil
