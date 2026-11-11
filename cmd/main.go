@@ -367,18 +367,31 @@ func main() {
 		// the manager stops, so would be fine to enable this option. However,
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
+		LeaderElectionReleaseOnCancel: false,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	if err := promsink.NewFirmwareStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
+	leaderFlag := &promsink.LeaderFlag{}
+	if enableLeaderElection {
+		// With leader election the manager only calls Start() on the elected
+		// leader, so the flag activates only on the leader pod.
+		if err := mgr.Add(leaderFlag); err != nil {
+			setupLog.Error(err, "Failed to register LeaderFlag runnable")
+			os.Exit(1)
+		}
+	} else {
+		// Without leader election a single-replica deployment is assumed;
+		// activate the flag immediately so collectors emit on startup.
+		leaderFlag.Activate()
+	}
+	if err := promsink.NewFirmwareStateCollector(mgr.GetClient(), ctrlmetrics.Registry, leaderFlag); err != nil {
 		setupLog.Error(err, "Failed to register FirmwareStateCollector")
 		os.Exit(1)
 	}
-	if err := promsink.NewSettingsStateCollector(mgr.GetClient(), ctrlmetrics.Registry); err != nil {
+	if err := promsink.NewSettingsStateCollector(mgr.GetClient(), ctrlmetrics.Registry, leaderFlag); err != nil {
 		setupLog.Error(err, "Failed to register SettingsStateCollector")
 		os.Exit(1)
 	}
