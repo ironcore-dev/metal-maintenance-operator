@@ -4,13 +4,47 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+func TestDiscoveryRegistryResyncInterval(t *testing.T) {
+	if os.Getenv("TEST_DISCOVERY_STARTUP") == "1" {
+		os.Args = []string{os.Args[0],
+			"--sanitization-namespace=test", "--sanitization-image=test",
+			"--report-base-url=http://test", "--manager-namespace=test",
+			"--enable-discovery", "--registry-resync-interval=" + os.Getenv("TEST_RESYNC_INTERVAL"),
+		}
+		main()
+		os.Exit(0)
+	}
+
+	for _, interval := range []string{"0s", "-1s", "1ns", "10s"} {
+		t.Run(interval, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestDiscoveryRegistryResyncInterval$")
+			cmd.Env = append(os.Environ(), "TEST_DISCOVERY_STARTUP=1", "TEST_RESYNC_INTERVAL="+interval)
+			output, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatal("expected startup to reject invalid or incomplete configuration")
+			}
+			want := "Must specify a positive --registry-resync-interval when discovery is enabled"
+			if interval == "1ns" || interval == "10s" {
+				// Positive intervals pass validation and reach the next required flag.
+				want = "Must specify --probe-image when discovery is enabled"
+			}
+			if !strings.Contains(string(output), want) {
+				t.Fatalf("expected %q, got %s", want, output)
+			}
+		})
+	}
+}
 
 const kubeSystem = "kube-system"
 

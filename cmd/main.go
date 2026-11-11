@@ -290,6 +290,10 @@ func main() {
 	}
 
 	if enableDiscovery {
+		if registryResyncInterval <= 0 {
+			setupLog.Error(nil, "Must specify a positive --registry-resync-interval when discovery is enabled")
+			os.Exit(1)
+		}
 		if probeImage == "" {
 			setupLog.Error(nil, "Must specify --probe-image when discovery is enabled")
 			os.Exit(1)
