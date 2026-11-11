@@ -134,15 +134,15 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("getting discovery claim: %w", err)
 	}
-	if err == nil {
+	claimExists := err == nil
+	if claimExists {
 		if !metav1.IsControlledBy(discoveryClaim, server) {
 			return nil, fmt.Errorf("discovery claim %s is not owned by server %s", claimKey, server.Name)
 		}
 		log.V(1).Info("Found matching discovery claim", "MatchingDiscoveryClaim", client.ObjectKeyFromObject(discoveryClaim))
-		return discoveryClaim, nil
 	}
 
-	var ignitionSecretRef *corev1.LocalObjectReference
+	ignitionSecretRef := discoveryClaim.Spec.IgnitionSecretRef
 	if r.IgnitionProvider != nil {
 		ignitionData, err := r.IgnitionProvider(ctx, server)
 		if err != nil {
@@ -153,18 +153,47 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: r.DiscoveryNamespace,
 				Name:      server.Name,
-				Labels: map[string]string{
-					constants.DiscoveryForUIDLabel: string(server.UID),
-				},
-			},
-			Data: map[string][]byte{
-				"ignition": ignitionData,
 			},
 		}
-		if err := r.Create(ctx, secret); err != nil && !apierrors.IsAlreadyExists(err) {
-			return nil, fmt.Errorf("creating server ignition secret: %w", err)
+		_, err = controllerutil.CreateOrPatch(ctx, r.Client, secret, func() error {
+			if secret.ResourceVersion != "" {
+				if secret.Labels[constants.DiscoveryForUIDLabel] != string(server.UID) {
+					return fmt.Errorf("ignition secret %s does not belong to server %s", client.ObjectKeyFromObject(secret), server.Name)
+				}
+				if owner := metav1.GetControllerOf(secret); owner != nil &&
+					!metav1.IsControlledBy(secret, server) && (!claimExists || !metav1.IsControlledBy(secret, discoveryClaim)) {
+					return fmt.Errorf("ignition secret %s has a different controller", client.ObjectKeyFromObject(secret))
+				}
+			}
+			if secret.Labels == nil {
+				secret.Labels = map[string]string{}
+			}
+			secret.Labels[constants.DiscoveryForUIDLabel] = string(server.UID)
+			if metav1.GetControllerOf(secret) == nil {
+				if err := ctrl.SetControllerReference(server, secret, r.Scheme); err != nil {
+					return err
+				}
+			}
+			if secret.Data == nil {
+				secret.Data = map[string][]byte{}
+			}
+			secret.Data["ignition"] = ignitionData
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("reconciling server ignition secret: %w", err)
 		}
 		ignitionSecretRef = &corev1.LocalObjectReference{Name: secret.Name}
+	}
+
+	if claimExists {
+		base := discoveryClaim.DeepCopy()
+		discoveryClaim.Spec.Image = r.ProbeOSImage
+		discoveryClaim.Spec.IgnitionSecretRef = ignitionSecretRef
+		if err := r.Patch(ctx, discoveryClaim, client.MergeFrom(base)); err != nil {
+			return nil, fmt.Errorf("patching discovery claim: %w", err)
+		}
+		return discoveryClaim, nil
 	}
 
 	discoveryClaim = &metalv1alpha1.ServerClaim{
@@ -192,19 +221,6 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 	}
 	if err := r.Create(ctx, discoveryClaim); err != nil {
 		return nil, fmt.Errorf("creating discovery claim: %w", err)
-	}
-	if ignitionSecretRef != nil {
-		secret := &corev1.Secret{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: r.DiscoveryNamespace, Name: ignitionSecretRef.Name}, secret); err != nil {
-			return nil, fmt.Errorf("getting ignition secret: %w", err)
-		}
-		base := secret.DeepCopy()
-		if err := ctrl.SetControllerReference(discoveryClaim, secret, r.Scheme); err != nil {
-			return nil, fmt.Errorf("setting discovery claim as owner of ignition secret: %w", err)
-		}
-		if err := r.Patch(ctx, secret, client.MergeFrom(base)); err != nil {
-			return nil, fmt.Errorf("patching ignition secret owner: %w", err)
-		}
 	}
 	log.V(1).Info("Created discovery claim", "DiscoveryClaim", client.ObjectKeyFromObject(discoveryClaim))
 	return discoveryClaim, nil
