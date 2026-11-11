@@ -344,6 +344,51 @@ func TestServeHTTP_ReasonLabelFromUnsubscribedFunc(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_BearerTokenRequired(t *testing.T) {
+	h := &discovery.Handler{
+		Client:      newClient(t, readyBMC("bmc-1")),
+		BearerToken: "secret-token",
+	}
+
+	// No token → 401
+	req := httptest.NewRequest(http.MethodGet, discovery.Path, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("missing token: got status %d, want 401", rec.Code)
+	}
+
+	// Wrong token → 401
+	req = httptest.NewRequest(http.MethodGet, discovery.Path, nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong token: got status %d, want 401", rec.Code)
+	}
+
+	// Correct token → 200
+	req = httptest.NewRequest(http.MethodGet, discovery.Path, nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("correct token: got status %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServeHTTP_NoBearerTokenConfigured_AllowsAccess(t *testing.T) {
+	// BearerToken="" means auth is delegated to the metrics server FilterProvider.
+	h := &discovery.Handler{Client: newClient(t, readyBMC("bmc-1"))}
+
+	req := httptest.NewRequest(http.MethodGet, discovery.Path, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("unauthenticated with no token configured: got status %d, want 200", rec.Code)
+	}
+}
+
 // errListClient is a minimal client.Client that returns the given error
 // from List. Other methods panic — we don't exercise them.
 type errListClient struct {

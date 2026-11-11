@@ -13,10 +13,12 @@
 package discovery
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
@@ -51,6 +53,12 @@ type Handler struct {
 	// to obtain a map of bmcName → reason for BMCs not push-subscribed. The reason
 	// is added as __meta_bmc_subscription_reason label on each SD target.
 	UnsubscribedBMCReasons func() map[string]string
+
+	// BearerToken gates access to the endpoint when non-empty.
+	// Callers must send "Authorization: Bearer <token>" with the exact value.
+	// When empty, authentication is skipped (insecure — only acceptable when
+	// the metrics server itself enforces authn via FilterProvider).
+	BearerToken string
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -58,6 +66,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "Only GET is allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	if h.BearerToken != "" {
+		got := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(h.BearerToken)) == 0 {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	list := &metalv1alpha1.BMCList{}

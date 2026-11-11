@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink"
 	psink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
@@ -832,3 +833,121 @@ var assertOnCriticalErr = errSentinel("apiserver down")
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
+
+// -- Cardinality cap tests --
+
+func TestEventSink_MaxBMCsCap_DropsUnknownBMC(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	// Cap at 2 BMCs.
+	s, err := psink.NewEventSinkWithOptions(reg, logr.Discard(), 2, 512)
+	if err != nil {
+		t.Fatalf("NewEventSinkWithOptions: %v", err)
+	}
+
+	ev := func(id string) sink.Event {
+		return sink.Event{EventID: id, MessageID: id, Severity: sevWarning}
+	}
+	_ = s.PublishEvents(context.Background(), "bmc-a", []sink.Event{ev("E1")})
+	_ = s.PublishEvents(context.Background(), "bmc-b", []sink.Event{ev("E2")})
+	// Third BMC exceeds cap — must be silently dropped, not panic.
+	_ = s.PublishEvents(context.Background(), "bmc-c", []sink.Event{ev("E3")})
+
+	if got := gatherEventCount(t, reg); got != 2 {
+		t.Errorf("series count: got %d, want 2 (bmc-c dropped)", got)
+	}
+	if _, ok := gatherEventValue(t, reg, "bmc-c", sevWarning, "E3", "system"); ok {
+		t.Error("bmc-c series present despite BMC cap")
+	}
+}
+
+func TestEventSink_MaxBMCsCap_KnownBMCAlwaysAccepted(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSinkWithOptions(reg, logr.Discard(), 1, 512)
+	if err != nil {
+		t.Fatalf("NewEventSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		{EventID: "E1", MessageID: "E1", Severity: sevWarning},
+	})
+	// Second publish to the same BMC must succeed even though cap==1.
+	_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		{EventID: "E2", MessageID: "E2", Severity: sevCritical},
+	})
+	if got := gatherEventCount(t, reg); got != 2 {
+		t.Errorf("series count: got %d, want 2 (same BMC, two label tuples)", got)
+	}
+}
+
+func TestEventSink_MaxSeriesPerBMC_DropsNewTuples(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	// Allow 1 BMC, 3 series per BMC.
+	s, err := psink.NewEventSinkWithOptions(reg, logr.Discard(), 10, 3)
+	if err != nil {
+		t.Fatalf("NewEventSinkWithOptions: %v", err)
+	}
+
+	for i := range 5 {
+		id := fmt.Sprintf("MSG-%d", i)
+		_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+			{EventID: id, MessageID: id, Severity: sevWarning},
+		})
+	}
+	// Only the first 3 label tuples must be minted; the 4th and 5th dropped.
+	if got := gatherEventCount(t, reg); got != 3 {
+		t.Errorf("series count: got %d, want 3 (cap=3)", got)
+	}
+}
+
+func TestEventSink_MaxSeriesPerBMC_ExistingTupleAlwaysIncremented(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSinkWithOptions(reg, logr.Discard(), 10, 1)
+	if err != nil {
+		t.Fatalf("NewEventSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		{EventID: "E1", MessageID: "KNOWN", Severity: sevWarning},
+	})
+	// Distinct EventID, same label tuple → same series, must increment.
+	_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		{EventID: "E2", MessageID: "KNOWN", Severity: sevWarning},
+	})
+	if got := gatherEventCount(t, reg); got != 1 {
+		t.Errorf("series count: got %d, want 1 (same label tuple reuses series)", got)
+	}
+	if v, _ := gatherEventValue(t, reg, bmc1, sevWarning, "KNOWN", "system"); v != 2 {
+		t.Errorf("counter: got %v, want 2 (both events counted on same series)", v)
+	}
+}
+
+func TestEventSink_MaxBMCsCap_ForgetMakesRoomForNewBMC(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSinkWithOptions(reg, logr.Discard(), 1, 512)
+	if err != nil {
+		t.Fatalf("NewEventSinkWithOptions: %v", err)
+	}
+
+	_ = s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		{EventID: "E1", MessageID: "E1", Severity: sevWarning},
+	})
+	// bmc-2 is rejected while cap is full.
+	_ = s.PublishEvents(context.Background(), "bmc-2", []sink.Event{
+		{EventID: "E2", MessageID: "E2", Severity: sevWarning},
+	})
+	if got := gatherEventCount(t, reg); got != 1 {
+		t.Errorf("before Forget: series count: got %d, want 1", got)
+	}
+
+	// Forget bmc1 → slot opens → bmc-2 now accepted.
+	s.Forget(bmc1)
+	_ = s.PublishEvents(context.Background(), "bmc-2", []sink.Event{
+		{EventID: "E2", MessageID: "E2", Severity: sevWarning},
+	})
+	if got := gatherEventCount(t, reg); got != 1 {
+		t.Errorf("after Forget+retry: series count: got %d, want 1 (bmc-2 accepted)", got)
+	}
+	if v, ok := gatherEventValue(t, reg, "bmc-2", sevWarning, "E2", "system"); !ok || v != 1 {
+		t.Errorf("bmc-2 after Forget: got %v ok=%v, want 1", v, ok)
+	}
+}

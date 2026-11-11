@@ -657,3 +657,115 @@ func TestAlerts_SetTestNotifier_WiresCorrectly(t *testing.T) {
 		t.Errorf("expected 1 notify call after SetTestNotifier, got %d", len(calls))
 	}
 }
+
+// -- SharedSecret / bearer-token auth tests --
+
+// newAuthReceiver builds a Receiver with a SharedSecret configured.
+func newAuthReceiver(t *testing.T, secret []byte) (http.Handler, *recordingEventSink, *recordingMetricSink) {
+	t.Helper()
+	eSink := &recordingEventSink{}
+	mSink := &recordingMetricSink{}
+	r, err := events.New(events.Config{
+		Addr:             ":0",
+		EventSink:        eSink,
+		MetricReportSink: mSink,
+		SharedSecret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("events.New: %v", err)
+	}
+	return r.Handler(), eSink, mSink
+}
+
+func doPostWithAuth(t *testing.T, h http.Handler, url, body, authHeader string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
+func TestAlerts_SharedSecret_MissingToken_Returns401(t *testing.T) {
+	secret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	h, _, _ := newAuthReceiver(t, secret)
+
+	resp := doPostWithAuth(t, h, "/serverevents/alerts/bmc-1", `{}`, "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestAlerts_SharedSecret_WrongToken_Returns401(t *testing.T) {
+	secret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	h, _, _ := newAuthReceiver(t, secret)
+
+	resp := doPostWithAuth(t, h, "/serverevents/alerts/bmc-1", `{}`, "Bearer wrongtoken")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestAlerts_SharedSecret_CorrectToken_Passes(t *testing.T) {
+	secret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	h, eSink, _ := newAuthReceiver(t, secret)
+	// hex(secret) = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+	token := "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+
+	resp := doPostWithAuth(t, h, "/serverevents/alerts/bmc-1",
+		`{"Events":[{"EventId":"e1","Severity":"Warning","MessageId":"FOO.1.0.Bar"}]}`,
+		"Bearer "+token)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	eSink.mu.Lock()
+	calls := len(eSink.calls)
+	eSink.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("expected 1 sink call, got %d", calls)
+	}
+}
+
+func TestMetricReport_SharedSecret_MissingToken_Returns401(t *testing.T) {
+	secret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	h, _, _ := newAuthReceiver(t, secret)
+
+	resp := doPostWithAuth(t, h, "/serverevents/metricsreport/bmc-1",
+		`{"@odata.type":"#MetricReport.v1_0_0.MetricReport","MetricValues":[]}`, "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestMetricReport_SharedSecret_CorrectToken_Passes(t *testing.T) {
+	secret := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	h, _, mSink := newAuthReceiver(t, secret)
+	token := "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+
+	resp := doPostWithAuth(t, h, "/serverevents/metricsreport/bmc-1",
+		`{"@odata.type":"#MetricReport.v1_0_0.MetricReport","MetricValues":[{"MetricId":"Power","MetricValue":"100"}]}`,
+		"Bearer "+token)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	mSink.mu.Lock()
+	calls := len(mSink.calls)
+	mSink.mu.Unlock()
+	if calls != 1 {
+		t.Errorf("expected 1 metric sink call, got %d", calls)
+	}
+}
+
+func TestAlerts_NoSharedSecret_AllowsUnauthenticated(t *testing.T) {
+	h := newReceiver(t, &recordingEventSink{})
+
+	resp := doPost(t, h, "/serverevents/alerts/bmc-1",
+		`{"Events":[{"EventId":"e1","Severity":"Warning","MessageId":"FOO.1.0.Bar"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 (no auth configured), got %d", resp.StatusCode)
+	}
+}

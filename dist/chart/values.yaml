@@ -190,6 +190,25 @@ metrics:
   # Note: Metrics authn/authz needs ClusterRole access.
   secure: false
 
+  # Bearer-token authentication for the /sd/bmcs service-discovery endpoint.
+  # When enabled, the manager reads the token from a mounted Secret and requires
+  # "Authorization: Bearer <token>" on every GET /sd/bmcs request.
+  # Configure the same token in your Prometheus http_sd_configs via bearer_token_file.
+  #
+  # This is independent of metrics.secure: it protects /sd/bmcs even when the
+  # metrics server runs over plain HTTP (metrics.secure=false). When metrics.secure=true
+  # the FilterProvider already enforces Kubernetes authn/authz for the whole server,
+  # so sdBearerToken is redundant but harmless.
+  sdBearerToken:
+    # Set to true to enable bearer-token authentication on /sd/bmcs.
+    enabled: false
+    # The token value. Required when enabled=true and existingSecret is not set.
+    # Use a strong random value (e.g. openssl rand -hex 32).
+    token: ""
+    # Reference an existing Secret instead of creating one.
+    # The Secret must have a "token" key containing the bearer token value.
+    existingSecret: ""
+
 ## Cert-manager integration for TLS certificates.
 ## Required for webhook certificates and metrics endpoint certificates.
 ##

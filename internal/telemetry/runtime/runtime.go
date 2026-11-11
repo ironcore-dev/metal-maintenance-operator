@@ -34,6 +34,7 @@ import (
 	promsink "github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/sink/prometheus"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/subscriptions"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/telemetry/warningevent"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	metalbmc "github.com/ironcore-dev/metal-operator/bmc"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -63,6 +64,14 @@ type Options struct {
 	// EnableCriticalEventHandler.
 	EnableWarningEventHandler bool
 
+	// SharedSecretName, when non-empty, names a Kubernetes Secret (in ConfigNamespace)
+	// that holds a shared bearer token used to authenticate incoming Redfish event POSTs.
+	// The Secret is created automatically on first start if it does not exist.
+	// The token must be configured in Redfish subscription HttpHeaders so BMCs include
+	// "Authorization: Bearer <token>" on every event POST.
+	// When empty, the event receiver accepts unauthenticated POSTs (backward compatible).
+	SharedSecretName string
+
 	// ActiveSubscriptions is populated by AddTo with a function that
 	// returns the current set of BMC names with active push subscriptions.
 	// Callers can pass this to discovery.Handler.SubscribedBMCs so the
@@ -82,6 +91,7 @@ type Options struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;create
 
 // AddTo registers the event-push pipeline on the given manager.
 // opts must be non-nil. On return, opts.ActiveSubscriptions and
@@ -183,12 +193,22 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 		ctrl.Log.WithName("telemetry").WithName("fetcher"),
 	)
 
+	var sharedSecret []byte
+	if opts.SharedSecretName != "" {
+		k, err := utils.EnsureHMACKey(context.Background(), mgr.GetClient(), opts.ConfigNamespace, opts.SharedSecretName)
+		if err != nil {
+			return fmt.Errorf("provision event receiver shared secret: %w", err)
+		}
+		sharedSecret = k
+	}
+
 	receiver, err := events.New(events.Config{
 		Addr:             opts.EventsAddr,
 		EventSink:        eventSink,
 		MetricReportSink: metricSink,
 		MetricFetcher:    fetcher,
 		SubscriberID:     opts.SubscriberID,
+		SharedSecret:     sharedSecret,
 		Log:              ctrl.Log.WithName("telemetry").WithName("events"),
 	})
 	if err != nil {
@@ -218,6 +238,11 @@ func AddTo(mgr manager.Manager, opts *Options) error {
 		// site, falling back to its internal defaults when the
 		// ConfigMap doesn't provide a value. See subscriptions/manager.go.
 		Log: ctrl.Log.WithName("telemetry").WithName("subscriptions"),
+	}
+	if len(sharedSecret) > 0 {
+		subReconciler.SubscriptionHeaders = map[string]string{
+			"Authorization": "Bearer " + receiver.BearerToken(),
+		}
 	}
 	if err := subReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("setup subscription reconciler: %w", err)
@@ -339,6 +364,40 @@ func (c *extendedClient) ListEventSubscriptions(_ context.Context) ([]subscripti
 		})
 	}
 	return out, nil
+}
+
+// CreateEventSubscription overrides the embedded metalbmc.BMC method to
+// pass httpHeaders to the BMC. When httpHeaders is non-nil, the BMC stores
+// them and includes them verbatim in every event POST — this is the mechanism
+// that carries the bearer token to the operator's event receiver.
+func (c *extendedClient) CreateEventSubscription(
+	_ context.Context,
+	destination string,
+	eventFormatType redfishschemas.EventFormatType,
+	retry redfishschemas.DeliveryRetryPolicy,
+	httpHeaders map[string]string,
+) (string, error) {
+	svc := c.api.GetService()
+	if svc == nil {
+		return "", fmt.Errorf("create subscription: no service root")
+	}
+	es, err := svc.EventService()
+	if err != nil {
+		return "", fmt.Errorf("create subscription: event service: %w", err)
+	}
+	if !es.ServiceEnabled {
+		return "", fmt.Errorf("create subscription: event service is not enabled")
+	}
+	return es.CreateEventSubscriptionInstance(
+		destination,
+		nil, // registryPrefixes: subscribe to all
+		nil, // resourceTypes: subscribe to all
+		httpHeaders,
+		redfishschemas.RedfishEventDestinationProtocol,
+		"metal-operator",
+		redfishschemas.DeliveryRetryPolicy(retry),
+		nil, // oem
+	)
 }
 
 func (c *extendedClient) SubmitTestEvent(_ context.Context, params subscriptions.TestEventParams) error {

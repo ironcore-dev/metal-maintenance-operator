@@ -15,6 +15,8 @@ package events
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +58,16 @@ type Config struct {
 	// SubscriberID scopes the receiver's route under a per-subscriber
 	// path segment.
 	SubscriberID string
+	// SharedSecret, when non-empty, enables bearer-token authentication on the
+	// alert and metricsreport endpoints. Every incoming POST must carry:
+	//
+	//   Authorization: Bearer <hex(SharedSecret)>
+	//
+	// Requests without a matching token are rejected with 401. When nil or
+	// empty, the endpoints are unauthenticated (backward compatible). Configure
+	// the same token in your Redfish subscription HttpHeaders so BMCs include it
+	// on every event POST.
+	SharedSecret []byte
 	// TestNotifier is called for every incoming alert event so the
 	// subscription reconciler can correlate SubmitTestEvent round-trips.
 	// Nil disables notification (backward compatible).
@@ -80,6 +92,9 @@ type Receiver struct {
 	alertsPath  string
 	metricsPath string
 	fetchSem    chan struct{} // bounds concurrent GET-on-empty goroutines
+	// bearerToken is the hex-encoded shared secret expected in Authorization headers.
+	// Empty string disables auth.
+	bearerToken string
 }
 
 var (
@@ -107,6 +122,9 @@ func New(cfg Config) (*Receiver, error) {
 		log = logr.Discard()
 	}
 	r := &Receiver{cfg: cfg, log: log, fetchSem: make(chan struct{}, maxConcurrentFetches)}
+	if len(cfg.SharedSecret) > 0 {
+		r.bearerToken = hex.EncodeToString(cfg.SharedSecret)
+	}
 	r.alertsPath = alertsPathFor(cfg.SubscriberID)
 	r.metricsPath = metricsPathFor(cfg.SubscriberID)
 	r.routes()
@@ -178,6 +196,14 @@ func (r *Receiver) Handler() http.Handler {
 	return r.mux
 }
 
+// BearerToken returns the hex-encoded shared secret configured for this
+// receiver, or empty string when auth is disabled. Used by the runtime
+// package to populate SubscriptionHeaders on the subscription reconciler
+// so BMCs include the token in their event POSTs.
+func (r *Receiver) BearerToken() string {
+	return r.bearerToken
+}
+
 // SetTestNotifier wires a TestEventNotifier after construction. Called by
 // the runtime package once the subscription reconciler is ready.
 func (r *Receiver) SetTestNotifier(n TestEventNotifier) {
@@ -187,6 +213,9 @@ func (r *Receiver) SetTestNotifier(n TestEventNotifier) {
 func (r *Receiver) handleAlerts(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "Only POST is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !r.checkAuth(w, req) {
 		return
 	}
 	bmcName := bmcNameFromPath(req.URL.Path, r.alertsPath)
@@ -272,6 +301,9 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 		http.Error(w, "Only POST is allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !r.checkAuth(w, req) {
+		return
+	}
 	bmcName := bmcNameFromPath(req.URL.Path, r.metricsPath)
 	if bmcName == "" {
 		http.Error(w, "Missing BMC name in URL", http.StatusBadRequest)
@@ -347,6 +379,21 @@ func (r *Receiver) handleMetricReports(w http.ResponseWriter, req *http.Request)
 	}
 	r.log.V(1).Info("Published samples", "bmc", bmcName, "count", len(samples))
 	w.WriteHeader(http.StatusOK)
+}
+
+// checkAuth verifies the Authorization: Bearer header when SharedSecret is configured.
+// Returns true when the request is authorized (or auth is disabled). Writes 401 and
+// returns false when the token is missing or wrong.
+func (r *Receiver) checkAuth(w http.ResponseWriter, req *http.Request) bool {
+	if r.bearerToken == "" {
+		return true
+	}
+	got := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(r.bearerToken)) != 1 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
 }
 
 func readBody(req *http.Request, w http.ResponseWriter) ([]byte, error) {
