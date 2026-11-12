@@ -1,5 +1,6 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+METALPROBE_IMG ?= metalprobe:latest
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -53,7 +54,7 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: fmt
 fmt: goimports ## Run goimports against code.
-	find . -name '*.go' -not -name 'zz_generated*.go' -not -path '*/vendor/*' | xargs $(GOIMPORTS) -w
+	$(GOIMPORTS) -w .
 
 .PHONY: vet
 vet: ## Run go vet against code.
@@ -123,7 +124,10 @@ check-license: addlicense ## Check that every file has a license header present.
 	find . -name '*.go' -exec $(ADDLICENSE) -check -c 'IronCore authors' {} +
 
 .PHONY: check
-check: generate manifests add-license fmt lint test # Generate manifests, code, lint, add licenses, test
+check: check-gen lint test # Generate manifests, code, lint, add licenses, test
+
+.PHONY: check-gen
+check-gen: generate manifests docs helm add-license fmt ## Check that generated code and manifests are up to date.
 
 ##@ Build
 
@@ -146,11 +150,19 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # make docker-build IMG=<img> BASE_IMAGE=docker.io/library/golang:1.26
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) -t ${IMG} .
+	$(CONTAINER_TOOL) build --target manager $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+.PHONY: docker-build-metalprobe
+docker-build-metalprobe: ## Build the metalprobe image (discovery boot agent).
+	$(CONTAINER_TOOL) build --target probe -t ${METALPROBE_IMG} .
+
+.PHONY: docker-push-metalprobe
+docker-push-metalprobe: ## Push the metalprobe image.
+	$(CONTAINER_TOOL) push ${METALPROBE_IMG}
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -165,7 +177,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name metal-maintenance-operator-builder
 	$(CONTAINER_TOOL) buildx use metal-maintenance-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --target manager $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm metal-maintenance-operator-builder
 	rm Dockerfile.cross
 
@@ -244,6 +256,7 @@ GOIMPORTS_VERSION ?= v0.45.0
 ADDLICENSE_VERSION ?= v1.1.1
 CRD_REF_DOCS_VERSION ?= v0.2.0
 PERSES_VERSION ?= v0.55.0-beta.1
+
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
@@ -269,6 +282,7 @@ $(ENVTEST): $(LOCALBIN)
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+
 # $(wildcard) ensures Make tracks changes to the config file if it exists
 $(GOLANGCI_LINT): $(LOCALBIN) $(wildcard .custom-gcl.yml)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))

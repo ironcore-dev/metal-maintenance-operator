@@ -12,6 +12,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+func TestRegistryFallbackURL(t *testing.T) {
+	const want = "http://registry.example:10000"
+	const host = "registry.example"
+	for _, tt := range []struct {
+		name, host, bindAddress, want string
+	}{
+		{"default", host, ":10000", want},
+		{"IPv4 bind host", host, "0.0.0.0:10000", want},
+		{"IPv6 bind host", host, "[::]:10000", want},
+		{"IPv6 advertised host", "2001:db8::1", ":10000", "http://[2001:db8::1]:10000"},
+		{"custom port", host, "127.0.0.1:12345", "http://registry.example:12345"},
+		{"missing port", host, "0.0.0.0", ""},
+		{"unbracketed IPv6", host, "::1:10000", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := registryFallbackURL(tt.host, tt.bindAddress)
+			if tt.want == "" {
+				if err == nil {
+					t.Fatal("expected invalid bind address to fail")
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 const kubeSystem = "kube-system"
 
 func secretNamespaces(t *testing.T, m map[client.Object]cache.ByObject) []string {
