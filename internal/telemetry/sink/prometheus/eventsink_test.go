@@ -832,3 +832,177 @@ var assertOnCriticalErr = errSentinel("apiserver down")
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
+
+// -- OnClear callback --
+
+type onClearRecorder struct {
+	mu   sync.Mutex
+	bmcs []string
+	err  error
+}
+
+func (r *onClearRecorder) handle(_ context.Context, bmcName string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bmcs = append(r.bmcs, bmcName)
+	return r.err
+}
+
+func (r *onClearRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.bmcs...)
+}
+
+func TestEventSink_OnClear_FiresForOKEvent(t *testing.T) {
+	for _, sev := range []string{"OK", "ok", "Ok", "Info", "info", "INFO"} {
+		t.Run(sev, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			s, err := psink.NewEventSink(reg)
+			if err != nil {
+				t.Fatalf("NewEventSink: %v", err)
+			}
+			rec := &onClearRecorder{}
+			s.OnClear = rec.handle
+
+			if err := s.PublishEvents(context.Background(), bmc1,
+				[]sink.Event{{EventID: "E1", MessageID: "E1", Severity: sev}}); err != nil {
+				t.Fatal(err)
+			}
+			if got := rec.snapshot(); len(got) != 1 || got[0] != bmc1 {
+				t.Errorf("severity %q: OnClear called %d times with %v, want 1 call with %q",
+					sev, len(got), got, bmc1)
+			}
+			// OK/Info events must NOT increment the alert counter.
+			if got := gatherEventCount(t, reg); got != 0 {
+				t.Errorf("severity %q: counter series created: got %d, want 0", sev, got)
+			}
+		})
+	}
+}
+
+func TestEventSink_OnClear_SkipsNonClearSeverities(t *testing.T) {
+	for _, sev := range []string{sevCritical, sevWarning, "Fatal", "something"} {
+		t.Run(sev, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			s, err := psink.NewEventSink(reg)
+			if err != nil {
+				t.Fatalf("NewEventSink: %v", err)
+			}
+			rec := &onClearRecorder{}
+			s.OnClear = rec.handle
+
+			if err := s.PublishEvents(context.Background(), bmc1,
+				[]sink.Event{{EventID: "E1", MessageID: "E1", Severity: sev}}); err != nil {
+				t.Fatal(err)
+			}
+			if got := rec.snapshot(); len(got) != 0 {
+				t.Errorf("severity %q: OnClear fired %d times, want 0", sev, len(got))
+			}
+		})
+	}
+}
+
+func TestEventSink_OnClear_DedupesAcrossBatches(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSink(reg)
+	if err != nil {
+		t.Fatalf("NewEventSink: %v", err)
+	}
+	rec := &onClearRecorder{}
+	s.OnClear = rec.handle
+
+	batch := []sink.Event{{EventID: "ok-1", MessageID: "ok-1", Severity: "OK"}}
+	_ = s.PublishEvents(context.Background(), bmc1, batch)
+	_ = s.PublishEvents(context.Background(), bmc1, batch)
+	_ = s.PublishEvents(context.Background(), bmc1, batch)
+
+	if got := rec.snapshot(); len(got) != 1 {
+		t.Errorf("OnClear fired %d times for the same EventID, want 1 (dedup)", len(got))
+	}
+}
+
+func TestEventSink_OnClear_ErrorDoesNotDedupe(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSink(reg)
+	if err != nil {
+		t.Fatalf("NewEventSink: %v", err)
+	}
+
+	// First call: OnClear fails → EventID must NOT enter seenSet.
+	failing := &onClearRecorder{err: errSentinel("k8s down")}
+	s.OnClear = failing.handle
+	batch := []sink.Event{{EventID: "ok-1", MessageID: "ok-1", Severity: "OK"}}
+	if err := s.PublishEvents(context.Background(), bmc1, batch); err == nil {
+		t.Fatal("expected error from failing OnClear")
+	}
+
+	// Second call: OnClear succeeds — must fire because EventID was not committed.
+	succeeding := &onClearRecorder{}
+	s.OnClear = succeeding.handle
+	if err := s.PublishEvents(context.Background(), bmc1, batch); err != nil {
+		t.Fatalf("retry PublishEvents: %v", err)
+	}
+	if got := succeeding.snapshot(); len(got) != 1 {
+		t.Errorf("retry: OnClear fired %d times, want 1 (EventID still retryable after failure)", len(got))
+	}
+
+	// Third call: same EventID now in seenSet — must NOT fire again.
+	third := &onClearRecorder{}
+	s.OnClear = third.handle
+	if err := s.PublishEvents(context.Background(), bmc1, batch); err != nil {
+		t.Fatalf("third PublishEvents: %v", err)
+	}
+	if got := third.snapshot(); len(got) != 0 {
+		t.Errorf("third call: OnClear fired %d times after dedup, want 0", len(got))
+	}
+}
+
+func TestEventSink_OnClear_NilFieldIsNoop(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSink(reg)
+	if err != nil {
+		t.Fatalf("NewEventSink: %v", err)
+	}
+	// No OnClear set — OK/Info events must be silently dropped, no error.
+	if err := s.PublishEvents(context.Background(), bmc1, []sink.Event{
+		{EventID: "E1", MessageID: "E1", Severity: "OK"},
+		{EventID: "E2", MessageID: "E2", Severity: "Info"},
+	}); err != nil {
+		t.Errorf("nil OnClear: unexpected error: %v", err)
+	}
+	if got := gatherEventCount(t, reg); got != 0 {
+		t.Errorf("OK/Info with nil OnClear created series: got %d, want 0", got)
+	}
+}
+
+// TestEventSink_OnClear_DoesNotPreventNewFaultFromFiring pins the key safety
+// property: after a clear is deduped, a subsequent Critical event with a
+// different EventID must still fire OnCritical. The dedup sets are per-EventID,
+// not per-BMC, so a new fault is never blocked by a prior clear.
+func TestEventSink_OnClear_DoesNotPreventNewFaultFromFiring(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	s, err := psink.NewEventSink(reg)
+	if err != nil {
+		t.Fatalf("NewEventSink: %v", err)
+	}
+	clearRec := &onClearRecorder{}
+	critRec := &onCriticalRecorder{}
+	s.OnClear = clearRec.handle
+	s.OnCritical = critRec.handle
+
+	// First: clear fires for ok-1.
+	_ = s.PublishEvents(context.Background(), bmc1,
+		[]sink.Event{{EventID: "ok-1", MessageID: "ok-1", Severity: "OK"}})
+	if got := clearRec.snapshot(); len(got) != 1 {
+		t.Fatalf("initial OnClear: fired %d times, want 1", len(got))
+	}
+
+	// Second: new Critical event with different EventID must fire OnCritical.
+	_ = s.PublishEvents(context.Background(), bmc1,
+		[]sink.Event{{EventID: "crit-1", MessageID: "crit-1", Severity: sevCritical}})
+	_, evs := critRec.snapshot()
+	if len(evs) != 1 || evs[0].EventID != "crit-1" {
+		t.Errorf("new fault: OnCritical fired %d times, want 1 for crit-1", len(evs))
+	}
+}

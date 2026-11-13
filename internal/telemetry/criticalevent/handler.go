@@ -170,6 +170,46 @@ func (h *ConditionHandler) ClearCriticalAlert(ctx context.Context, server *metal
 	return nil
 }
 
+// HandleClear lists Servers indexed by bmcName and clears the
+// CriticalEventReceived condition on each. Call this when the BMC sends an
+// OK or Info event indicating a previously-reported fault has resolved.
+func (h *ConditionHandler) HandleClear(ctx context.Context, bmcName string) error {
+	if bmcName == "" {
+		return nil
+	}
+
+	serverList := &metalv1alpha1.ServerList{}
+	if err := h.Client.List(ctx, serverList, client.MatchingFields{BMCRefField: bmcName}); err != nil {
+		return fmt.Errorf("list Servers by %s=%s: %w", BMCRefField, bmcName, err)
+	}
+
+	if len(serverList.Items) == 0 {
+		return nil
+	}
+
+	var failed []error
+	for i := range serverList.Items {
+		server := &serverList.Items[i]
+		if err := h.ClearCriticalAlert(ctx, server, "OKEventReceived",
+			"Hardware fault resolved: OK/Info event received from BMC"); err != nil {
+			h.Log.Error(err, "Failed to clear Server condition",
+				"server", server.Name, "bmc", bmcName)
+			failed = append(failed, err)
+			continue
+		}
+		h.Log.V(1).Info("Critical event condition cleared",
+			"server", server.Name, "bmc", bmcName)
+	}
+	if len(failed) > 0 {
+		// At least one condition patch failed. Restore the gauge to 1 so the
+		// alert continues to fire — a successful ClearCriticalAlert earlier in
+		// the loop may have already zeroed it for this BMC hostname.
+		h.SetAlertGauge(bmcName, 1)
+		return fmt.Errorf("failed to clear %d/%d servers: %w", len(failed), len(serverList.Items), errors.Join(failed...))
+	}
+	return nil
+}
+
 // sanitizeEventID strips characters apiserver's Reason validation
 // rejects (regex `^([A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?)?$`).
 func sanitizeEventID(id string) string {
