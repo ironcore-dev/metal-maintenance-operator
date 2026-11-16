@@ -16,7 +16,7 @@ require (
 	github.com/prometheus/client_model v0.6.3
 	github.com/safchain/ethtool v0.7.0
 	github.com/siderolabs/go-smbios v0.3.4
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/stmcginnis/gofish v0.27.0
 	go.yaml.in/yaml/v3 v3.0.6
 	k8s.io/api v0.37.0
