@@ -497,7 +497,7 @@ dashboard-reset: ## Delete all dashboards then reapply from source.
 .PHONY: perses-start
 perses-start: perses-server ## Start a local Perses server for dashboard development.
 	@echo "Starting local Perses at $(PERSES_URL) (plugin loading takes ~15s)..."
-	"$(PERSES_SERVER)" -config "$(DASHBOARDS_SRC)/dev-config.yaml" -web.listen-address "127.0.0.1:$(PERSES_PORT)" &
+	"$(PERSES_SERVER)" -config "$(DASHBOARDS_SRC)/dev-config.yaml" -web.listen-address "127.0.0.1:$(PERSES_PORT)"
 
 .PHONY: dashboard-watch
 dashboard-watch: percli ## Watch dashboard source for changes and rebuild JSON (run alongside perses-start).
