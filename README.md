@@ -135,9 +135,10 @@ More information can be found via the [Kubebuilder Documentation](https://book.k
 
 ## kube-state-metrics integration
 
-When `kubeStateMetrics.enabled: true`, the chart ships a `CustomResourceStateMetrics` ConfigMap that makes kube-state-metrics expose the operator's Custom Resources as `kube_ironcore_info` metrics (which the dashboards below join against).
-
-**Note:** upstream kube-state-metrics has no label-based ConfigMap discovery, so this ConfigMap is inert until a sidecar/initContainer (e.g. the open-source [`kiwigrid/k8s-sidecar`](https://github.com/kiwigrid/k8s-sidecar)) feeds it into KSM. See [`docs/concepts/kube-state-metrics.md`](docs/concepts/kube-state-metrics.md) for the wiring, consumers, and limitations.
+The kube-state-metrics CustomResourceState configuration for ironcore.dev CRDs has moved to
+`metal-telemetry-operator`. Enable it there via `kubeStateMetrics.enabled: true` or
+`kubeStateMetrics.sidecarDiscovery.enabled: true`. The dashboards in this operator require
+`kube_ironcore_info` metrics, which kube-state-metrics exposes when that configuration is active.
 
 ## Developing Dashboards
 
