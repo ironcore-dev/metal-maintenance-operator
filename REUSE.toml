@@ -22,6 +22,7 @@ path = [
     "REUSE.toml",
     "hack/**",
     "internal/hwmgr/mock/**",
+    "test/data/**",
     "sanitizer/go.mod",
     "sanitizer/go.sum",
     "sanitizer/Makefile",
@@ -29,6 +30,7 @@ path = [
     "sanitizer/hack/kernel/go.mod",
     "sanitizer/hack/kernel/go.sum",
     "internal/ignition/sanitization-ignition.yaml.gotmpl",
+    "internal/ignition/discovery-ignition.yaml.gotmpl",
     "dashboards/go.mod",
     "dashboards/go.sum",
     "dashboards/built/*.json"
