@@ -25,8 +25,10 @@ jobs:
         image:
         - name: metal-maintenance-operator-controller-manager
           target: manager
+          tag-prefix: ""
         - name: metalprobe
           target: probe
+          tag-prefix: maintenance-
     permissions:
       contents: read
       packages: write
@@ -51,7 +53,8 @@ jobs:
           type=ref,event=pr
           type=sha
         flavor: |
-          latest=${{ github.ref == 'refs/heads/main' }}
+          prefix=${{ matrix.image.tag-prefix }}
+          latest=${{ matrix.image.target == 'manager' && github.ref == 'refs/heads/main' }}
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v4
       with:
