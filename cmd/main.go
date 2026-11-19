@@ -103,6 +103,7 @@ func main() {
 	var sanitizationImage string
 	var sanitizationTolerations []metalv1alpha1.Toleration
 	var enableDiscovery bool
+	var writeServerIPsAnnotation bool
 	var discoveryNamespace string
 	var probeImage string
 	var probeOSImage string
@@ -152,6 +153,9 @@ func main() {
 	flag.StringVar(&discoveryNamespace, "discovery-namespace", "",
 		"Namespace where discovery ServerClaims, ignition secrets and Metadata objects are created. "+
 			"Defaults to --manager-namespace.")
+	flag.BoolVar(&writeServerIPsAnnotation, "write-server-ips-annotation", true,
+		"Stamp discovered in-band IPs onto the Server as the metal.ironcore.dev/ips annotation, "+
+			"consumed by metal-operator's metaldata and boot-operator. Set to false to disable.")
 	flag.StringVar(&probeImage, "probe-image", "", "Image of the metalprobe agent run during discovery.")
 	flag.StringVar(&probeOSImage, "probe-os-image", "", "OS image for the discovery boot of a Server.")
 	flag.StringVar(&registryURL, "registry-url", "", "Externally reachable URL of the discovery registry. "+
@@ -487,9 +491,10 @@ func main() {
 				ProbeImage:  probeImage,
 				RegistryURL: registryURL,
 			}).Ignition,
-			Registry:           registryServer,
-			RegistryDataMaxAge: registryDataMaxAge,
-			ResyncInterval:     registryResyncInterval,
+			Registry:                 registryServer,
+			RegistryDataMaxAge:       registryDataMaxAge,
+			ResyncInterval:           registryResyncInterval,
+			WriteServerIPsAnnotation: writeServerIPsAnnotation,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Unable to create ServerDiscovery controller")
 			os.Exit(1)

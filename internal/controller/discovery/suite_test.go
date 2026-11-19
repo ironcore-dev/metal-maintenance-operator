@@ -114,9 +114,10 @@ func SetupTest() *corev1.Namespace {
 			IgnitionProvider: func(_ context.Context, _ *metalv1alpha1.Server) ([]byte, error) {
 				return []byte("ignition-data"), nil
 			},
-			Registry:           testRegistry,
-			RegistryDataMaxAge: time.Minute,
-			ResyncInterval:     10 * time.Millisecond,
+			Registry:                 testRegistry,
+			RegistryDataMaxAge:       time.Minute,
+			ResyncInterval:           10 * time.Millisecond,
+			WriteServerIPsAnnotation: true,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		go func() {
