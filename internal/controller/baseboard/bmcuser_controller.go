@@ -161,11 +161,21 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, fmt.Errorf("failed to update User status: %w", err)
 	}
 
+	// Now that Status.ID is confirmed, re-run updateEffectiveSecret: the supplied
+	// Spec.BMCSecretRef may actually authenticate (e.g. the credential was valid all
+	// along but Status.ID was blank on a previous reconcile). Only treat the stored
+	// credential as stale (reOnboard) if EffectiveBMCSecretRef is still nil after
+	// this check.
+	if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update effective BMCSecret: %w", err)
+	}
+
 	// reOnboard is true when the account already exists on the BMC (Status.ID is
-	// set) but no working credential is proven (needsBootstrap). In this case
-	// the stored BMCSecret is stale: generate a fresh one and push it to the BMC
-	// using the setup/bootstrap credential obtained above.
-	reOnboard := needsBootstrap && user.Status.ID != ""
+	// set) but no working credential is proven (needsBootstrap && EffectiveBMCSecretRef
+	// still nil after the re-check above). In this case the stored BMCSecret is
+	// genuinely stale: generate a fresh one and push it to the BMC using the
+	// setup/bootstrap credential obtained above.
+	reOnboard := user.Status.ID != "" && user.Status.EffectiveBMCSecretRef == nil
 	if user.Spec.BMCSecretRef == nil || reOnboard {
 		log.V(1).Info("No BMCSecret reference set for User, creating a new one")
 		if err := r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj); err != nil {
