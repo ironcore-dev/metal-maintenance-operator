@@ -177,8 +177,7 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	// setup/bootstrap credential obtained above.
 	reOnboard := user.Status.ID != "" && user.Status.EffectiveBMCSecretRef == nil
 	if user.Spec.BMCSecretRef == nil || reOnboard {
-		log.V(1).Info("No BMCSecret reference set for User, creating a new one")
-		if err := r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj); err != nil {
+		if err := r.ensureNewBMCSecretForUser(ctx, bmcClient, user, bmcObj); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to handle missing BMCSecret reference: %w", err)
 		}
 	}
@@ -448,6 +447,31 @@ func (r *BMCUserReconciler) hasPeerRotationInFlight(ctx context.Context, user *b
 		}
 	}
 	return false, nil
+}
+
+// ensureNewBMCSecretForUser ensures a generated BMCSecret exists for user and
+// that Spec.BMCSecretRef points to it. On the first call it generates a fresh
+// password and creates the secret. On subsequent calls (retries where the
+// previous CreateOrUpdateAccount failed) it reuses the already-generated secret
+// owned by this user so that each reconcile cycle does not accumulate orphans.
+// When the existing Spec.BMCSecretRef already points at a secret owned by user,
+// that secret is reused; otherwise a new one is generated.
+func (r *BMCUserReconciler) ensureNewBMCSecretForUser(ctx context.Context, bmcClient bmc.BMC, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	// If Spec.BMCSecretRef already names a secret owned by this user, it was
+	// generated in a prior reconcile. Reuse it instead of creating another one.
+	if user.Spec.BMCSecretRef != nil {
+		existing := &metalv1alpha1.BMCSecret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: user.Spec.BMCSecretRef.Name}, existing); err == nil {
+			if metav1.IsControlledBy(existing, user) {
+				log.V(1).Info("Reusing previously generated BMCSecret for re-onboard retry", "BMCSecret", existing.Name)
+				return nil
+			}
+		}
+	}
+
+	return r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj)
 }
 
 // ensureBMCSecretForUser generates a password, creates a BMCSecret to hold the
