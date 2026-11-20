@@ -20,7 +20,7 @@ import (
 )
 
 var _ = Describe("BMCUser Controller", func() {
-	_ = SetupTest(nil)
+	ns := SetupTest(nil)
 
 	var bmcObj *metalv1alpha1.BMC
 	var bmcSecret *metalv1alpha1.BMCSecret
@@ -645,6 +645,105 @@ var _ = Describe("BMCUser Controller", func() {
 				}
 			}
 		}
+	})
+
+	It("should bootstrap via setup credential when account already exists on BMC but credential is stale", func(ctx SpecContext) {
+		// Regression test for: BMCUserSet stuck in pendingBMCs=1 when operator
+		// accounts were pre-existing (rebuilt/re-onboarded server). The fix is that
+		// needsBootstrap is gated only on EffectiveBMCSecretRef == nil, not on
+		// Status.ID == "".
+		mockServers[0].ResetAccounts()
+		By("Creating a setup credential secret with valid BMC credentials")
+		setupSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "re-onboard-setup-",
+				Namespace:    ns.Name,
+			},
+			Data: map[string][]byte{
+				"username": []byte("admin"),
+				"password": []byte("adminpass"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, setupSecret)).To(Succeed())
+		Eventually(Get(setupSecret)).Should(Succeed())
+
+		By("Creating a BMCUserSet with setupCredentialRef")
+		set := &baseboardv1alpha1.BMCUserSet{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "re-onboard-set-",
+			},
+			Spec: baseboardv1alpha1.BMCUserSetSpec{
+				BMCSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"does-not-match": "anything"},
+				},
+				SetupCredentialRef: &v1.SecretReference{
+					Name:      setupSecret.Name,
+					Namespace: ns.Name,
+				},
+				RotationStrategy: baseboardv1alpha1.RotationStrategySingleAccount,
+				Template: baseboardv1alpha1.BMCUserTemplate{
+					UserName: "re-onboard-metal",
+					RoleID:   "Administrator",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, set)).To(Succeed())
+		Eventually(Get(set)).Should(Succeed())
+
+		By("Creating a BMCUser owned by the set with a stale BMCSecret (wrong password)")
+		staleSecret := &metalv1alpha1.BMCSecret{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "re-onboard-stale-",
+			},
+			Data: map[string][]byte{
+				"username": []byte("re-onboard-metal"),
+				"password": []byte("stale-wrong-password"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, staleSecret)).To(Succeed())
+		Eventually(Get(staleSecret)).Should(Succeed())
+
+		trueVal := true
+		user := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "re-onboard-user-",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         baseboardv1alpha1.SchemeGroupVersion.String(),
+						Kind:               "BMCUserSet",
+						Name:               set.Name,
+						UID:                set.UID,
+						Controller:         &trueVal,
+						BlockOwnerDeletion: &trueVal,
+					},
+				},
+			},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName: "re-onboard-metal",
+				RoleID:   "Administrator",
+				Type:     baseboardv1alpha1.BMCUserTypeOperatorAdmin,
+				BMCSecretRef: &v1.LocalObjectReference{
+					Name: staleSecret.Name,
+				},
+				BMCRef: &v1.LocalObjectReference{
+					Name: bmcObj.Name,
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Succeed())
+
+		By("Patching Status.ID to simulate the account already existing on the BMC")
+		userBase := user.DeepCopy()
+		user.Status.ID = "3"
+		Expect(k8sClient.Status().Patch(ctx, user, client.MergeFrom(userBase))).To(Succeed())
+		Eventually(Object(user)).Should(HaveField("Status.ID", Equal("3")))
+
+		By("Verifying that EffectiveBMCSecretRef is eventually set via the setup credential path")
+		Eventually(Object(user), "10s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, setupSecret)).To(Succeed())
 	})
 
 	It("should not delete BMC account on deletion when DeletionPolicy=Retain and credential is live", func(ctx SpecContext) {

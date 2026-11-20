@@ -126,13 +126,16 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, err
 	}
 
-	// Bootstrap: account doesn't exist on the BMC yet (no ID) and no working
-	// credential is known. Credential resolution order:
+	// Bootstrap: no working credential is known yet. Credential resolution order:
 	//  1. set.Spec.SetupCredentialRef (global setup secret, if configured)
 	//  2. user.Status.BootstrapSecretRef (per-BMC factory secret recorded by the Set
 	//     controller before -a might promote a new credential)
 	//  3. getBMCClient (current BMC.Spec.BMCSecretRef — fallback for standalone users)
-	needsBootstrap := user.Status.ID == "" && user.Status.EffectiveBMCSecretRef == nil
+	//
+	// We gate only on EffectiveBMCSecretRef, not on Status.ID == "", so that
+	// re-onboarded BMCs (account exists but credential is stale/unknown) also
+	// follow the setup-credential path instead of getting stuck on getBMCClient.
+	needsBootstrap := user.Status.EffectiveBMCSecretRef == nil
 	var bmcClient bmc.BMC
 	var clientErr error
 	if needsBootstrap {
@@ -158,7 +161,12 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, fmt.Errorf("failed to update User status: %w", err)
 	}
 
-	if user.Spec.BMCSecretRef == nil {
+	// reOnboard is true when the account already exists on the BMC (Status.ID is
+	// set) but no working credential is proven (needsBootstrap). In this case
+	// the stored BMCSecret is stale: generate a fresh one and push it to the BMC
+	// using the setup/bootstrap credential obtained above.
+	reOnboard := needsBootstrap && user.Status.ID != ""
+	if user.Spec.BMCSecretRef == nil || reOnboard {
 		log.V(1).Info("No BMCSecret reference set for User, creating a new one")
 		if err := r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to handle missing BMCSecret reference: %w", err)
@@ -169,7 +177,7 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, err
 	}
 
-	if user.Status.ID == "" {
+	if user.Status.ID == "" || reOnboard {
 		log.V(1).Info("No BMC account ID set in User status, creating or updating BMC account")
 		_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
 		if err != nil {
