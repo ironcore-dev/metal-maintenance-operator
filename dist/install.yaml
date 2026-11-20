@@ -3060,8 +3060,9 @@ spec:
                     default: Disable
                     description: |-
                       Action specifies what to do with the factory account once both operator accounts are proven.
-                      Rotate changes the password (risky if interrupted). Disable sets Enabled=false on the BMC
-                      (idempotent, reversible, recommended for production). None leaves the account untouched.
+                      Rotate changes the password (risky if interrupted; opt-in only). Disable sets Enabled=false on
+                      the BMC (idempotent, reversible, recommended for production). None leaves the account untouched.
+                      Defaults to Disable.
                     enum:
                     - Rotate
                     - Disable
