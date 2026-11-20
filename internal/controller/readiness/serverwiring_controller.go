@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	clientutils "github.com/ironcore-dev/controller-utils/clientutils"
+	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -38,7 +39,8 @@ const (
 // ServerWiringReconciler reconciles a ServerWiring object.
 type ServerWiringReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	DiscoveryNamespace string
 }
 
 // +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverwirings,verbs=get;list;watch;create;update;patch;delete
@@ -46,6 +48,7 @@ type ServerWiringReconciler struct {
 // +kubebuilder:rbac:groups=readiness.metal.ironcore.dev,resources=serverwirings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=discovery.metal.ironcore.dev,resources=metadata,verbs=get;list;watch
 
 func (r *ServerWiringReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -95,8 +98,19 @@ func (r *ServerWiringReconciler) reconcileExists(ctx context.Context, wiring *re
 		return ctrl.Result{}, fmt.Errorf("getting server %s: %w", wiring.Spec.ServerRef.Name, err)
 	}
 
+	// Metadata is namespaced and by convention named after the Server,
+	// written by the discovery controller into DiscoveryNamespace.
+	meta := &discoveryv1alpha1.Metadata{}
+	metaFound := true
+	if err := r.Get(ctx, client.ObjectKey{Name: wiring.Spec.ServerRef.Name, Namespace: r.DiscoveryNamespace}, meta); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("getting metadata for server %s: %w", wiring.Spec.ServerRef.Name, err)
+		}
+		metaFound = false
+	}
+
 	hasSpec := len(wiring.Spec.Network.Interfaces) > 0
-	mismatches, ready := r.validateServer(server, wiring)
+	mismatches, ready := r.validateServer(meta, metaFound, wiring)
 
 	if err := r.setNetworkReadyCondition(ctx, server, ready, hasSpec, mismatches); err != nil {
 		return ctrl.Result{}, err
@@ -105,59 +119,79 @@ func (r *ServerWiringReconciler) reconcileExists(ctx context.Context, wiring *re
 	return ctrl.Result{}, r.updateStatus(ctx, wiring, ready, mismatches)
 }
 
-func (r *ServerWiringReconciler) validateServer(server *metalv1alpha1.Server, wiring *readinessv1alpha1.ServerWiring) (mismatches []readinessv1alpha1.InterfaceMismatch, ready bool) {
-	ready = true
-
+func (r *ServerWiringReconciler) validateServer(meta *discoveryv1alpha1.Metadata, metaFound bool, wiring *readinessv1alpha1.ServerWiring) (mismatches []readinessv1alpha1.InterfaceMismatch, ready bool) {
 	if len(wiring.Spec.Network.Interfaces) == 0 {
 		return nil, true
 	}
 
-	actualByMAC := make(map[string]metalv1alpha1.NetworkInterface, len(server.Status.NetworkInterfaces))
-	for _, nic := range server.Status.NetworkInterfaces {
-		actualByMAC[strings.ToLower(nic.MACAddress)] = nic
+	if !metaFound {
+		for _, expected := range wiring.Spec.Network.Interfaces {
+			mismatches = append(mismatches, readinessv1alpha1.InterfaceMismatch{
+				MACAddress: expected.MACAddress,
+				Reason:     reasonInterfaceMissing,
+				Message:    "no discovery Metadata found for this server",
+			})
+		}
+		return mismatches, false
+	}
+
+	// Index observed NICs by MAC address for O(1) lookup.
+	observedNICs := make(map[string]discoveryv1alpha1.NetworkInterface, len(meta.NetworkInterfaces))
+	for _, nic := range meta.NetworkInterfaces {
+		observedNICs[strings.ToLower(nic.MACAddress)] = nic
+	}
+
+	// Build MAC→neighbors map: interface name→MAC from observed NICs, then
+	// walk LLDP interfaces to map by MAC.
+	nameToMAC := make(map[string]string, len(meta.NetworkInterfaces))
+	for _, nic := range meta.NetworkInterfaces {
+		nameToMAC[nic.Name] = strings.ToLower(nic.MACAddress)
+	}
+	lldpByMAC := make(map[string][]discoveryv1alpha1.LLDPNeighbor)
+	for _, iface := range meta.LLDP {
+		if mac, ok := nameToMAC[iface.Name]; ok {
+			lldpByMAC[mac] = iface.Neighbors
+		}
 	}
 
 	for _, expected := range wiring.Spec.Network.Interfaces {
 		mac := strings.ToLower(expected.MACAddress)
-		actual, found := actualByMAC[mac]
+		observed, found := observedNICs[mac]
 		if !found {
-			ready = false
 			mismatches = append(mismatches, readinessv1alpha1.InterfaceMismatch{
 				MACAddress: expected.MACAddress,
 				Reason:     reasonInterfaceMissing,
-				Message:    "interface not found",
+				Message:    fmt.Sprintf("interface not found in discovery metadata (mac %s)", expected.MACAddress),
 			})
 			continue
 		}
 
-		if expected.CarrierStatus != "" && actual.CarrierStatus != expected.CarrierStatus {
-			ready = false
+		if expected.CarrierStatus != "" && observed.CarrierStatus != expected.CarrierStatus {
 			mismatches = append(mismatches, readinessv1alpha1.InterfaceMismatch{
 				MACAddress: expected.MACAddress,
 				Reason:     reasonCarrierDown,
-				Message:    fmt.Sprintf("carrierStatus: expected %q, got %q", expected.CarrierStatus, actual.CarrierStatus),
+				Message:    fmt.Sprintf("carrierStatus: expected %q, got %q", expected.CarrierStatus, observed.CarrierStatus),
 			})
 		}
 
 		type neighborKey struct{ system, port string }
-		actualNeighbors := make(map[neighborKey]struct{}, len(actual.Neighbors))
-		for _, n := range actual.Neighbors {
-			actualNeighbors[neighborKey{n.SystemName, n.PortID}] = struct{}{}
+		observedNeighbors := make(map[neighborKey]struct{}, len(lldpByMAC[mac]))
+		for _, n := range lldpByMAC[mac] {
+			observedNeighbors[neighborKey{n.SystemName, n.PortID}] = struct{}{}
 		}
-		for _, expectedNeighbor := range expected.Neighbors {
-			key := neighborKey{expectedNeighbor.SystemName, expectedNeighbor.PortID}
-			if _, ok := actualNeighbors[key]; !ok {
-				ready = false
+		for _, wantNeighbor := range expected.Neighbors {
+			key := neighborKey{wantNeighbor.SystemName, wantNeighbor.PortID}
+			if _, ok := observedNeighbors[key]; !ok {
 				mismatches = append(mismatches, readinessv1alpha1.InterfaceMismatch{
 					MACAddress: expected.MACAddress,
 					Reason:     reasonNeighborMismatch,
-					Message:    fmt.Sprintf("LLDP neighbor not found: systemName=%q portID=%q", expectedNeighbor.SystemName, expectedNeighbor.PortID),
+					Message:    fmt.Sprintf("LLDP neighbor not found: systemName=%q portID=%q", wantNeighbor.SystemName, wantNeighbor.PortID),
 				})
 			}
 		}
 	}
 
-	return mismatches, ready
+	return mismatches, len(mismatches) == 0
 }
 
 func (r *ServerWiringReconciler) setNetworkReadyCondition(ctx context.Context, server *metalv1alpha1.Server, ready, hasSpec bool, mismatches []readinessv1alpha1.InterfaceMismatch) error {
@@ -224,6 +258,12 @@ func (r *ServerWiringReconciler) enqueueFromServer(ctx context.Context, obj clie
 	return requests
 }
 
+// enqueueFromMetadata maps a Metadata event to ServerWirings that reference a
+// Server of the same name (Metadata is namespaced and named after the Server).
+func (r *ServerWiringReconciler) enqueueFromMetadata(ctx context.Context, obj client.Object) []ctrl.Request {
+	return r.enqueueFromServer(ctx, obj)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServerWiringReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
@@ -245,6 +285,8 @@ func (r *ServerWiringReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&readinessv1alpha1.ServerWiring{}).
 		Watches(&metalv1alpha1.Server{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueFromServer)).
+		Watches(&discoveryv1alpha1.Metadata{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueFromMetadata)).
 		Named("serverwiring").
 		Complete(r)
 }

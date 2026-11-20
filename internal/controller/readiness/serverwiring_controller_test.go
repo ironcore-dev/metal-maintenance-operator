@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
+	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
 	readiness "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,9 +17,10 @@ import (
 )
 
 var _ = Describe("ServerWiring Controller", func() {
-	ns := SetupNamespace()
+	ns, discoveryNs := SetupNamespace()
 
-	makeServer := func(ctx SpecContext, name string, nics []metalv1alpha1.NetworkInterface) *metalv1alpha1.Server {
+	// makeServer creates a cluster-scoped Server with no NIC data.
+	makeServer := func(ctx SpecContext, name string) *metalv1alpha1.Server {
 		s := &metalv1alpha1.Server{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   name,
@@ -29,10 +31,22 @@ var _ = Describe("ServerWiring Controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, s)).To(Succeed())
-		Eventually(UpdateStatus(s, func() {
-			s.Status.NetworkInterfaces = nics
-		})).Should(Succeed())
 		return s
+	}
+
+	// makeMetadata creates a discovery Metadata object in the test namespace,
+	// named after the server, with the supplied NIC and LLDP data.
+	makeMetadata := func(ctx SpecContext, serverName string, namespace string, nics []discoveryv1alpha1.NetworkInterface, lldp []discoveryv1alpha1.LLDPInterface) *discoveryv1alpha1.Metadata {
+		m := &discoveryv1alpha1.Metadata{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      serverName,
+				Namespace: namespace,
+			},
+			NetworkInterfaces: nics,
+			LLDP:              lldp,
+		}
+		Expect(k8sClient.Create(ctx, m)).To(Succeed())
+		return m
 	}
 
 	makeServerWiring := func(server *metalv1alpha1.Server, network readiness.ExpectedNetworkSpec, nameSuffix string) *readiness.ServerWiring {
@@ -47,7 +61,7 @@ var _ = Describe("ServerWiring Controller", func() {
 
 	Context("basic lifecycle", func() {
 		It("adds a finalizer on creation", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-lifecycle-000000000", nil)
+			server := makeServer(ctx, "srv-lifecycle-000000000")
 			DeferCleanup(k8sClient.Delete, server)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{}, "lifecycle")
@@ -60,7 +74,7 @@ var _ = Describe("ServerWiring Controller", func() {
 		})
 
 		It("removes the finalizer on deletion", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-delete-0000000000", nil)
+			server := makeServer(ctx, "srv-delete-0000000000")
 			DeferCleanup(k8sClient.Delete, server)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{}, "delete")
@@ -81,10 +95,12 @@ var _ = Describe("ServerWiring Controller", func() {
 
 	Context("network validation", func() {
 		It("marks a server ready when all expected interfaces are present", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-ready-000000000000", []metalv1alpha1.NetworkInterface{
-				{MACAddress: "aa:bb:cc:dd:ee:01", CarrierStatus: "up"},
-			})
+			server := makeServer(ctx, "srv-ready-000000000000")
 			DeferCleanup(k8sClient.Delete, server)
+			meta := makeMetadata(ctx, server.Name, discoveryNs.Name, []discoveryv1alpha1.NetworkInterface{
+				{Name: "eth0", MACAddress: "aa:bb:cc:dd:ee:01", CarrierStatus: "up"},
+			}, nil)
+			DeferCleanup(k8sClient.Delete, meta)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
@@ -109,10 +125,12 @@ var _ = Describe("ServerWiring Controller", func() {
 		})
 
 		It("reports a mismatch when an expected interface is missing", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-nomic-000000000000", []metalv1alpha1.NetworkInterface{
-				{MACAddress: "11:22:33:44:55:66"},
-			})
+			server := makeServer(ctx, "srv-nomic-000000000000")
 			DeferCleanup(k8sClient.Delete, server)
+			meta := makeMetadata(ctx, server.Name, discoveryNs.Name, []discoveryv1alpha1.NetworkInterface{
+				{Name: "eth0", MACAddress: "11:22:33:44:55:66"},
+			}, nil)
+			DeferCleanup(k8sClient.Delete, meta)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
@@ -138,11 +156,35 @@ var _ = Describe("ServerWiring Controller", func() {
 			)
 		})
 
-		It("reports a mismatch when carrier status does not match", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-carrier-00000000000", []metalv1alpha1.NetworkInterface{
-				{MACAddress: "aa:bb:cc:00:00:01", CarrierStatus: "down"},
-			})
+		It("reports InterfaceMissing when no Metadata object exists", func(ctx SpecContext) {
+			server := makeServer(ctx, "srv-nometa-00000000000")
 			DeferCleanup(k8sClient.Delete, server)
+			// Intentionally no Metadata created.
+
+			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
+				Interfaces: []readiness.ExpectedInterface{
+					{MACAddress: "aa:bb:cc:dd:ee:ff"},
+				},
+			}, "nometa")
+			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, wiring)
+
+			Eventually(Object(wiring)).Should(SatisfyAll(
+				HaveField("Status.Ready", BeFalse()),
+				HaveField("Status.Mismatches", ContainElement(SatisfyAll(
+					HaveField("Reason", reasonInterfaceMissing),
+					HaveField("Message", ContainSubstring("no discovery Metadata found")),
+				))),
+			))
+		})
+
+		It("reports a mismatch when carrier status does not match", func(ctx SpecContext) {
+			server := makeServer(ctx, "srv-carrier-00000000000")
+			DeferCleanup(k8sClient.Delete, server)
+			meta := makeMetadata(ctx, server.Name, discoveryNs.Name, []discoveryv1alpha1.NetworkInterface{
+				{Name: "eth0", MACAddress: "aa:bb:cc:00:00:01", CarrierStatus: "down"},
+			}, nil)
+			DeferCleanup(k8sClient.Delete, meta)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
@@ -162,15 +204,22 @@ var _ = Describe("ServerWiring Controller", func() {
 		})
 
 		It("reports a mismatch when an expected LLDP neighbor is missing", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-lldp-000000000000", []metalv1alpha1.NetworkInterface{
-				{
-					MACAddress: "aa:bb:cc:00:01:01",
-					Neighbors: []metalv1alpha1.LLDPNeighbor{
-						{SystemName: "switch-a", PortID: "Ethernet1"},
+			server := makeServer(ctx, "srv-lldp-000000000000")
+			DeferCleanup(k8sClient.Delete, server)
+			meta := makeMetadata(ctx, server.Name, discoveryNs.Name,
+				[]discoveryv1alpha1.NetworkInterface{
+					{Name: "eth0", MACAddress: "aa:bb:cc:00:01:01"},
+				},
+				[]discoveryv1alpha1.LLDPInterface{
+					{
+						Name: "eth0",
+						Neighbors: []discoveryv1alpha1.LLDPNeighbor{
+							{SystemName: "switch-a", PortID: "Ethernet1"},
+						},
 					},
 				},
-			})
-			DeferCleanup(k8sClient.Delete, server)
+			)
+			DeferCleanup(k8sClient.Delete, meta)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{
 				Interfaces: []readiness.ExpectedInterface{
@@ -196,10 +245,12 @@ var _ = Describe("ServerWiring Controller", func() {
 		})
 
 		It("sets NoExpectedSpec reason when no interfaces are configured", func(ctx SpecContext) {
-			server := makeServer(ctx, "srv-nospec-00000000000", []metalv1alpha1.NetworkInterface{
-				{MACAddress: "aa:bb:cc:00:02:01"},
-			})
+			server := makeServer(ctx, "srv-nospec-00000000000")
 			DeferCleanup(k8sClient.Delete, server)
+			meta := makeMetadata(ctx, server.Name, discoveryNs.Name, []discoveryv1alpha1.NetworkInterface{
+				{Name: "eth0", MACAddress: "aa:bb:cc:00:02:01"},
+			}, nil)
+			DeferCleanup(k8sClient.Delete, meta)
 
 			wiring := makeServerWiring(server, readiness.ExpectedNetworkSpec{}, "nospec")
 			Expect(k8sClient.Create(ctx, wiring)).To(Succeed())

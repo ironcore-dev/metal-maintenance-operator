@@ -296,6 +296,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if discoveryNamespace == "" {
+		discoveryNamespace = managerNamespace
+	}
+
 	if enableDiscovery {
 		if registryResyncInterval <= 0 {
 			setupLog.Error(nil, "Must specify a positive --registry-resync-interval when discovery is enabled")
@@ -312,9 +316,6 @@ func main() {
 		if probeOSImage == "" {
 			setupLog.Error(nil, "Must specify --probe-os-image when discovery is enabled")
 			os.Exit(1)
-		}
-		if discoveryNamespace == "" {
-			discoveryNamespace = managerNamespace
 		}
 		if registryURL == "" {
 			registryAddr := os.Getenv("REGISTRY_ADDRESS")
@@ -521,8 +522,9 @@ func main() {
 	}
 
 	if err = (&readinessctrl.ServerWiringReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		DiscoveryNamespace: discoveryNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create ServerWiring controller")
 		os.Exit(1)
