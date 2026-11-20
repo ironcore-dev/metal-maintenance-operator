@@ -114,7 +114,9 @@ spec:
                     description: |-
                       Action specifies what to do with the factory account once both operator accounts are proven.
                       Rotate changes the password (risky if interrupted; opt-in only). Disable sets Enabled=false on
-                      the BMC (idempotent, reversible, recommended for production). None leaves the account untouched.
+                      the BMC and, when RetainCredential is true (the default), stores a new random password in a
+                      break-glass BMCSecret before disabling (idempotent, reversible, recommended for production).
+                      None leaves the account untouched.
                       Defaults to Disable.
                     enum:
                     - Rotate

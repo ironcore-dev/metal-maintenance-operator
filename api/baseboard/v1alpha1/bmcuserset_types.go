@@ -39,7 +39,10 @@ const (
 
 	// FactoryAccountActionDisable disables the factory account on the BMC via Redfish
 	// (sets Enabled=false). The account remains on the BMC but cannot be used to log in.
-	// This is the safest option: it is idempotent, reversible, and requires no credential rotation.
+	// When RetainCredential is true (the default), a new random password is generated and
+	// stored in a break-glass BMCSecret before the account is disabled, so the credential
+	// is available for emergency re-enable. This is the safest option: it is idempotent,
+	// reversible, and does not permanently remove the account.
 	FactoryAccountActionDisable FactoryAccountAction = "Disable"
 
 	// FactoryAccountActionNone leaves the factory account completely untouched.
@@ -53,7 +56,9 @@ const (
 type FactoryAccount struct {
 	// Action specifies what to do with the factory account once both operator accounts are proven.
 	// Rotate changes the password (risky if interrupted; opt-in only). Disable sets Enabled=false on
-	// the BMC (idempotent, reversible, recommended for production). None leaves the account untouched.
+	// the BMC and, when RetainCredential is true (the default), stores a new random password in a
+	// break-glass BMCSecret before disabling (idempotent, reversible, recommended for production).
+	// None leaves the account untouched.
 	// Defaults to Disable.
 	// +kubebuilder:default=Disable
 	// +optional
