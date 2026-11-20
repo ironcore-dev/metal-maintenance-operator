@@ -126,13 +126,16 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, err
 	}
 
-	// Bootstrap: account doesn't exist on the BMC yet (no ID) and no working
-	// credential is known. Credential resolution order:
+	// Bootstrap: no working credential is known yet. Credential resolution order:
 	//  1. set.Spec.SetupCredentialRef (global setup secret, if configured)
 	//  2. user.Status.BootstrapSecretRef (per-BMC factory secret recorded by the Set
 	//     controller before -a might promote a new credential)
 	//  3. getBMCClient (current BMC.Spec.BMCSecretRef — fallback for standalone users)
-	needsBootstrap := user.Status.ID == "" && user.Status.EffectiveBMCSecretRef == nil
+	//
+	// We gate only on EffectiveBMCSecretRef, not on Status.ID == "", so that
+	// re-onboarded BMCs (account exists but credential is stale/unknown) also
+	// follow the setup-credential path instead of getting stuck on getBMCClient.
+	needsBootstrap := user.Status.EffectiveBMCSecretRef == nil
 	var bmcClient bmc.BMC
 	var clientErr error
 	if needsBootstrap {
@@ -158,9 +161,23 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, fmt.Errorf("failed to update User status: %w", err)
 	}
 
-	if user.Spec.BMCSecretRef == nil {
-		log.V(1).Info("No BMCSecret reference set for User, creating a new one")
-		if err := r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj); err != nil {
+	// Now that Status.ID is confirmed, re-run updateEffectiveSecret: the supplied
+	// Spec.BMCSecretRef may actually authenticate (e.g. the credential was valid all
+	// along but Status.ID was blank on a previous reconcile). Only treat the stored
+	// credential as stale (reOnboard) if EffectiveBMCSecretRef is still nil after
+	// this check.
+	if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update effective BMCSecret: %w", err)
+	}
+
+	// reOnboard is true when the account already exists on the BMC (Status.ID is
+	// set) but no working credential is proven (needsBootstrap && EffectiveBMCSecretRef
+	// still nil after the re-check above). In this case the stored BMCSecret is
+	// genuinely stale: generate a fresh one and push it to the BMC using the
+	// setup/bootstrap credential obtained above.
+	reOnboard := user.Status.ID != "" && user.Status.EffectiveBMCSecretRef == nil
+	if user.Spec.BMCSecretRef == nil || reOnboard {
+		if err := r.ensureNewBMCSecretForUser(ctx, bmcClient, user, bmcObj); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to handle missing BMCSecret reference: %w", err)
 		}
 	}
@@ -169,31 +186,13 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, err
 	}
 
-	if user.Status.ID == "" {
-		log.V(1).Info("No BMC account ID set in User status, creating or updating BMC account")
-		_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
+	if user.Status.ID == "" || reOnboard {
+		requeue, err := r.ensureBMCAccount(ctx, user, bmcObj, bmcClient, bmcSecret)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
-		}
-		accountService, err := bmcClient.GetAccountService()
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
-		}
-		if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
-			log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
-			if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
-				return ctrl.Result{}, condErr
-			}
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-		if err := r.setPasswordValidCondition(ctx, user, true, ""); err != nil {
 			return ctrl.Result{}, err
 		}
-		if err = bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to create or update BMC account with new password: %w", err)
-		}
-		if err = r.patchUserStatus(ctx, user, bmcClient, metav1.Now()); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update User status after creating BMC account: %w", err)
+		if requeue {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 	}
 	if err := r.reconcileSecretRef(ctx, user, bmcSecret, bmcClient, bmcObj); err != nil {
@@ -209,6 +208,39 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, fmt.Errorf("failed to update Ready condition: %w", err)
 	}
 	return r.ensureBMCUserRotation(ctx, user)
+}
+
+// ensureBMCAccount creates or updates the BMC account for user using the given
+// client. It returns (true, nil) when the password in bmcSecret is invalid and
+// the caller should requeue, and (false, err) on hard errors.
+func (r *BMCUserReconciler) ensureBMCAccount(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, bmcSecret *metalv1alpha1.BMCSecret) (requeue bool, _ error) {
+	log := ctrl.LoggerFrom(ctx)
+	log.V(1).Info("No BMC account ID set in User status, creating or updating BMC account")
+	_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
+	if err != nil {
+		return false, fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
+	}
+	accountService, err := bmcClient.GetAccountService()
+	if err != nil {
+		return false, fmt.Errorf("failed to get account service: %w", err)
+	}
+	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
+		log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
+		if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
+			return false, condErr
+		}
+		return true, nil
+	}
+	if err := r.setPasswordValidCondition(ctx, user, true, ""); err != nil {
+		return false, err
+	}
+	if err = bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
+		return false, fmt.Errorf("failed to create or update BMC account with new password: %w", err)
+	}
+	if err = r.patchUserStatus(ctx, user, bmcClient, metav1.Now()); err != nil {
+		return false, fmt.Errorf("failed to update User status after creating BMC account: %w", err)
+	}
+	return false, nil
 }
 
 // patchUserStatus looks up the BMC account matching the user's UserName and
@@ -415,6 +447,31 @@ func (r *BMCUserReconciler) hasPeerRotationInFlight(ctx context.Context, user *b
 		}
 	}
 	return false, nil
+}
+
+// ensureNewBMCSecretForUser ensures a generated BMCSecret exists for user and
+// that Spec.BMCSecretRef points to it. On the first call it generates a fresh
+// password and creates the secret. On subsequent calls (retries where the
+// previous CreateOrUpdateAccount failed) it reuses the already-generated secret
+// owned by this user so that each reconcile cycle does not accumulate orphans.
+// When the existing Spec.BMCSecretRef already points at a secret owned by user,
+// that secret is reused; otherwise a new one is generated.
+func (r *BMCUserReconciler) ensureNewBMCSecretForUser(ctx context.Context, bmcClient bmc.BMC, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	// If Spec.BMCSecretRef already names a secret owned by this user, it was
+	// generated in a prior reconcile. Reuse it instead of creating another one.
+	if user.Spec.BMCSecretRef != nil {
+		existing := &metalv1alpha1.BMCSecret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: user.Spec.BMCSecretRef.Name}, existing); err == nil {
+			if metav1.IsControlledBy(existing, user) {
+				log.V(1).Info("Reusing previously generated BMCSecret for re-onboard retry", "BMCSecret", existing.Name)
+				return nil
+			}
+		}
+	}
+
+	return r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj)
 }
 
 // ensureBMCSecretForUser generates a password, creates a BMCSecret to hold the

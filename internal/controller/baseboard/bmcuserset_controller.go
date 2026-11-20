@@ -648,12 +648,12 @@ func (r *BMCUserSetReconciler) handleFactoryAccount(
 
 		var err error
 		switch set.Spec.FactoryAccount.Action {
-		case baseboardv1alpha1.FactoryAccountActionNone:
-			err = r.handleFactoryAccountNone(ctx, activeAdmin, bmcObj)
 		case baseboardv1alpha1.FactoryAccountActionDisable:
 			err = r.handleFactoryAccountDisable(ctx, set, activeAdmin, bmcObj, users)
-		default: // Rotate
+		case baseboardv1alpha1.FactoryAccountActionRotate:
 			err = r.handleFactoryAccountRotate(ctx, set, bmcObj, activeAdmin, users)
+		default: // None or unrecognised — leave the factory account untouched
+			err = r.handleFactoryAccountNone(ctx, activeAdmin, bmcObj)
 		}
 		if err != nil {
 			errs = append(errs, err)
