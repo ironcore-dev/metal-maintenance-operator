@@ -685,7 +685,7 @@ var _ = Describe("BMCUser Controller", func() {
 			resp, err := http.DefaultClient.Do(req)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(resp.StatusCode).To(Equal(http.StatusCreated))
-			resp.Body.Close()
+			g.Expect(resp.Body.Close()).To(Succeed())
 			g.Expect(mockServers[0].GetAccountNames()).To(HaveKey("re-onboard-metal"))
 		}, "5s", "100ms").Should(Succeed())
 		// After ResetAccounts (IDs 1-5 exist), the next POST creates ID 6.

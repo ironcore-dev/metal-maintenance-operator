@@ -188,30 +188,12 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	}
 
 	if user.Status.ID == "" || reOnboard {
-		log.V(1).Info("No BMC account ID set in User status, creating or updating BMC account")
-		_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
+		requeue, err := r.ensureBMCAccount(ctx, user, bmcObj, bmcClient, bmcSecret)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
-		}
-		accountService, err := bmcClient.GetAccountService()
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get account service: %w", err)
-		}
-		if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
-			log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
-			if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
-				return ctrl.Result{}, condErr
-			}
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-		if err := r.setPasswordValidCondition(ctx, user, true, ""); err != nil {
 			return ctrl.Result{}, err
 		}
-		if err = bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to create or update BMC account with new password: %w", err)
-		}
-		if err = r.patchUserStatus(ctx, user, bmcClient, metav1.Now()); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update User status after creating BMC account: %w", err)
+		if requeue {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 	}
 	if err := r.reconcileSecretRef(ctx, user, bmcSecret, bmcClient, bmcObj); err != nil {
@@ -227,6 +209,39 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{}, fmt.Errorf("failed to update Ready condition: %w", err)
 	}
 	return r.ensureBMCUserRotation(ctx, user)
+}
+
+// ensureBMCAccount creates or updates the BMC account for user using the given
+// client. It returns (true, nil) when the password in bmcSecret is invalid and
+// the caller should requeue, and (false, err) on hard errors.
+func (r *BMCUserReconciler) ensureBMCAccount(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, bmcSecret *metalv1alpha1.BMCSecret) (requeue bool, _ error) {
+	log := ctrl.LoggerFrom(ctx)
+	log.V(1).Info("No BMC account ID set in User status, creating or updating BMC account")
+	_, password, err := bmcutils.GetBMCCredentialsFromSecret(bmcSecret)
+	if err != nil {
+		return false, fmt.Errorf("failed to get credentials from BMCSecret: %w", err)
+	}
+	accountService, err := bmcClient.GetAccountService()
+	if err != nil {
+		return false, fmt.Errorf("failed to get account service: %w", err)
+	}
+	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
+		log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
+		if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
+			return false, condErr
+		}
+		return true, nil
+	}
+	if err := r.setPasswordValidCondition(ctx, user, true, ""); err != nil {
+		return false, err
+	}
+	if err = bmcClient.CreateOrUpdateAccount(ctx, user.Spec.UserName, user.Spec.RoleID, password, true); err != nil {
+		return false, fmt.Errorf("failed to create or update BMC account with new password: %w", err)
+	}
+	if err = r.patchUserStatus(ctx, user, bmcClient, metav1.Now()); err != nil {
+		return false, fmt.Errorf("failed to update User status after creating BMC account: %w", err)
+	}
+	return false, nil
 }
 
 // patchUserStatus looks up the BMC account matching the user's UserName and
