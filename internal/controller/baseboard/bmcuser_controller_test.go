@@ -4,6 +4,10 @@
 package baseboard
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"time"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
@@ -653,6 +657,40 @@ var _ = Describe("BMCUser Controller", func() {
 		// needsBootstrap is gated only on EffectiveBMCSecretRef == nil, not on
 		// Status.ID == "".
 		mockServers[0].ResetAccounts()
+
+		By("Pre-creating account 're-onboard-metal' on the mock BMC with a known password via Redfish POST")
+		// POST to the mock Redfish server with admin credentials to seed the account that
+		// simulates a previously-onboarded server: account exists on BMC but the
+		// operator's stored credential is now stale (the BMCUser has a different password).
+		createAccountBody, err := json.Marshal(map[string]any{
+			"UserName": "re-onboard-metal",
+			"Password": "initial-bmc-password",
+			"RoleId":   "Administrator",
+			"Enabled":  true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		// Use Eventually to retry in case the mock server is not yet ready.
+		// Re-create the request body on each attempt since the reader is consumed.
+		// Stop as soon as the account appears (avoid duplicate POSTs on retry).
+		Eventually(func(g Gomega) {
+			if _, ok := mockServers[0].GetAccountNames()["re-onboard-metal"]; ok {
+				return // already seeded — idempotent
+			}
+			req, err := http.NewRequest(http.MethodPost,
+				fmt.Sprintf("http://%s:%d/redfish/v1/AccountService/Accounts", MockServerIP, MockServerPort),
+				bytes.NewReader(createAccountBody))
+			g.Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.SetBasicAuth("admin", "adminpass")
+			resp, err := http.DefaultClient.Do(req)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(resp.StatusCode).To(Equal(http.StatusCreated))
+			resp.Body.Close()
+			g.Expect(mockServers[0].GetAccountNames()).To(HaveKey("re-onboard-metal"))
+		}, "5s", "100ms").Should(Succeed())
+		// After ResetAccounts (IDs 1-5 exist), the next POST creates ID 6.
+		preExistingID := "6"
+
 		By("Creating a setup credential secret with valid BMC credentials")
 		setupSecret := &v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -690,7 +728,10 @@ var _ = Describe("BMCUser Controller", func() {
 		Expect(k8sClient.Create(ctx, set)).To(Succeed())
 		Eventually(Get(set)).Should(Succeed())
 
-		By("Creating a BMCUser owned by the set with a stale BMCSecret (wrong password)")
+		By("Creating a BMCUser owned by the set with a stale BMCSecret (wrong password), without BMCRef")
+		// No BMCRef initially so the controller cannot reconcile yet — we need to
+		// set Status.ID first to simulate the state after a previous reconcile cycle
+		// that populated Status.ID but left EffectiveBMCSecretRef nil.
 		staleSecret := &metalv1alpha1.BMCSecret{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "re-onboard-stale-",
@@ -725,9 +766,7 @@ var _ = Describe("BMCUser Controller", func() {
 				BMCSecretRef: &v1.LocalObjectReference{
 					Name: staleSecret.Name,
 				},
-				BMCRef: &v1.LocalObjectReference{
-					Name: bmcObj.Name,
-				},
+				// BMCRef intentionally omitted — set after Status.ID is patched.
 			},
 		}
 		Expect(k8sClient.Create(ctx, user)).To(Succeed())
@@ -735,12 +774,26 @@ var _ = Describe("BMCUser Controller", func() {
 
 		By("Patching Status.ID to simulate the account already existing on the BMC")
 		userBase := user.DeepCopy()
-		user.Status.ID = "3"
+		user.Status.ID = preExistingID
 		Expect(k8sClient.Status().Patch(ctx, user, client.MergeFrom(userBase))).To(Succeed())
-		Eventually(Object(user)).Should(HaveField("Status.ID", Equal("3")))
+		Eventually(Object(user)).Should(HaveField("Status.ID", Equal(preExistingID)))
+
+		By("Attaching BMCRef so the controller can now reconcile")
+		Eventually(Update(user, func() {
+			user.Spec.BMCRef = &v1.LocalObjectReference{Name: bmcObj.Name}
+		})).Should(Succeed())
 
 		By("Verifying that EffectiveBMCSecretRef is eventually set via the setup credential path")
 		Eventually(Object(user), "10s").Should(HaveField("Status.EffectiveBMCSecretRef", Not(BeNil())))
+
+		By("Verifying the mock BMC now accepts the new password from the effective secret")
+		effectiveSecret := &metalv1alpha1.BMCSecret{}
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: user.Status.EffectiveBMCSecretRef.Name}, effectiveSecret)).To(Succeed())
+		}, "5s").Should(Succeed())
+		newPassword := string(effectiveSecret.Data["password"])
+		Expect(mockServers[0].Authenticate("re-onboard-metal", newPassword)).To(BeTrue(),
+			"mock BMC should accept the new password written by the re-onboard path")
 
 		Expect(k8sClient.Delete(ctx, set)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, setupSecret)).To(Succeed())
