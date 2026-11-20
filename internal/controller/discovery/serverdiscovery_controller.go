@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
@@ -29,13 +30,14 @@ import (
 // ServerDiscoveryReconciler discovers Servers tainted with the Undiscovered taint.
 type ServerDiscoveryReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	DiscoveryNamespace string
-	ProbeOSImage       string
-	IgnitionProvider   func(ctx context.Context, server *metalv1alpha1.Server) ([]byte, error)
-	Registry           *registry.RegistryServer
-	RegistryDataMaxAge time.Duration
-	ResyncInterval     time.Duration
+	Scheme                   *runtime.Scheme
+	DiscoveryNamespace       string
+	ProbeOSImage             string
+	IgnitionProvider         func(ctx context.Context, server *metalv1alpha1.Server) ([]byte, error)
+	Registry                 *registry.RegistryServer
+	RegistryDataMaxAge       time.Duration
+	ResyncInterval           time.Duration
+	WriteServerIPsAnnotation bool
 }
 
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update;patch
@@ -44,7 +46,7 @@ type ServerDiscoveryReconciler struct {
 // +kubebuilder:rbac:groups=discovery.metal.ironcore.dev,resources=metadata,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// Reconcile is part of the main Kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ServerDiscoveryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	server := &metalv1alpha1.Server{}
@@ -97,6 +99,12 @@ func (r *ServerDiscoveryReconciler) reconcile(ctx context.Context, server *metal
 		return ctrl.Result{}, fmt.Errorf("applying Metadata for server %s: %w", server.Name, err)
 	}
 	log.V(1).Info("Applied Metadata")
+
+	if r.WriteServerIPsAnnotation {
+		if err := r.annotateServerIPs(ctx, server, data); err != nil {
+			return ctrl.Result{}, fmt.Errorf("annotating server %s with IPs: %w", server.Name, err)
+		}
+	}
 
 	base := server.DeepCopy()
 	if setDiscoveryCondition(server, metav1.Condition{
@@ -255,6 +263,48 @@ func (r *ServerDiscoveryReconciler) applyMetadata(
 	ctrl.LoggerFrom(ctx).V(1).Info("Created or patched Metadata",
 		"Metadata", client.ObjectKeyFromObject(metadata), "Operation", opResult)
 	return nil
+}
+
+func (r *ServerDiscoveryReconciler) annotateServerIPs(
+	ctx context.Context,
+	server *metalv1alpha1.Server,
+	data discoveryv1alpha1.Metadata,
+) error {
+	ips := collectServerIPs(data)
+	if ips == "" {
+		return nil
+	}
+	if server.Annotations[constants.ServerIPsAnnotation] == ips {
+		return nil
+	}
+	base := server.DeepCopy()
+	if server.Annotations == nil {
+		server.Annotations = map[string]string{}
+	}
+	server.Annotations[constants.ServerIPsAnnotation] = ips
+	if err := r.Patch(ctx, server, client.MergeFrom(base)); err != nil {
+		return err
+	}
+	ctrl.LoggerFrom(ctx).V(1).Info("Annotated Server with discovered IPs", "ips", ips)
+	return nil
+}
+
+func collectServerIPs(data discoveryv1alpha1.Metadata) string {
+	seen := map[string]struct{}{}
+	ips := make([]string, 0)
+	for _, ni := range data.NetworkInterfaces {
+		for _, ip := range ni.IPAddresses {
+			if ip == "" {
+				continue
+			}
+			if _, ok := seen[ip]; ok {
+				continue
+			}
+			seen[ip] = struct{}{}
+			ips = append(ips, ip)
+		}
+	}
+	return strings.Join(ips, ",")
 }
 
 func (r *ServerDiscoveryReconciler) cleanupDiscoveryResources(ctx context.Context, server *metalv1alpha1.Server) error {

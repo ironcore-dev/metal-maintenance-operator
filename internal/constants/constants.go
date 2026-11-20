@@ -24,6 +24,10 @@ const (
 	// DiscoveryForUIDLabel labels discovery ServerClaims and their ignition
 	// secrets with the UID of the Server they discover.
 	DiscoveryForUIDLabel = "discovery.metal.ironcore.dev/server-uid"
+	// ServerIPsAnnotation holds a comma-separated list of the Server's in-band IPs.
+	// TODO: drop this and use metalv1alpha1.ServerIPsAnnotation once we bump to
+	// a metal-operator release that exposes it in the api package.
+	ServerIPsAnnotation = "metal.ironcore.dev/ips"
 )
 
 // Index field keys for controller-runtime field indexers.

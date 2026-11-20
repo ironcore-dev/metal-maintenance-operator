@@ -73,8 +73,9 @@ var _ = Describe("ServerDiscoveryReconciler", func() {
 				},
 			},
 			NetworkInterfaces: []discoveryv1alpha1.NetworkInterface{{
-				Name:       "eth0",
-				MACAddress: "00:11:22:33:44:55",
+				Name:        "eth0",
+				MACAddress:  "00:11:22:33:44:55",
+				IPAddresses: []string{"10.0.0.23", "2001:db8::23"},
 			}},
 		})
 
@@ -93,6 +94,10 @@ var _ = Describe("ServerDiscoveryReconciler", func() {
 			HaveField("Type", constants.ConditionDiscovered),
 			HaveField("Status", metav1.ConditionTrue),
 		))))
+
+		By("checking the discovered IPs are written as an annotation on the Server")
+		Eventually(Object(server)).Should(HaveField("ObjectMeta.Annotations",
+			HaveKeyWithValue(constants.ServerIPsAnnotation, "10.0.0.23,2001:db8::23")))
 
 		By("checking the discovery claim is deleted")
 		Eventually(ObjectList(claimList, discoveryClaimListOpts(ns.Name, server)...)).Should(
