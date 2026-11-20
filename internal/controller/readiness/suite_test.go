@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/modutils"
+	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
 	readinessv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/readiness/v1alpha1"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -74,6 +75,7 @@ var _ = BeforeSuite(func() {
 
 	Expect(metalv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	Expect(readinessv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	Expect(discoveryv1alpha1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -83,8 +85,9 @@ var _ = BeforeSuite(func() {
 	SetClient(k8sClient)
 })
 
-func SetupNamespace() *corev1.Namespace {
+func SetupNamespace() (*corev1.Namespace, *corev1.Namespace) {
 	ns := &corev1.Namespace{}
+	discoveryNs := &corev1.Namespace{}
 	BeforeEach(func(ctx SpecContext) {
 		mgrCtx, cancel := context.WithCancel(context.Background())
 		DeferCleanup(cancel)
@@ -94,6 +97,12 @@ func SetupNamespace() *corev1.Namespace {
 		}
 		Expect(k8sClient.Create(ctx, ns)).To(Succeed(), "failed to create test namespace")
 		DeferCleanup(k8sClient.Delete, ns)
+
+		*discoveryNs = corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "discovery-"},
+		}
+		Expect(k8sClient.Create(ctx, discoveryNs)).To(Succeed(), "failed to create discovery namespace")
+		DeferCleanup(k8sClient.Delete, discoveryNs)
 
 		k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme.Scheme,
@@ -105,8 +114,9 @@ func SetupNamespace() *corev1.Namespace {
 		Expect(err).NotTo(HaveOccurred(), "failed to create k8s manager")
 
 		Expect((&ServerWiringReconciler{
-			Client: k8sManager.GetClient(),
-			Scheme: k8sManager.GetScheme(),
+			Client:             k8sManager.GetClient(),
+			Scheme:             k8sManager.GetScheme(),
+			DiscoveryNamespace: discoveryNs.Name,
 		}).SetupWithManager(k8sManager)).To(Succeed())
 
 		go func() {
@@ -114,5 +124,5 @@ func SetupNamespace() *corev1.Namespace {
 			Expect(k8sManager.Start(mgrCtx)).To(Succeed(), "failed to start manager")
 		}()
 	})
-	return ns
+	return ns, discoveryNs
 }
