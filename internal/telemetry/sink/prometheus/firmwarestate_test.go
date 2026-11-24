@@ -33,8 +33,10 @@ func TestFirmwareStateCollector_BIOSVersion(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(server, biosv).WithStatusSubresource(biosv).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -74,8 +76,10 @@ func TestFirmwareStateCollector_BMCVersion(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bmc, bmcv).WithStatusSubresource(bmcv).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -101,8 +105,10 @@ func TestFirmwareStateCollector_EmptyCluster(t *testing.T) {
 	scheme := newStateScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -125,8 +131,10 @@ func TestFirmwareStateCollector_NilServerRefSkipped(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(biosv).WithStatusSubresource(biosv).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 
@@ -150,8 +158,10 @@ func TestFirmwareStateCollector_ObservedVersionEmptyWhenServerMissing(t *testing
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(biosv).WithStatusSubresource(biosv).Build()
 
+	lf := &promsink.LeaderFlag{}
+	defer lf.Activate()()
 	reg := prometheus.NewRegistry()
-	if err := promsink.NewFirmwareStateCollector(c, reg); err != nil {
+	if err := promsink.NewFirmwareStateCollector(c, reg, lf); err != nil {
 		t.Fatalf("NewFirmwareStateCollector: %v", err)
 	}
 

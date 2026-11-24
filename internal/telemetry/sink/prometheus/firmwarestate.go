@@ -33,11 +33,14 @@ var (
 // FirmwareStateCollector implements prometheus.Collector for BIOSVersion and BMCVersion resources.
 type FirmwareStateCollector struct {
 	client client.Client
+	leader *LeaderFlag
 }
 
 // NewFirmwareStateCollector creates and registers a FirmwareStateCollector with the given Prometheus registerer.
-func NewFirmwareStateCollector(c client.Client, reg prometheus.Registerer) error {
-	return reg.Register(&FirmwareStateCollector{client: c})
+// leader gates metric emission: Collect returns immediately with no series when the pod is not the leader,
+// preventing duplicate series when multiple replicas are running.
+func NewFirmwareStateCollector(c client.Client, reg prometheus.Registerer, leader *LeaderFlag) error {
+	return reg.Register(&FirmwareStateCollector{client: c, leader: leader})
 }
 
 func (v *FirmwareStateCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -53,6 +56,10 @@ func stateLabel(s string) string {
 }
 
 func (v *FirmwareStateCollector) Collect(ch chan<- prometheus.Metric) {
+	if !v.leader.AcquireCollect() {
+		return
+	}
+	defer v.leader.ReleaseCollect()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
