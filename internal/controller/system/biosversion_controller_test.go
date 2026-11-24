@@ -18,6 +18,7 @@ import (
 	bmcutils "github.com/ironcore-dev/metal-operator/pkg/bmcutils"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -483,6 +484,60 @@ var _ = Describe("BIOSVersion Controller", func() {
 		By("Deleting the BIOSVersion")
 		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should release a held ServerMaintenance while readiness gates are not satisfied", func(ctx SpecContext) {
+		By("Creating a BIOSVersion with a ReadinessGate that is not satisfied on the Server")
+		biosVersion := &systemv1alpha1.BIOSVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-release-maintenance-",
+			},
+			Spec: systemv1alpha1.BIOSVersionSpec{
+				BIOSVersionTemplate: systemv1alpha1.BIOSVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBiosVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBiosVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosVersion)).To(Succeed())
+		Eventually(Object(biosVersion)).Should(HaveField("Status.State", systemv1alpha1.BIOSVersionStatePending))
+
+		By("Simulating a ServerMaintenance carried over into Pending, as after a retry")
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: biosVersion.Name},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(controllerutil.SetControllerReference(biosVersion, serverMaintenance, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, serverMaintenance)).To(Succeed())
+		Eventually(Update(biosVersion, func() {
+			biosVersion.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
+				Namespace: serverMaintenance.Namespace,
+				Name:      serverMaintenance.Name,
+			}
+		})).Should(Succeed())
+
+		By("Ensuring the ServerMaintenance is released although the BIOSVersion stays Pending")
+		Eventually(Object(biosVersion)).Should(SatisfyAll(
+			HaveField("Spec.ServerMaintenanceRef", BeNil()),
+			HaveField("Status.State", systemv1alpha1.BIOSVersionStatePending),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the BIOSVersion")
+		Expect(k8sClient.Delete(ctx, biosVersion)).To(Succeed())
 	})
 
 	It("should wait for readiness gates to be satisfied before starting the upgrade", func(ctx SpecContext) {

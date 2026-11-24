@@ -254,6 +254,14 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 		}
 		if !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			// Never hold a ServerMaintenance while blocked on gates: the sibling this object
+			// waits for may need exclusive access to the same Servers to settle (deadlock). A
+			// retry (Failed -> Pending) carries the maintenance over, so release it here.
+			if bmcVersion.Spec.ServerMaintenanceRefs != nil {
+				if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
 			return ctrl.Result{}, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, baseboardv1alpha1.BMCVersionStatePending, reasons)
 		}
 		if err := r.markBMCVersionReadinessGatesSatisfied(ctx, bmcVersion, bmcVersion.Status.State); err != nil {
@@ -760,6 +768,12 @@ func (r *BMCVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcCl
 		}
 		if !satisfied {
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			// A queued (not yet active) request must not keep its place in line while blocked.
+			if bmcVersion.Spec.ServerMaintenanceRefs != nil {
+				if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
+					return false, err
+				}
+			}
 			return false, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, bmcVersion.Status.State, reasons)
 		}
 		if err := r.markBMCVersionReadinessGatesSatisfied(ctx, bmcVersion, bmcVersion.Status.State); err != nil {

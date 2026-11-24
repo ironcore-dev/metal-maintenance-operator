@@ -19,6 +19,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/ironcore-dev/controller-utils/metautils"
 	"github.com/ironcore-dev/metal-maintenance-operator/api"
@@ -1124,6 +1125,152 @@ var _ = Describe("BMCSettings Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should release held ServerMaintenances while readiness gates are not satisfied", func(ctx SpecContext) {
+		By("Creating a BMCSettings with a ReadinessGate that is not satisfied on the Server")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-bmc-release-maintenance-",
+			},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "release-value"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+		Eventually(Object(settings)).Should(HaveField("Status.State", baseboardv1alpha1.BMCSettingsStatePending))
+
+		By("Simulating a ServerMaintenance carried over into Pending, as after a retry")
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: settings.Name},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(controllerutil.SetControllerReference(settings, serverMaintenance, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, serverMaintenance)).To(Succeed())
+		Eventually(Update(settings, func() {
+			settings.Spec.ServerMaintenanceRefs = []api.ServerMaintenanceRefItem{{
+				ServerMaintenanceRef: &metalv1alpha1.ObjectReference{
+					Namespace: serverMaintenance.Namespace,
+					Name:      serverMaintenance.Name,
+				},
+			}}
+		})).Should(Succeed())
+
+		By("Ensuring the ServerMaintenance is released although the BMCSettings stays Pending")
+		Eventually(Object(settings)).Should(SatisfyAll(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStatePending),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the BMCSettings")
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
+	})
+
+	It("should release the ServerMaintenance and revert to Pending when readiness gates break while waiting for approval", func(ctx SpecContext) {
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating an Ignition secret and a ServerClaim so the maintenance needs approval")
+		ignitionSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+		}
+		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
+		serverClaim := &metalv1alpha1.ServerClaim{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+			Spec: metalv1alpha1.ServerClaimSpec{
+				Power:             metalv1alpha1.PowerOn,
+				ServerRef:         &v1.LocalObjectReference{Name: server.Name},
+				IgnitionSecretRef: &v1.LocalObjectReference{Name: ignitionSecret.Name},
+				Image:             "foo:bar",
+			},
+		}
+		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
+		Eventually(Update(server, func() {
+			server.Spec.ServerClaimRef = &metalv1alpha1.ImmutableObjectReference{
+				Name:      serverClaim.Name,
+				Namespace: serverClaim.Namespace,
+			}
+		})).Should(Succeed())
+		Eventually(UpdateStatus(server, func() {
+			server.Status.State = metalv1alpha1.ServerStateReserved
+		})).Should(Succeed())
+
+		By("Creating a BMCSettings gated on the condition")
+		settings := &baseboardv1alpha1.BMCSettings{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-bmc-gate-break-"},
+			Spec: baseboardv1alpha1.BMCSettingsSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmc.Name},
+				BMCSettingsTemplate: baseboardv1alpha1.BMCSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						Version:                 "1.45.455b66-rev4",
+						SettingsFlow:            []api.SettingsFlowItem{{Name: "flow1", Priority: 1, Settings: map[string]string{"abc": "gate-break-value"}}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, settings)).To(Succeed())
+
+		By("Ensuring it requested maintenance and waits for approval")
+		Eventually(Object(settings)).Should(SatisfyAll(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStateInProgress),
+			HaveField("Spec.ServerMaintenanceRefs", HaveLen(1)),
+		))
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: ns.Name,
+				Name:      settings.Spec.ServerMaintenanceRefs[0].ServerMaintenanceRef.Name,
+			},
+		}
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		By("Breaking the readiness gate on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionFalse,
+				Reason: "DriftDetected",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the maintenance request is withdrawn and the BMCSettings reverts to Pending")
+		Eventually(Object(settings)).Should(SatisfyAll(
+			HaveField("Status.State", baseboardv1alpha1.BMCSettingsStatePending),
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the BMCSettings")
+		Expect(k8sClient.Delete(ctx, settings)).To(Succeed())
 	})
 
 	It("should stay Applied and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {

@@ -358,6 +358,12 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 		}
 		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			// Never hold a ServerMaintenance while blocked on gates: the sibling this object
+			// waits for may need exclusive access to the same Server to settle (deadlock). A
+			// retry (Failed -> Pending) carries the maintenance over, so release it here.
+			if err := r.cleanupServerMaintenanceReferences(ctx, fw); err != nil {
+				return true, err
+			}
 			return r.patchFirmwareUpdateReadinessGatesNotSatisfied(ctx, fw, systemv1alpha1.FirmwareUpdateStatePending, reasons)
 		}
 		// Gates are satisfied: ensure the condition reflects that (it may be stale False from a
@@ -772,6 +778,10 @@ func (r *FirmwareUpdateReconciler) ensureResetBeforeRetry(ctx context.Context, b
 		// we'd wait for its condition).
 		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, fw.Spec.ReadinessGates); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			// A queued (not yet active) request must not keep its place in line while blocked.
+			if err := r.cleanupServerMaintenanceReferences(ctx, fw); err != nil {
+				return false, err
+			}
 			condition, err := utils.GetCondition(r.Conditions, fw.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
 				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)

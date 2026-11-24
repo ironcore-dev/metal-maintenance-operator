@@ -27,6 +27,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -1128,6 +1129,147 @@ var _ = Describe("BIOSSettings Controller", func() {
 		By("Deleting the BIOSSettings")
 		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should release a held ServerMaintenance while readiness gates are not satisfied", func(ctx SpecContext) {
+		biosSetting := map[string]string{"EmbeddedSata": "Raid"}
+
+		By("Creating a BIOSSettings with a ReadinessGate that is not satisfied on the Server")
+		biosSettings := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-release-maintenance-",
+			},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: biosSetting,
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettings)).To(Succeed())
+		Eventually(Object(biosSettings)).Should(HaveField("Status.State", systemv1alpha1.BIOSSettingsStatePending))
+
+		By("Simulating a ServerMaintenance carried over into Pending, as after a retry")
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: biosSettings.Name},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(controllerutil.SetControllerReference(biosSettings, serverMaintenance, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, serverMaintenance)).To(Succeed())
+		Eventually(Update(biosSettings, func() {
+			biosSettings.Spec.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
+				Namespace: serverMaintenance.Namespace,
+				Name:      serverMaintenance.Name,
+			}
+		})).Should(Succeed())
+
+		By("Ensuring the ServerMaintenance is released although the BIOSSettings stays Pending")
+		Eventually(Object(biosSettings)).Should(SatisfyAll(
+			HaveField("Spec.ServerMaintenanceRef", BeNil()),
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStatePending),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the BIOSSettings")
+		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
+	})
+
+	It("should release the ServerMaintenance and revert to Pending when readiness gates break while waiting for approval", func(ctx SpecContext) {
+		By("Satisfying the readiness gate on the Server up front")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionTrue,
+				Reason: "Ready",
+			})
+		})).Should(Succeed())
+
+		By("Creating an Ignition secret and a ServerClaim so the maintenance needs approval")
+		ignitionSecret := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+		}
+		Expect(k8sClient.Create(ctx, ignitionSecret)).To(Succeed())
+		serverClaim = &metalv1alpha1.ServerClaim{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, GenerateName: "test-"},
+			Spec: metalv1alpha1.ServerClaimSpec{
+				Power:             metalv1alpha1.PowerOff,
+				ServerRef:         &v1.LocalObjectReference{Name: server.Name},
+				IgnitionSecretRef: &v1.LocalObjectReference{Name: ignitionSecret.Name},
+				Image:             "foo:bar",
+			},
+		}
+		Expect(k8sClient.Create(ctx, serverClaim)).To(Succeed())
+		Eventually(Object(server)).Should(HaveField("Status.State", metalv1alpha1.ServerStateReserved))
+
+		By("Creating a BIOSSettings gated on the condition")
+		biosSettings := &systemv1alpha1.BIOSSettings{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "test-gate-break-"},
+			Spec: systemv1alpha1.BIOSSettingsSpec{
+				BIOSSettingsTemplate: systemv1alpha1.BIOSSettingsTemplate{
+					SettingsTemplate: api.SettingsTemplate{
+						SettingsFlow: []api.SettingsFlowItem{{
+							Settings: map[string]string{"AdminPhone": "gate-break-value"},
+							Priority: 1,
+							Name:     "one",
+						}},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, biosSettings)).To(Succeed())
+
+		By("Ensuring it requested maintenance and waits for approval")
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: biosSettings.Name},
+		}
+		Eventually(Object(biosSettings)).Should(SatisfyAll(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStateInProgress),
+			HaveField("Spec.ServerMaintenanceRef", Not(BeNil())),
+		))
+		Eventually(Get(serverMaintenance)).Should(Succeed())
+
+		By("Breaking the readiness gate on the Server")
+		Eventually(UpdateStatus(server, func() {
+			apimeta.SetStatusCondition(&server.Status.Conditions, metav1.Condition{
+				Type:   "SomePrerequisiteReady",
+				Status: metav1.ConditionFalse,
+				Reason: "DriftDetected",
+			})
+		})).Should(Succeed())
+
+		By("Ensuring the maintenance request is withdrawn and the BIOSSettings reverts to Pending")
+		Eventually(Object(biosSettings)).Should(SatisfyAll(
+			HaveField("Status.State", systemv1alpha1.BIOSSettingsStatePending),
+			HaveField("Spec.ServerMaintenanceRef", BeNil()),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the BIOSSettings")
+		Expect(k8sClient.Delete(ctx, biosSettings)).To(Succeed())
 	})
 
 	It("should stay Applied and skip re-actuation when readiness gates become unsatisfied again after completion", func(ctx SpecContext) {

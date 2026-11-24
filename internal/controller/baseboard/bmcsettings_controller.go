@@ -286,6 +286,12 @@ func (r *BMCSettingsReconciler) ensureBMCSettingsMaintenanceStateTransition(ctx 
 		}
 		if !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			// Never hold a ServerMaintenance while blocked on gates: the sibling this object
+			// waits for may need exclusive access to the same Servers to settle (deadlock). A
+			// retry (Failed -> Pending) carries the maintenance over, so release it here.
+			if err := r.cleanupServerMaintenanceReferences(ctx, settings); err != nil {
+				return ctrl.Result{}, err
+			}
 			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to get readiness gates condition: %w", err)
@@ -427,6 +433,24 @@ func (r *BMCSettingsReconciler) markBMCSettingsReadinessGatesSatisfied(ctx conte
 	return r.updateBMCSettingsStatus(ctx, settings, state, condition)
 }
 
+// patchBMCSettingsReadinessGatesNotSatisfied patches ConditionReadinessGatesSatisfied to False
+// with the given reasons and moves the object to state.
+func (r *BMCSettingsReconciler) patchBMCSettingsReadinessGatesNotSatisfied(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, state baseboardv1alpha1.BMCSettingsState, reasons []string) error {
+	condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
+	if err != nil {
+		return fmt.Errorf("failed to get readiness gates condition: %w", err)
+	}
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionFalse),
+		conditionutils.UpdateReason(ReasonReadinessGatesNotSatisfied),
+		conditionutils.UpdateMessage(strings.Join(reasons, "; ")),
+	); err != nil {
+		return fmt.Errorf("failed to update readiness gates condition: %w", err)
+	}
+	return r.updateBMCSettingsStatus(ctx, settings, state, condition)
+}
+
 func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context, settings *baseboardv1alpha1.BMCSettings, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	settingsDiff, effectiveSettings, err := r.getBMCSettingsDifference(ctx, settings, bmcObj, bmcClient, false)
@@ -461,6 +485,17 @@ func (r *BMCSettingsReconciler) handleSettingInProgressState(ctx context.Context
 	}
 	if !granted {
 		log.V(1).Info("Waiting for maintenance to be granted before continuing with updating settings")
+		satisfied, reasons, err := r.checkBMCSettingsReadinessGates(ctx, bmcObj, bmcClient, settings)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !satisfied {
+			log.V(1).Info("Readiness gates no longer satisfied while waiting for maintenance approval, reverting to Pending", "Reasons", reasons)
+			if err := r.cleanupServerMaintenanceReferences(ctx, settings); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, r.patchBMCSettingsReadinessGatesNotSatisfied(ctx, settings, baseboardv1alpha1.BMCSettingsStatePending, reasons)
+		}
 		if condition.Status != metav1.ConditionTrue {
 			if err := r.Conditions.Update(
 				condition,
@@ -1295,6 +1330,10 @@ func (r *BMCSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 		}
 		if !satisfied {
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			// A queued (not yet active) request must not keep its place in line while blocked.
+			if err := r.cleanupServerMaintenanceReferences(ctx, settings); err != nil {
+				return false, err
+			}
 			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
 				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)

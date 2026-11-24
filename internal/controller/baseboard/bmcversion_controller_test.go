@@ -16,6 +16,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
 	"github.com/ironcore-dev/controller-utils/metautils"
@@ -742,6 +743,60 @@ var _ = Describe("BMCVersion Controller", func() {
 		By("Deleting the BMCVersion")
 		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
 		Eventually(Object(server)).Should(testutils.ServerNotParked)
+	})
+
+	It("should release held ServerMaintenances while readiness gates are not satisfied", func(ctx SpecContext) {
+		By("Creating a BMCVersion with a ReadinessGate that is not satisfied on the Server")
+		bmcVersion := &baseboardv1alpha1.BMCVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-release-maintenance-",
+			},
+			Spec: baseboardv1alpha1.BMCVersionSpec{
+				BMCRef: &v1.LocalObjectReference{Name: bmcObj.Name},
+				BMCVersionTemplate: baseboardv1alpha1.BMCVersionTemplate{
+					VersionTemplate: api.VersionTemplate{
+						Version:                 upgradeServerBMCVersion,
+						Image:                   api.ImageSpec{URI: upgradeServerBMCVersion},
+						ServerMaintenancePolicy: maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+					},
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, bmcVersion)).To(Succeed())
+		Eventually(Object(bmcVersion)).Should(HaveField("Status.State", baseboardv1alpha1.BMCVersionStatePending))
+
+		By("Simulating a ServerMaintenance carried over into Pending, as after a retry")
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: bmcVersion.Name},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(controllerutil.SetControllerReference(bmcVersion, serverMaintenance, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, serverMaintenance)).To(Succeed())
+		Eventually(Update(bmcVersion, func() {
+			bmcVersion.Spec.ServerMaintenanceRefs = []metalv1alpha1.ObjectReference{{
+				Namespace: serverMaintenance.Namespace,
+				Name:      serverMaintenance.Name,
+			}}
+		})).Should(Succeed())
+
+		By("Ensuring the ServerMaintenance is released although the BMCVersion stays Pending")
+		Eventually(Object(bmcVersion)).Should(SatisfyAll(
+			HaveField("Spec.ServerMaintenanceRefs", BeNil()),
+			HaveField("Status.State", baseboardv1alpha1.BMCVersionStatePending),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the BMCVersion")
+		Expect(k8sClient.Delete(ctx, bmcVersion)).To(Succeed())
 	})
 
 	It("should wait for readiness gates to be satisfied before starting the upgrade", func(ctx SpecContext) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/controller-utils/conditionutils"
+	"github.com/ironcore-dev/metal-maintenance-operator/api"
 	maintenancev1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/maintenance/v1alpha1"
 	systemv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/system/v1alpha1"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
@@ -19,6 +20,7 @@ import (
 	mockserver "github.com/ironcore-dev/metal-operator/bmc/mock/server"
 	"github.com/stmcginnis/gofish/schemas"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	. "sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 
@@ -183,6 +185,63 @@ var _ = Describe("FirmwareUpdate Controller", func() {
 		By("Ensuring that the FirmwareUpdateDell has been removed")
 		Eventually(Get(fwUpdate)).Should(Satisfy(apierrors.IsNotFound))
 		Consistently(Get(fwUpdate)).Should(Satisfy(apierrors.IsNotFound))
+	})
+
+	It("should release a held ServerMaintenance while readiness gates are not satisfied", func(ctx SpecContext) {
+		By("Creating a FirmwareUpdate with a ReadinessGate that is not satisfied on the Server")
+		fwUpdate := &systemv1alpha1.FirmwareUpdate{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "test-release-maintenance-",
+				Namespace:    ns.Name,
+			},
+			Spec: systemv1alpha1.FirmwareUpdateSpec{
+				FirmwareUpdateTemplate: systemv1alpha1.FirmwareUpdateTemplate{
+					DellRepository: &systemv1alpha1.DellFirmwareRepository{
+						ShareType:   systemv1alpha1.DellShareTypeHTTPS,
+						Address:     "downloads.dell.com",
+						CatalogFile: "Catalog.xml",
+					},
+					ServerMaintenancePolicy: ptr.To(maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval),
+					ReadinessGating: api.ReadinessGating{
+						ReadinessGates: []metalv1alpha1.ConditionRequirement{{
+							Type:           "SomePrerequisiteReady",
+							RequiredStatus: metav1.ConditionTrue,
+						}},
+					},
+				},
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(k8sClient.Create(ctx, fwUpdate)).To(Succeed())
+		Eventually(Object(fwUpdate)).Should(HaveField("Status.State", systemv1alpha1.FirmwareUpdateStatePending))
+
+		By("Simulating a ServerMaintenance carried over into Pending, as after a retry")
+		serverMaintenance := &maintenancev1alpha1.ServerMaintenance{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns.Name, Name: fwUpdate.Name},
+			Spec: maintenancev1alpha1.ServerMaintenanceSpec{
+				Policy:    maintenancev1alpha1.ServerMaintenancePolicyOwnerApproval,
+				ServerRef: &v1.LocalObjectReference{Name: server.Name},
+			},
+		}
+		Expect(controllerutil.SetControllerReference(fwUpdate, serverMaintenance, k8sClient.Scheme())).To(Succeed())
+		Expect(k8sClient.Create(ctx, serverMaintenance)).To(Succeed())
+		Eventually(UpdateStatus(fwUpdate, func() {
+			fwUpdate.Status.ServerMaintenanceRef = &metalv1alpha1.ObjectReference{
+				Namespace: serverMaintenance.Namespace,
+				Name:      serverMaintenance.Name,
+			}
+		})).Should(Succeed())
+
+		By("Ensuring the ServerMaintenance is released although the FirmwareUpdate stays Pending")
+		Eventually(Object(fwUpdate)).Should(SatisfyAll(
+			HaveField("Status.ServerMaintenanceRef", BeNil()),
+			HaveField("Status.State", systemv1alpha1.FirmwareUpdateStatePending),
+		))
+		Eventually(Get(serverMaintenance)).Should(Satisfy(apierrors.IsNotFound))
+
+		By("Deleting the FirmwareUpdate")
+		Expect(k8sClient.Delete(ctx, fwUpdate)).To(Succeed())
+		Eventually(Get(fwUpdate)).Should(Satisfy(apierrors.IsNotFound))
 	})
 
 	It("should mark Failed when the repository check job fails", func(ctx SpecContext) {

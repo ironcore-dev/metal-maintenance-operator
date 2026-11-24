@@ -368,6 +368,40 @@ func (r *BIOSSettingsReconciler) patchBIOSSettingsReadinessGatesNotSatisfied(ctx
 	return r.updateStatus(ctx, settings, state, condition)
 }
 
+func findDuplicateSettingsFlowKeys(flow []api.SettingsFlowItem) (duplicateName, duplicateSettingsNames []string) {
+	allNames := map[string]struct{}{}
+	allSettingsNames := map[string]struct{}{}
+	duplicateName = make([]string, 0, len(flow))
+	for _, flowItem := range flow {
+		if _, ok := allNames[flowItem.Name]; ok {
+			duplicateName = append(duplicateName, flowItem.Name)
+		}
+		allNames[flowItem.Name] = struct{}{}
+		for key := range flowItem.Settings {
+			if _, ok := allSettingsNames[key]; ok {
+				duplicateSettingsNames = append(duplicateSettingsNames, key)
+			}
+			allSettingsNames[key] = struct{}{}
+		}
+	}
+	return duplicateName, duplicateSettingsNames
+}
+
+func (r *BIOSSettingsReconciler) markMaintenanceApproved(ctx context.Context, settings *systemv1alpha1.BIOSSettings, condition *metav1.Condition) error {
+	if err := r.Conditions.Update(
+		condition,
+		conditionutils.UpdateStatus(corev1.ConditionFalse),
+		conditionutils.UpdateReason(constants.ReasonMaintenanceApproved),
+		conditionutils.UpdateMessage("Server is now in Maintenance mode"),
+	); err != nil {
+		return fmt.Errorf("failed to update creating ServerMaintenance condition: %w", err)
+	}
+	if err := r.updateStatus(ctx, settings, settings.Status.State, condition); err != nil {
+		return fmt.Errorf("failed to patch BIOSSettings ServerMaintenance waiting conditions: %w", err)
+	}
+	return nil
+}
+
 func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, bmcClient bmc.BMC, settings *systemv1alpha1.BIOSSettings, server *metalv1alpha1.Server) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	if err := r.ensureCompletionConditionInitialized(ctx, server, settings); err != nil {
@@ -375,6 +409,12 @@ func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, 
 	}
 	if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
 		log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+		// Never hold a ServerMaintenance while blocked on gates: the sibling this object
+		// waits for may need exclusive access to the same Server to settle (deadlock). A
+		// retry (Failed -> Pending) carries the maintenance over, so release it here.
+		if err := r.removeServerMaintenance(ctx, settings); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.patchBIOSSettingsReadinessGatesNotSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStatePending, reasons); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -428,22 +468,7 @@ func (r *BIOSSettingsReconciler) handleSettingPendingState(ctx context.Context, 
 	}
 
 	// Verify that no duplicate name and duplicate settings are found
-	allNames := map[string]struct{}{}
-	allSettingsNames := map[string]struct{}{}
-	duplicateName := make([]string, 0, len(settings.Spec.SettingsFlow))
-	var duplicateSettingsNames []string
-	for _, flowItem := range settings.Spec.SettingsFlow {
-		if _, ok := allNames[flowItem.Name]; ok {
-			duplicateName = append(duplicateName, flowItem.Name)
-		}
-		allNames[flowItem.Name] = struct{}{}
-		for key := range flowItem.Settings {
-			if _, ok := allSettingsNames[key]; ok {
-				duplicateSettingsNames = append(duplicateSettingsNames, key)
-			}
-			allSettingsNames[key] = struct{}{}
-		}
-	}
+	duplicateName, duplicateSettingsNames := findDuplicateSettingsFlowKeys(settings.Spec.SettingsFlow)
 
 	if len(duplicateName) > 0 || len(duplicateSettingsNames) > 0 {
 		log.V(1).Info("Found duplicate keys", "DuplicatesCount", len(duplicateName), "DuplicatesSettingsCound", len(duplicateSettingsNames))
@@ -524,6 +549,13 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 	}
 	if ok := r.isServerInMaintenance(ctx, settings, server); !ok {
 		log.V(1).Info("Server is not yet in Maintenance status, skipping")
+		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
+			log.V(1).Info("Readiness gates no longer satisfied while waiting for maintenance approval, reverting to Pending", "Reasons", reasons)
+			if err := r.removeServerMaintenance(ctx, settings); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, r.patchBIOSSettingsReadinessGatesNotSatisfied(ctx, settings, systemv1alpha1.BIOSSettingsStatePending, reasons)
+		}
 		if condition.Status != metav1.ConditionTrue {
 			if err := r.Conditions.Update(
 				condition,
@@ -541,18 +573,7 @@ func (r *BIOSSettingsReconciler) handleSettingInProgressState(ctx context.Contex
 	}
 	// once in maintenance, clear the waiting condition if present
 	if condition.Reason != constants.ReasonMaintenanceApproved {
-		if err := r.Conditions.Update(
-			condition,
-			conditionutils.UpdateStatus(corev1.ConditionFalse),
-			conditionutils.UpdateReason(constants.ReasonMaintenanceApproved),
-			conditionutils.UpdateMessage("Server is now in Maintenance mode"),
-		); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update creating ServerMaintenance condition: %w", err)
-		}
-		if err := r.updateStatus(ctx, settings, settings.Status.State, condition); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to patch BIOSSettings ServerMaintenance waiting conditions: %w", err)
-		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.markMaintenanceApproved(ctx, settings, condition)
 	}
 	if err := r.ensureCompletionConditionInProgress(ctx, settings, server); err != nil {
 		return ctrl.Result{}, err
@@ -1334,6 +1355,10 @@ func (r *BIOSSettingsReconciler) ensureResetBeforeRetry(ctx context.Context, bmc
 		// InProgress-state gate handling.
 		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, settings.Spec.ReadinessGates); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			// A queued (not yet active) request must not keep its place in line while blocked.
+			if err := r.removeServerMaintenance(ctx, settings); err != nil {
+				return false, err
+			}
 			condition, err := utils.GetCondition(r.Conditions, settings.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
 				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)

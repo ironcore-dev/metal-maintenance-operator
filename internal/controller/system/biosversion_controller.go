@@ -263,6 +263,12 @@ func (r *BIOSVersionReconciler) transitionState(ctx context.Context, biosVersion
 		}
 		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied", "Reasons", reasons)
+			// Never hold a ServerMaintenance while blocked on gates: the sibling this object
+			// waits for may need exclusive access to the same Server to settle (deadlock). A
+			// retry (Failed -> Pending) carries the maintenance over, so release it here.
+			if err := r.cleanupServerMaintenanceReferences(ctx, biosVersion); err != nil {
+				return true, err
+			}
 			condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
 				return true, fmt.Errorf("failed to get readiness gates condition: %w", err)
@@ -654,6 +660,10 @@ func (r *BIOSVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcC
 		// InProgress-state gate handling.
 		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
+			// A queued (not yet active) request must not keep its place in line while blocked.
+			if err := r.cleanupServerMaintenanceReferences(ctx, biosVersion); err != nil {
+				return false, err
+			}
 			condition, err := utils.GetCondition(r.Conditions, biosVersion.Status.Conditions, ConditionReadinessGatesSatisfied)
 			if err != nil {
 				return false, fmt.Errorf("failed to get readiness gates condition: %w", err)
