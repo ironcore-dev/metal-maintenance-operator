@@ -257,10 +257,10 @@ func (r *BMCVersionReconciler) ensureBMCVersionStateTransition(ctx context.Conte
 			// Never hold a ServerMaintenance while blocked on gates: the sibling this object
 			// waits for may need exclusive access to the same Servers to settle (deadlock). A
 			// retry (Failed -> Pending) carries the maintenance over, so release it here.
-			if bmcVersion.Spec.ServerMaintenanceRefs != nil {
-				if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
-					return ctrl.Result{}, err
-				}
+			// Owned ServerMaintenances are discovered via owner references,
+			// so cleanup must also run when the refs were never persisted.
+			if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
+				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, baseboardv1alpha1.BMCVersionStatePending, reasons)
 		}
@@ -769,10 +769,9 @@ func (r *BMCVersionReconciler) ensureResetBeforeRetry(ctx context.Context, bmcCl
 		if !satisfied {
 			log.V(1).Info("Readiness gates not satisfied, waiting before resetting for retry", "Reasons", reasons)
 			// A queued (not yet active) request must not keep its place in line while blocked.
-			if bmcVersion.Spec.ServerMaintenanceRefs != nil {
-				if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
-					return false, err
-				}
+			// cleanup is owner-based and must also run when they were never persisted.
+			if err := r.removeServerMaintenances(ctx, bmcVersion); err != nil {
+				return false, err
 			}
 			return false, r.patchBMCVersionReadinessGatesNotSatisfied(ctx, bmcVersion, bmcVersion.Status.State, reasons)
 		}
@@ -838,6 +837,11 @@ func (r *BMCVersionReconciler) checkIfMaintenanceGranted(ctx context.Context, bm
 		}
 		if _, ok := serverNames[maintenance.Spec.ServerRef.Name]; !ok {
 			log.V(1).Info("ServerMaintenance references a server not managed by this BMC", "ServerMaintenance", maintenance.Name, "Server", maintenance.Spec.ServerRef.Name)
+			return false
+		}
+		// A terminating ServerMaintenance may still report InMaintenance but is about to release the Server.
+		if !maintenance.DeletionTimestamp.IsZero() {
+			log.V(1).Info("ServerMaintenance is being deleted", "ServerMaintenance", maintenance.Name)
 			return false
 		}
 		if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {

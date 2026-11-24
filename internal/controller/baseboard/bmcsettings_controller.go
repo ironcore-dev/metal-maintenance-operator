@@ -1550,6 +1550,11 @@ func (r *BMCSettingsReconciler) checkIfMaintenanceGranted(ctx context.Context, s
 			log.V(1).Info("ServerMaintenance references a server not managed by this BMC", "ServerMaintenance", serverMaintenance.Name, "Server", serverMaintenance.Spec.ServerRef.Name)
 			return false, nil
 		}
+		// A terminating ServerMaintenance may still report InMaintenance but is about to release the Server.
+		if !serverMaintenance.DeletionTimestamp.IsZero() {
+			log.V(1).Info("ServerMaintenance is being deleted", "ServerMaintenance", serverMaintenance.Name)
+			return false, nil
+		}
 		if serverMaintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 			log.V(1).Info("ServerMaintenance did not reach InMaintenance state", "ServerMaintenance", serverMaintenance.Name, "State", serverMaintenance.Status.State)
 			notInMaintenanceState = append(notInMaintenanceState, serverMaintenance.Name)

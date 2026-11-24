@@ -360,8 +360,9 @@ func (r *BIOSVersionReconciler) handleServerMaintenance(ctx context.Context, bmc
 	if err != nil {
 		return false, fmt.Errorf("failed to get referenced ServerMaintenance: %w", err)
 	}
-	if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
-		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "ServerMaintenanceState", maintenance.Status.State)
+	// A terminating ServerMaintenance may still report InMaintenance but is about to release the Server.
+	if !maintenance.DeletionTimestamp.IsZero() || maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
+		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "ServerMaintenanceState", maintenance.Status.State, "Terminating", !maintenance.DeletionTimestamp.IsZero())
 		if satisfied, reasons := utils.GatesSatisfied(server.Status.Conditions, biosVersion.Spec.ReadinessGates); !satisfied {
 			log.V(1).Info("Readiness gates no longer satisfied while waiting for maintenance approval, reverting to Pending", "Reasons", reasons)
 			if err := r.cleanupServerMaintenanceReferences(ctx, biosVersion); err != nil {

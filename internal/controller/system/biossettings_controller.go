@@ -1515,6 +1515,11 @@ func (r *BIOSSettingsReconciler) isServerInMaintenance(ctx context.Context, sett
 		log.V(1).Info("Failed to get referenced ServerMaintenance", "ServerMaintenance", settings.Spec.ServerMaintenanceRef.Name, "error", err)
 		return false
 	}
+	// A terminating ServerMaintenance may still report InMaintenance but is about to release the Server.
+	if !maintenance.DeletionTimestamp.IsZero() {
+		log.V(1).Info("ServerMaintenance is being deleted", "ServerMaintenance", maintenance.Name)
+		return false
+	}
 	if maintenance.Status.State != maintenancev1alpha1.ServerMaintenanceStateInMaintenance {
 		log.V(1).Info("Server not yet in maintenance", "Server", server.Name, "ServerMaintenanceState", maintenance.Status.State)
 		return false
