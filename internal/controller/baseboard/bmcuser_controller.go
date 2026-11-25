@@ -122,9 +122,17 @@ func (r *BMCUserReconciler) passwordPolicy(manufacturer bmc.Manufacturer) utils.
 	}
 	if cfg.DefaultPasswordLength != nil {
 		policy.FallbackLength = cfg.DefaultPasswordLength
+		// Also use DefaultPasswordLength as a global MaxLengthCap so it limits
+		// generation even when the BMC over-reports MaxPasswordLength (e.g. iDRAC
+		// reporting 122) and no vendor-specific entry matches (e.g. manufacturer
+		// is empty during bootstrap). A vendor entry can still override this with
+		// its own MaxPasswordLength.
+		policy.MaxLengthCap = cfg.DefaultPasswordLength
 	}
 	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
-		policy.MaxLengthCap = vp.MaxPasswordLength
+		if vp.MaxPasswordLength != nil {
+			policy.MaxLengthCap = vp.MaxPasswordLength
+		}
 		policy.SpecialChars = vp.SpecialChars
 	}
 	return policy
