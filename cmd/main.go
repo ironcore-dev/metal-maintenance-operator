@@ -185,6 +185,10 @@ func main() {
 		"Skip TLS certificate validation for BMC connections.")
 	flag.DurationVar(&resyncInterval, "resync-interval", 2*time.Minute,
 		"Resync interval for BMC/BIOS maintenance controllers.")
+	var bootstrapRetryDelay time.Duration
+	flag.DurationVar(&bootstrapRetryDelay, "bmcuser-bootstrap-retry-delay", 30*time.Second,
+		"Back-off before re-attempting a BMCUser credential prove that has not yet succeeded "+
+			"(e.g. a freshly created BMC account that does not authenticate immediately).")
 	var defaultFailedAutoRetryCountInt int
 	flag.IntVar(&defaultFailedAutoRetryCountInt, "default-failed-auto-retry-count", 3,
 		"Number of automatic retries before a maintenance task is marked failed.")
@@ -215,6 +219,16 @@ func main() {
 	flag.StringVar(&firmwareUpdateConfigNamespace, "firmwareupdate-config-namespace", "",
 		"Namespace of the FirmwareUpdate ConfigMap. Defaults to POD_NAMESPACE. Ignored when "+
 			"--firmwareupdate-config-name is empty.")
+
+	var (
+		bmcUserConfigName      string
+		bmcUserConfigNamespace string
+	)
+	flag.StringVar(&bmcUserConfigName, "bmcuser-config-name", "",
+		"Name of the ConfigMap holding BMCUser password-policy overrides (per-vendor max length and special "+
+			"characters, and the global fallback length). Leave empty (the default) to disable ConfigMap-based overrides.")
+	flag.StringVar(&bmcUserConfigNamespace, "bmcuser-config-namespace", "",
+		"Namespace of the BMCUser ConfigMap. Defaults to POD_NAMESPACE. Ignored when --bmcuser-config-name is empty.")
 
 	// Telemetry collector flags. The whole pipeline is gated by
 	// --enable-telemetry — when off (the default), zero telemetry
@@ -350,6 +364,16 @@ func main() {
 		}
 	}
 
+	if bmcUserConfigName != "" && bmcUserConfigNamespace == "" {
+		bmcUserConfigNamespace = os.Getenv("POD_NAMESPACE")
+		if bmcUserConfigNamespace == "" {
+			setupLog.Error(nil,
+				"BMCUser ConfigMap namespace resolution failed: neither "+
+					"--bmcuser-config-namespace nor POD_NAMESPACE is set")
+			os.Exit(1)
+		}
+	}
+
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
 	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
@@ -430,6 +454,7 @@ func main() {
 					namedConfigMapRefs(
 						enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
 						firmwareUpdateConfigNamespace, firmwareUpdateConfigName,
+						bmcUserConfigNamespace, bmcUserConfigName,
 					)...,
 				),
 				secretCacheByObject(
@@ -744,13 +769,33 @@ func main() {
 		}
 	}
 
+	var bmcUserConfigLoader *configloader.Loader[config.BMCUserConfig]
+	if bmcUserConfigName != "" && bmcUserConfigNamespace != "" {
+		bmcUserConfigLoader = &configloader.Loader[config.BMCUserConfig]{
+			Cache:     mgr.GetCache(),
+			Client:    mgr.GetClient(),
+			Namespace: bmcUserConfigNamespace,
+			Name:      bmcUserConfigName,
+			Parse:     config.ParseBMCUserConfig,
+			Log:       ctrl.Log.WithName("bmcuser-config-loader"),
+		}
+		if err := mgr.Add(bmcUserConfigLoader); err != nil {
+			setupLog.Error(err, "Unable to register BMCUser ConfigMap loader")
+			os.Exit(1)
+		}
+		setupLog.Info("Enabled BMCUser ConfigMap overrides",
+			"configMap", bmcUserConfigNamespace+"/"+bmcUserConfigName)
+	}
+
 	if err = (&baseboardctrl.BMCUserReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		ManagerNamespace:   managerNamespace,
-		DefaultProtocol:    protocol,
-		SkipCertValidation: skipCertValidation,
-		BMCOptions:         bmcOpts,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		ManagerNamespace:    managerNamespace,
+		DefaultProtocol:     protocol,
+		SkipCertValidation:  skipCertValidation,
+		BMCOptions:          bmcOpts,
+		BootstrapRetryDelay: bootstrapRetryDelay,
+		ConfigLoader:        bmcUserConfigLoader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUser controller")
 		os.Exit(1)
@@ -763,6 +808,7 @@ func main() {
 		DefaultProtocol:    protocol,
 		SkipCertValidation: skipCertValidation,
 		BMCOptions:         bmcOpts,
+		ConfigLoader:       bmcUserConfigLoader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUserSet controller")
 		os.Exit(1)
@@ -774,6 +820,7 @@ func main() {
 		SkipCertValidation: skipCertValidation,
 		BMCOptions:         bmcOpts,
 		ResyncInterval:     resyncInterval,
+		ConfigLoader:       bmcUserConfigLoader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUserRotation controller")
 		os.Exit(1)
@@ -864,6 +911,7 @@ type namedConfigMapRef struct {
 func namedConfigMapRefs(
 	telemetryEnabled bool, telemetryNS, telemetryName string,
 	firmwareUpdateConfigNS, firmwareUpdateConfigName string,
+	bmcUserConfigNS, bmcUserConfigName string,
 ) []namedConfigMapRef {
 	var refs []namedConfigMapRef
 	if telemetryEnabled && telemetryNS != "" && telemetryName != "" {
@@ -871,6 +919,9 @@ func namedConfigMapRefs(
 	}
 	if firmwareUpdateConfigName != "" && firmwareUpdateConfigNS != "" {
 		refs = append(refs, namedConfigMapRef{Namespace: firmwareUpdateConfigNS, Name: firmwareUpdateConfigName})
+	}
+	if bmcUserConfigName != "" && bmcUserConfigNS != "" {
+		refs = append(refs, namedConfigMapRef{Namespace: bmcUserConfigNS, Name: bmcUserConfigName})
 	}
 	return refs
 }

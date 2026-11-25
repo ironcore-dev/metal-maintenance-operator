@@ -23,6 +23,8 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -39,6 +41,11 @@ const (
 	conditionTypeCredentialsBootstrapped = "CredentialsBootstrapped"
 	reasonCredentialsBootstrapped        = "CredentialsBootstrapped"
 	reasonCredentialsPending             = "CredentialsPending"
+	// reasonLoginFailed marks CredentialsBootstrapped=False when the generated
+	// credential was applied to the BMC account but the subsequent live-auth
+	// check (bmcConnectionTest) was rejected with HTTP 401/403. This distinguishes
+	// "attempted and rejected" from the generic "not yet proven" pending state.
+	reasonLoginFailed = "LoginFailed"
 
 	// conditionTypePasswordValid is False when a user-supplied password in the
 	// referenced BMCSecret violates the BMC's reported length limits. The controller
@@ -63,6 +70,19 @@ func (r *BMCUserReconciler) rotationFailureDelay() time.Duration {
 	return 5 * time.Minute
 }
 
+// bootstrapRetryDelay returns the back-off before re-attempting a credential
+// prove that has not yet succeeded, defaulting to 30 seconds. A newly created
+// BMC account may not authenticate on the immediately following request (e.g. a
+// BMC that activates the account with a short delay), and the live-auth check
+// swallows HTTP 401/403 rather than erroring, so without this requeue a stuck
+// BMCUser would only be re-driven by an incidental watch event.
+func (r *BMCUserReconciler) bootstrapRetryDelay() time.Duration {
+	if r.BootstrapRetryDelay > 0 {
+		return r.BootstrapRetryDelay
+	}
+	return 30 * time.Second
+}
+
 // BMCUserReconciler reconciles a BMCUser object
 type BMCUserReconciler struct {
 	client.Client
@@ -77,6 +97,36 @@ type BMCUserReconciler struct {
 	// RotationFailureRetryDelay is the minimum back-off before retrying after a
 	// failed rotation. Defaults to 5 minutes.
 	RotationFailureRetryDelay time.Duration
+	// BootstrapRetryDelay is the back-off before re-attempting a credential prove
+	// that has not yet succeeded (e.g. a freshly created BMC account that does not
+	// authenticate on the immediately following request). Defaults to 30 seconds.
+	BootstrapRetryDelay time.Duration
+	// ConfigLoader, when set, supplies live-reloaded password-policy overrides
+	// (per-vendor max length and special characters, and the global fallback
+	// length) from a ConfigMap. When nil the built-in defaults apply.
+	ConfigLoader *configloader.Loader[config.BMCUserConfig]
+}
+
+// passwordPolicy builds the per-reconcile password policy for the given
+// (already normalized) manufacturer from the live ConfigMap, falling back to
+// built-in defaults for any field the config leaves unset.
+func (r *BMCUserReconciler) passwordPolicy(manufacturer bmc.Manufacturer) utils.PasswordPolicy {
+	var policy utils.PasswordPolicy
+	if r.ConfigLoader == nil {
+		return policy
+	}
+	cfg := r.ConfigLoader.Config()
+	if cfg == nil {
+		return policy
+	}
+	if cfg.DefaultPasswordLength != nil {
+		policy.FallbackLength = cfg.DefaultPasswordLength
+	}
+	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
+		policy.MaxLengthCap = vp.MaxPasswordLength
+		policy.SpecialChars = vp.SpecialChars
+	}
+	return policy
 }
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers,verbs=get;list;watch;create;update;patch;delete
@@ -86,6 +136,7 @@ type BMCUserReconciler struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -194,6 +245,14 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		if requeue {
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		// The account was just created/updated with the generated credential and
+		// Status.ID is now set. Re-run the prove step in this same reconcile so the
+		// credential is verified immediately, rather than waiting for an incidental
+		// watch event to re-enter reconcile. Without this, EffectiveBMCSecretRef is
+		// never set on the reconcile that creates the account.
+		if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update effective BMCSecret after account creation: %w", err)
+		}
 	}
 	if err := r.reconcileSecretRef(ctx, user, bmcSecret, bmcClient, bmcObj); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to reconcile BMCSecret reference: %w", err)
@@ -206,6 +265,16 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	}
 	if err := r.updateReadyCondition(ctx, user); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update Ready condition: %w", err)
+	}
+	// If the credential still has not been proven, the generated password was
+	// applied but the live-auth check did not accept it (e.g. the BMC has not yet
+	// activated the account). bmcConnectionTest swallows HTTP 401/403, so requeue
+	// explicitly with a back-off to re-attempt the prove rather than relying on an
+	// incidental watch event. updateCredentialsBootstrappedCondition above surfaces
+	// the stuck state as CredentialsBootstrapped=False (reason LoginFailed).
+	if user.Status.EffectiveBMCSecretRef == nil {
+		log.V(1).Info("Credential not yet proven after account reconcile, requeueing", "retryAfter", r.bootstrapRetryDelay())
+		return ctrl.Result{RequeueAfter: r.bootstrapRetryDelay()}, nil
 	}
 	return r.ensureBMCUserRotation(ctx, user)
 }
@@ -224,7 +293,8 @@ func (r *BMCUserReconciler) ensureBMCAccount(ctx context.Context, user *baseboar
 	if err != nil {
 		return false, fmt.Errorf("failed to get account service: %w", err)
 	}
-	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
+	manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
+	if err := utils.ValidatePasswordLengthWithPolicy(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, manufacturer, r.passwordPolicy(manufacturer)); err != nil {
 		log.Info("Password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
 		if condErr := r.setPasswordValidCondition(ctx, user, false, err.Error()); condErr != nil {
 			return false, condErr
@@ -455,16 +525,34 @@ func (r *BMCUserReconciler) hasPeerRotationInFlight(ctx context.Context, user *b
 // previous CreateOrUpdateAccount failed) it reuses the already-generated secret
 // owned by this user so that each reconcile cycle does not accumulate orphans.
 // When the existing Spec.BMCSecretRef already points at a secret owned by user,
-// that secret is reused; otherwise a new one is generated.
+// that secret is reused only when its password is still valid for the BMC's
+// (now-known) manufacturer and policy (length and allowed character set);
+// otherwise a fresh one is generated. Revalidating on reuse lets a user recover
+// from a credential that was generated before the BMC manufacturer/policy was
+// known (wrong character set / over-length), which the immutable secret would
+// otherwise pin forever.
 func (r *BMCUserReconciler) ensureNewBMCSecretForUser(ctx context.Context, bmcClient bmc.BMC, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 
 	// If Spec.BMCSecretRef already names a secret owned by this user, it was
-	// generated in a prior reconcile. Reuse it instead of creating another one.
+	// generated in a prior reconcile. Reuse it only if its password still meets
+	// the BMC's reported length limits and the policy's allowed character set for
+	// this manufacturer; a secret generated before Manufacturer/policy was known
+	// may violate them and must be regenerated.
 	if user.Spec.BMCSecretRef != nil {
 		existing := &metalv1alpha1.BMCSecret{}
 		if err := r.Get(ctx, client.ObjectKey{Name: user.Spec.BMCSecretRef.Name}, existing); err == nil {
 			if metav1.IsControlledBy(existing, user) {
+				_, password, credErr := bmcutils.GetBMCCredentialsFromSecret(existing)
+				if credErr == nil {
+					if accountService, svcErr := bmcClient.GetAccountService(); svcErr == nil {
+						manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
+						if valErr := utils.ValidatePasswordAgainstPolicy(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, manufacturer, r.passwordPolicy(manufacturer)); valErr != nil {
+							log.Info("Previously generated BMCSecret is invalid for this BMC; regenerating", "BMCSecret", existing.Name, "reason", valErr.Error())
+							return r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj)
+						}
+					}
+				}
 				log.V(1).Info("Reusing previously generated BMCSecret for re-onboard retry", "BMCSecret", existing.Name)
 				return nil
 			}
@@ -488,7 +576,8 @@ func (r *BMCUserReconciler) ensureBMCSecretForUser(ctx context.Context, bmcClien
 	if fallback <= 0 {
 		fallback = 20
 	}
-	newPassword, err := utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
+	manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
+	newPassword, err := utils.GenerateHTMLSafePasswordWithPolicy(manufacturer, accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback, r.passwordPolicy(manufacturer))
 	if err != nil {
 		return fmt.Errorf("failed to generate new password for BMC account %s: %w", user.Name, err)
 	}
@@ -534,7 +623,8 @@ func (r *BMCUserReconciler) handleUpdatedSecretRef(ctx context.Context, user *ba
 	if err != nil {
 		return fmt.Errorf("failed to get account service: %w", err)
 	}
-	if err := utils.ValidatePasswordLength(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, bmc.Manufacturer(bmcObj.Status.Manufacturer)); err != nil {
+	manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
+	if err := utils.ValidatePasswordLengthWithPolicy(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, manufacturer, r.passwordPolicy(manufacturer)); err != nil {
 		log.Info("Updated password in referenced BMCSecret violates BMC length limits; not applying", "BMCSecret", bmcSecret.Name, "error", err.Error())
 		return r.setPasswordValidCondition(ctx, user, false, err.Error())
 	}
@@ -618,6 +708,35 @@ func (r *BMCUserReconciler) syncBMCSecretRefToBMC(ctx context.Context, user *bas
 		return fmt.Errorf("failed to patch BMC.Spec.BMCSecretRef: %w", err)
 	}
 	return nil
+}
+
+// resolveManufacturer returns the normalized BMC manufacturer used for
+// vendor-specific password handling. It prefers BMC.Status.Manufacturer when the
+// metal-operator BMC controller has already populated it, but during onboarding
+// that field is often still empty: the BMC controller can only discover the
+// manufacturer once it has a working credential in BMC.Spec.BMCSecretRef, which
+// is exactly what this bootstrap flow is in the middle of establishing
+// (chicken-and-egg). In that case we read the manufacturer directly from the live
+// bootstrap client's Redfish Manager — the same source the BMC controller uses —
+// so a vendor-correct character set and length rule are applied from the very
+// first generated credential. The value is normalized to the canonical
+// bmc.Manufacturer constant (e.g. "Dell" -> "Dell Inc.") so it matches the
+// generator's vendor config. An unresolved manufacturer is returned empty, which
+// leaves the generator on its generic default.
+func (r *BMCUserReconciler) resolveManufacturer(ctx context.Context, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) bmc.Manufacturer {
+	log := ctrl.LoggerFrom(ctx)
+	if bmcObj.Status.Manufacturer != "" {
+		return utils.NormalizeManufacturer(bmcObj.Status.Manufacturer)
+	}
+	manager, err := bmcClient.DiscoverManager(ctx)
+	if err != nil || manager == nil || manager.Manufacturer == "" {
+		if err != nil {
+			log.V(1).Info("Could not discover BMC manufacturer from live client; proceeding with generic defaults", "BMC", bmcObj.Name, "error", err.Error())
+		}
+		return utils.NormalizeManufacturer(bmcObj.Status.Manufacturer)
+	}
+	log.V(1).Info("Resolved BMC manufacturer from live client", "BMC", bmcObj.Name, "Manufacturer", manager.Manufacturer)
+	return utils.NormalizeManufacturer(manager.Manufacturer)
 }
 
 // getBMCClient builds an authenticated BMC client for the given BMC using the
@@ -1100,11 +1219,29 @@ func (r *BMCUserReconciler) updateCredentialsBootstrappedCondition(ctx context.C
 			ObservedGeneration: user.Generation,
 		}
 	} else {
+		// Distinguish "the account exists on the BMC but its credential was not
+		// accepted by the live-auth check" (LoginFailed) from the generic
+		// "not yet attempted / still in progress" pending state. LoginFailed only
+		// applies when login actually failed (no EffectiveBMCSecretRef) while the
+		// account exists (Status.ID set): the generated password was applied but
+		// bmcConnectionTest rejected it (HTTP 401/403, swallowed there). When an
+		// effective ref already exists, login succeeded and bootstrapped was only
+		// flipped false because factory-account handling is still pending — that is
+		// not a login failure, so keep the generic pending reason.
+		reason := reasonCredentialsPending
+		message := "Waiting for credential bootstrap to complete"
+		if user.Status.ID != "" && user.Status.EffectiveBMCSecretRef == nil {
+			reason = reasonLoginFailed
+			message = "BMC account exists but its generated credential was rejected (login failed); retrying"
+			if user.Spec.BMCSecretRef != nil {
+				message = fmt.Sprintf("BMC account exists but credential in BMCSecret %q was rejected (login failed); retrying", user.Spec.BMCSecretRef.Name)
+			}
+		}
 		cond = metav1.Condition{
 			Type:               conditionTypeCredentialsBootstrapped,
 			Status:             metav1.ConditionFalse,
-			Reason:             reasonCredentialsPending,
-			Message:            "Waiting for credential bootstrap to complete",
+			Reason:             reason,
+			Message:            message,
 			ObservedGeneration: user.Generation,
 		}
 	}
