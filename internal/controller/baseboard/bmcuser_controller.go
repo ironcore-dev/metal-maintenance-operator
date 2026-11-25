@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"time"
 
@@ -886,6 +887,15 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 			var httpErr *schemas.Error
 			if errors.As(err, &httpErr) && (httpErr.HTTPReturnedStatusCode == 401 || httpErr.HTTPReturnedStatusCode == 403) {
 				return true, nil
+			}
+			// A TCP-level error (connection reset, refused, timeout) means the BMC is
+			// temporarily unreachable, not that the credentials are wrong. Treat it as
+			// transient so the caller's requeue-while-unproven logic retries rather than
+			// surfacing a hard reconciler error.
+			if netErr, ok := errors.AsType[net.Error](err); ok {
+				log := ctrl.LoggerFrom(ctx)
+				log.V(1).Info("Transient network error during BMC connection test; will retry", "error", netErr.Error())
+				return false, nil
 			}
 			return false, fmt.Errorf("failed to verify BMC credentials: %w", err)
 		}
