@@ -179,7 +179,7 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 				accountService.MaxPasswordLength, minLength,
 			))
 		}
-		newPassword, err = utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
+		newPassword, err = utils.GenerateHTMLSafePassword(utils.NormalizeManufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to generate new password: %w", err)
 		}

@@ -840,4 +840,60 @@ var _ = Describe("BMCUser Controller", func() {
 		Expect(mockServers[0].GetAccountNames()).To(HaveKey("retain-admin"))
 	})
 
+	It("should surface CredentialsBootstrapped=False reason LoginFailed when the account exists but the credential is not proven", func(ctx SpecContext) {
+		By("Creating a BMCUser referencing a non-existent BMC so the live reconciler does not mutate its status")
+		user := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{Name: "login-failed-user"},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName:     "login-failed",
+				RoleID:       "Administrator",
+				BMCSecretRef: &v1.LocalObjectReference{Name: bmcSecret.Name},
+				BMCRef:       &v1.LocalObjectReference{Name: "does-not-exist-bmc"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Succeed())
+
+		By("Simulating an account that exists on the BMC (Status.ID set) but whose credential did not authenticate (EffectiveBMCSecretRef nil)")
+		userBase := user.DeepCopy()
+		user.Status.ID = "1"
+		user.Status.EffectiveBMCSecretRef = nil
+		Expect(k8sClient.Status().Patch(ctx, user, client.MergeFrom(userBase))).To(Succeed())
+
+		r := &BMCUserReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		Expect(r.updateCredentialsBootstrappedCondition(ctx, user)).To(Succeed())
+
+		By("Verifying CredentialsBootstrapped is False with reason LoginFailed")
+		Eventually(Object(user)).Should(HaveField("Status.Conditions", ContainElement(SatisfyAll(
+			HaveField("Type", Equal(conditionTypeCredentialsBootstrapped)),
+			HaveField("Status", Equal(metav1.ConditionFalse)),
+			HaveField("Reason", Equal(reasonLoginFailed)),
+		))))
+	})
+
+	It("should use reason CredentialsPending when the account does not exist yet (Status.ID empty)", func(ctx SpecContext) {
+		By("Creating a BMCUser referencing a non-existent BMC so the live reconciler does not mutate its status")
+		user := &baseboardv1alpha1.BMCUser{
+			ObjectMeta: metav1.ObjectMeta{Name: "pending-user"},
+			Spec: baseboardv1alpha1.BMCUserSpec{
+				UserName:     "pending",
+				RoleID:       "Administrator",
+				BMCSecretRef: &v1.LocalObjectReference{Name: bmcSecret.Name},
+				BMCRef:       &v1.LocalObjectReference{Name: "does-not-exist-bmc"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, user)).To(Succeed())
+		Eventually(Get(user)).Should(Succeed())
+
+		r := &BMCUserReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		Expect(r.updateCredentialsBootstrappedCondition(ctx, user)).To(Succeed())
+
+		By("Verifying CredentialsBootstrapped is False with reason CredentialsPending")
+		Eventually(Object(user)).Should(HaveField("Status.Conditions", ContainElement(SatisfyAll(
+			HaveField("Type", Equal(conditionTypeCredentialsBootstrapped)),
+			HaveField("Status", Equal(metav1.ConditionFalse)),
+			HaveField("Reason", Equal(reasonCredentialsPending)),
+		))))
+	})
+
 })

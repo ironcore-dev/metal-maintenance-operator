@@ -769,7 +769,7 @@ func (r *BMCUserSetReconciler) handleFactoryAccountDisable(ctx context.Context, 
 			// username) so the account credential is preserved and re-enable is possible.
 			var disablePassword string
 			if retainCredential {
-				newPassword, err := utils.GenerateHTMLSafePassword(bmc.Manufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, r.DefaultPasswordLength)
+				newPassword, err := utils.GenerateHTMLSafePassword(utils.NormalizeManufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, r.DefaultPasswordLength)
 				if err != nil {
 					return fmt.Errorf("BMC %s: failed to generate password for factory disable: %w", bmcObj.Name, err)
 				}
