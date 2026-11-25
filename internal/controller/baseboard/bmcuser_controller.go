@@ -63,6 +63,12 @@ const (
 	reasonNotReady     = "NotReady"
 )
 
+// errBMCUnreachable is returned by bmcConnectionTest when the BMC is temporarily
+// unreachable due to a network-level error (connection reset, timeout, etc.).
+// It signals an inconclusive result: the credential was not rejected, but could
+// not be verified. Callers should requeue rather than treat it as success or failure.
+var errBMCUnreachable = errors.New("BMC temporarily unreachable")
+
 // rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
 func (r *BMCUserReconciler) rotationFailureDelay() time.Duration {
 	if r.RotationFailureRetryDelay > 0 {
@@ -837,6 +843,9 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 
 	invalidCredentials, err := r.bmcConnectionTest(ctx, secret, bmcObj)
 	if err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			return nil
+		}
 		return fmt.Errorf("failed to test BMC connection with BMCSecret %s: %w", secret.Name, err)
 	}
 	if invalidCredentials {
@@ -860,6 +869,9 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 
 	invalidCredentials, err = r.bmcConnectionTest(ctx, effSecret, bmcObj)
 	if err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			return nil
+		}
 		return fmt.Errorf("failed to test BMC connection with effectiveSecret %s: %w", effSecret.Name, err)
 	}
 	if invalidCredentials {
@@ -903,7 +915,7 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 			if netErr, ok := errors.AsType[net.Error](err); ok {
 				log := ctrl.LoggerFrom(ctx)
 				log.V(1).Info("Transient network error during BMC connection test; will retry", "error", netErr.Error())
-				return false, nil
+				return false, errBMCUnreachable
 			}
 			return false, fmt.Errorf("failed to verify BMC credentials: %w", err)
 		}

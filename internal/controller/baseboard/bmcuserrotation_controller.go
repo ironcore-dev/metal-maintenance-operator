@@ -276,6 +276,11 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 
 	invalidCredentials, err := r.bmcConnectionTest(ctx, secret, bmcObj)
 	if err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			log := ctrl.LoggerFrom(ctx)
+			log.V(1).Info("BMC unreachable during credential verification; requeueing without promoting", "secret", secret.Name)
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("failed to test new credentials: %w", err)
 	}
 	if invalidCredentials {
@@ -436,7 +441,7 @@ func (r *BMCUserRotationReconciler) bmcConnectionTest(ctx context.Context, secre
 			if netErr, ok := errors.AsType[net.Error](err); ok {
 				log := ctrl.LoggerFrom(ctx)
 				log.V(1).Info("Transient network error during BMC connection test; will retry", "error", netErr.Error())
-				return false, nil
+				return false, errBMCUnreachable
 			}
 			return false, fmt.Errorf("failed to verify BMC credentials: %w", err)
 		}
