@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -64,9 +65,15 @@ func (r *BMCUserRotationReconciler) passwordPolicy(manufacturer bmc.Manufacturer
 	}
 	if cfg.DefaultPasswordLength != nil {
 		policy.FallbackLength = cfg.DefaultPasswordLength
+		policy.MaxLengthCap = cfg.DefaultPasswordLength
+	}
+	if cfg.DefaultSpecialChars != nil {
+		policy.SpecialChars = cfg.DefaultSpecialChars
 	}
 	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
-		policy.MaxLengthCap = vp.MaxPasswordLength
+		if vp.MaxPasswordLength != nil {
+			policy.MaxLengthCap = vp.MaxPasswordLength
+		}
 		policy.SpecialChars = vp.SpecialChars
 	}
 	return policy
@@ -272,6 +279,11 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 
 	invalidCredentials, err := r.bmcConnectionTest(ctx, secret, bmcObj)
 	if err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			log := ctrl.LoggerFrom(ctx)
+			log.V(1).Info("BMC unreachable during credential verification; requeueing without promoting", "secret", secret.Name)
+			return ctrl.Result{RequeueAfter: r.ResyncInterval}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("failed to test new credentials: %w", err)
 	}
 	if invalidCredentials {
@@ -428,6 +440,11 @@ func (r *BMCUserRotationReconciler) bmcConnectionTest(ctx context.Context, secre
 		if _, err := bmcClient.GetAccountService(); err != nil {
 			if httpErr, ok := errors.AsType[*schemas.Error](err); ok && (httpErr.HTTPReturnedStatusCode == 401 || httpErr.HTTPReturnedStatusCode == 403) {
 				return true, nil
+			}
+			if netErr, ok := errors.AsType[net.Error](err); ok {
+				log := ctrl.LoggerFrom(ctx)
+				log.V(1).Info("Transient network error during BMC connection test; will retry", "error", netErr.Error())
+				return false, errBMCUnreachable
 			}
 			return false, fmt.Errorf("failed to verify BMC credentials: %w", err)
 		}

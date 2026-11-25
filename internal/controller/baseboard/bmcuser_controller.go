@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"time"
 
@@ -61,6 +62,12 @@ const (
 	reasonReady        = "Ready"
 	reasonNotReady     = "NotReady"
 )
+
+// errBMCUnreachable is returned by bmcConnectionTest when the BMC is temporarily
+// unreachable due to a network-level error (connection reset, timeout, etc.).
+// It signals an inconclusive result: the credential was not rejected, but could
+// not be verified. Callers should requeue rather than treat it as success or failure.
+var errBMCUnreachable = errors.New("BMC temporarily unreachable")
 
 // rotationFailureRetryDelay returns the configured back-off delay, defaulting to 5 minutes.
 func (r *BMCUserReconciler) rotationFailureDelay() time.Duration {
@@ -121,9 +128,20 @@ func (r *BMCUserReconciler) passwordPolicy(manufacturer bmc.Manufacturer) utils.
 	}
 	if cfg.DefaultPasswordLength != nil {
 		policy.FallbackLength = cfg.DefaultPasswordLength
+		// Also use DefaultPasswordLength as a global MaxLengthCap so it limits
+		// generation even when the BMC over-reports MaxPasswordLength (e.g. iDRAC
+		// reporting 122) and no vendor-specific entry matches (e.g. manufacturer
+		// is empty during bootstrap). A vendor entry can still override this with
+		// its own MaxPasswordLength.
+		policy.MaxLengthCap = cfg.DefaultPasswordLength
+	}
+	if cfg.DefaultSpecialChars != nil {
+		policy.SpecialChars = cfg.DefaultSpecialChars
 	}
 	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
-		policy.MaxLengthCap = vp.MaxPasswordLength
+		if vp.MaxPasswordLength != nil {
+			policy.MaxLengthCap = vp.MaxPasswordLength
+		}
 		policy.SpecialChars = vp.SpecialChars
 	}
 	return policy
@@ -828,6 +846,9 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 
 	invalidCredentials, err := r.bmcConnectionTest(ctx, secret, bmcObj)
 	if err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			return nil
+		}
 		return fmt.Errorf("failed to test BMC connection with BMCSecret %s: %w", secret.Name, err)
 	}
 	if invalidCredentials {
@@ -851,6 +872,9 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 
 	invalidCredentials, err = r.bmcConnectionTest(ctx, effSecret, bmcObj)
 	if err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			return nil
+		}
 		return fmt.Errorf("failed to test BMC connection with effectiveSecret %s: %w", effSecret.Name, err)
 	}
 	if invalidCredentials {
@@ -886,6 +910,15 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 			var httpErr *schemas.Error
 			if errors.As(err, &httpErr) && (httpErr.HTTPReturnedStatusCode == 401 || httpErr.HTTPReturnedStatusCode == 403) {
 				return true, nil
+			}
+			// A TCP-level error (connection reset, refused, timeout) means the BMC is
+			// temporarily unreachable, not that the credentials are wrong. Treat it as
+			// transient so the caller's requeue-while-unproven logic retries rather than
+			// surfacing a hard reconciler error.
+			if netErr, ok := errors.AsType[net.Error](err); ok {
+				log := ctrl.LoggerFrom(ctx)
+				log.V(1).Info("Transient network error during BMC connection test; will retry", "error", netErr.Error())
+				return false, errBMCUnreachable
 			}
 			return false, fmt.Errorf("failed to verify BMC credentials: %w", err)
 		}

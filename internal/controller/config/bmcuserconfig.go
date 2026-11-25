@@ -66,6 +66,15 @@ type BMCUserConfig struct {
 	// default (20) applies.
 	DefaultPasswordLength *uint `yaml:"defaultPasswordLength,omitempty"`
 
+	// DefaultSpecialChars overrides the set of special (non-alphanumeric)
+	// characters permitted in generated passwords for any vendor not explicitly
+	// listed in Vendors. Use it to exclude characters that some firmware rejects
+	// (e.g. '/'). A per-vendor specialChars entry takes precedence over this
+	// default. A nil value keeps the generator's built-in vendor defaults; an
+	// empty string is rejected (a password needs some special characters for
+	// complexity).
+	DefaultSpecialChars *string `yaml:"defaultSpecialChars,omitempty"`
+
 	// Vendors maps a canonical manufacturer string (e.g. "Dell Inc.") to a
 	// per-vendor password policy override. A manufacturer absent from the map
 	// uses the operator's built-in defaults for that vendor.
@@ -96,6 +105,7 @@ func ValidateBMCUserConfig(cfg *BMCUserConfig) field.ErrorList {
 
 	errs = validateAPIVersion(errs, root.Child("apiVersion"), cfg.APIVersion, BMCUserAPIVersion)
 	errs = validatePasswordLengthPtr(errs, root.Child("defaultPasswordLength"), cfg.DefaultPasswordLength)
+	errs = validateSpecialChars(errs, root.Child("defaultSpecialChars"), cfg.DefaultSpecialChars)
 
 	for vendor, policy := range cfg.Vendors {
 		vPath := root.Child("vendors").Key(vendor)
@@ -104,17 +114,23 @@ func ValidateBMCUserConfig(cfg *BMCUserConfig) field.ErrorList {
 		}
 		errs = validatePasswordLengthPtr(errs, vPath.Child("maxPasswordLength"), policy.MaxPasswordLength)
 		if policy.SpecialChars != nil {
-			if *policy.SpecialChars == "" {
-				errs = append(errs, field.Invalid(vPath.Child("specialChars"), *policy.SpecialChars,
-					"must not be empty; omit the field to keep the vendor default"))
-			} else if i := strings.IndexFunc(*policy.SpecialChars, isAlphanumeric); i >= 0 {
-				// Letters and digits are always permitted in generated passwords, so
-				// listing them here is meaningless and likely a mistake. Only the set
-				// of allowed *special* characters belongs in specialChars.
-				errs = append(errs, field.Invalid(vPath.Child("specialChars"), *policy.SpecialChars,
-					"must contain only special (non-alphanumeric) characters"))
-			}
+			errs = validateSpecialChars(errs, vPath.Child("specialChars"), policy.SpecialChars)
 		}
+	}
+	return errs
+}
+
+// validateSpecialChars appends errors if v is non-nil and not a valid special-character set.
+func validateSpecialChars(errs field.ErrorList, path *field.Path, v *string) field.ErrorList {
+	if v == nil {
+		return errs
+	}
+	if *v == "" {
+		errs = append(errs, field.Invalid(path, *v,
+			"must not be empty; omit the field to keep the vendor default"))
+	} else if i := strings.IndexFunc(*v, isAlphanumeric); i >= 0 {
+		errs = append(errs, field.Invalid(path, *v,
+			"must contain only special (non-alphanumeric) characters"))
 	}
 	return errs
 }

@@ -16,6 +16,7 @@ func TestParseBMCUserConfig(t *testing.T) {
 			yaml: `
 apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
 defaultPasswordLength: 24
+defaultSpecialChars: "!#$%*.?-@_"
 vendors:
   "Dell Inc.":
     maxPasswordLength: 20
@@ -68,6 +69,14 @@ vendors:
 			wantErr: true,
 		},
 		{
+			name: "empty defaultSpecialChars rejected",
+			yaml: `
+apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
+defaultSpecialChars: ""
+`,
+			wantErr: true,
+		},
+		{
 			name: "alphanumeric in specialChars rejected",
 			yaml: `
 apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
@@ -78,12 +87,27 @@ vendors:
 			wantErr: true,
 		},
 		{
+			name: "alphanumeric in defaultSpecialChars rejected",
+			yaml: `
+apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
+defaultSpecialChars: "!#a$"
+`,
+			wantErr: true,
+		},
+		{
 			name: "non-alphanumeric specialChars accepted",
 			yaml: `
 apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
 vendors:
   "Dell Inc.":
     specialChars: "!@"
+`,
+		},
+		{
+			name: "non-alphanumeric defaultSpecialChars accepted",
+			yaml: `
+apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
+defaultSpecialChars: "!@"
 `,
 		},
 	}
@@ -104,6 +128,7 @@ func TestParseBMCUserConfigValues(t *testing.T) {
 	cfg, err := ParseBMCUserConfig([]byte(`
 apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
 defaultPasswordLength: 24
+defaultSpecialChars: "!#$%*.?-@_"
 vendors:
   "Dell Inc.":
     maxPasswordLength: 20
@@ -114,6 +139,9 @@ vendors:
 	}
 	if cfg.DefaultPasswordLength == nil || *cfg.DefaultPasswordLength != 24 {
 		t.Fatalf("DefaultPasswordLength = %v, want 24", cfg.DefaultPasswordLength)
+	}
+	if cfg.DefaultSpecialChars == nil || *cfg.DefaultSpecialChars != "!#$%*.?-@_" {
+		t.Fatalf("DefaultSpecialChars = %v, want the configured set", cfg.DefaultSpecialChars)
 	}
 	dell, ok := cfg.Vendors["Dell Inc."]
 	if !ok {
