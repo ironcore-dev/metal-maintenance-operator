@@ -433,6 +433,11 @@ func (r *BMCUserRotationReconciler) bmcConnectionTest(ctx context.Context, secre
 				return true, nil
 			}
 		}
+		if netErr, ok := errors.AsType[net.Error](err); ok {
+			log := ctrl.LoggerFrom(ctx)
+			log.V(1).Info("Transient network error creating BMC client; will retry", "error", netErr.Error())
+			return false, errBMCUnreachable
+		}
 		return false, fmt.Errorf("failed to create BMC client: %w", err)
 	}
 	defer bmcClient.Logout()
