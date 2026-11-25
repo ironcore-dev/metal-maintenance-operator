@@ -135,6 +135,9 @@ func (r *BMCUserReconciler) passwordPolicy(manufacturer bmc.Manufacturer) utils.
 		// its own MaxPasswordLength.
 		policy.MaxLengthCap = cfg.DefaultPasswordLength
 	}
+	if cfg.DefaultSpecialChars != nil {
+		policy.SpecialChars = cfg.DefaultSpecialChars
+	}
 	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
 		if vp.MaxPasswordLength != nil {
 			policy.MaxLengthCap = vp.MaxPasswordLength

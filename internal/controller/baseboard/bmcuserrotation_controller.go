@@ -67,6 +67,9 @@ func (r *BMCUserRotationReconciler) passwordPolicy(manufacturer bmc.Manufacturer
 		policy.FallbackLength = cfg.DefaultPasswordLength
 		policy.MaxLengthCap = cfg.DefaultPasswordLength
 	}
+	if cfg.DefaultSpecialChars != nil {
+		policy.SpecialChars = cfg.DefaultSpecialChars
+	}
 	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
 		if vp.MaxPasswordLength != nil {
 			policy.MaxLengthCap = vp.MaxPasswordLength
