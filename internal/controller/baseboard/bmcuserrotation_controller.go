@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -428,6 +429,11 @@ func (r *BMCUserRotationReconciler) bmcConnectionTest(ctx context.Context, secre
 		if _, err := bmcClient.GetAccountService(); err != nil {
 			if httpErr, ok := errors.AsType[*schemas.Error](err); ok && (httpErr.HTTPReturnedStatusCode == 401 || httpErr.HTTPReturnedStatusCode == 403) {
 				return true, nil
+			}
+			if netErr, ok := errors.AsType[net.Error](err); ok {
+				log := ctrl.LoggerFrom(ctx)
+				log.V(1).Info("Transient network error during BMC connection test; will retry", "error", netErr.Error())
+				return false, nil
 			}
 			return false, fmt.Errorf("failed to verify BMC credentials: %w", err)
 		}
