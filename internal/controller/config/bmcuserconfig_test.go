@@ -67,6 +67,25 @@ vendors:
 `,
 			wantErr: true,
 		},
+		{
+			name: "alphanumeric in specialChars rejected",
+			yaml: `
+apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
+vendors:
+  "Dell Inc.":
+    specialChars: "!#a$"
+`,
+			wantErr: true,
+		},
+		{
+			name: "non-alphanumeric specialChars accepted",
+			yaml: `
+apiVersion: bmcuser.metal.ironcore.dev/v1alpha1
+vendors:
+  "Dell Inc.":
+    specialChars: "!@"
+`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

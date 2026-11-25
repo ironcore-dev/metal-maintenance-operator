@@ -14,6 +14,8 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/clientutils"
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -71,6 +73,54 @@ type BMCUserSetReconciler struct {
 	SkipCertValidation    bool
 	BMCOptions            bmc.Options
 	DefaultPasswordLength int
+	// ConfigLoader, when set, supplies live-reloaded password-policy overrides
+	// (per-vendor max length and special characters, and the global fallback
+	// length) from a ConfigMap, matching the BMCUser controller. When nil the
+	// built-in defaults apply.
+	ConfigLoader *configloader.Loader[config.BMCUserConfig]
+}
+
+// passwordPolicy builds the password policy for the given (already normalized)
+// manufacturer from the live ConfigMap, falling back to built-in defaults for
+// any field the config leaves unset. Mirrors BMCUserReconciler.passwordPolicy so
+// factory-account credentials honour the same configured length caps and
+// character sets as operator-account bootstrap.
+func (r *BMCUserSetReconciler) passwordPolicy(manufacturer bmc.Manufacturer) utils.PasswordPolicy {
+	var policy utils.PasswordPolicy
+	if r.ConfigLoader == nil {
+		return policy
+	}
+	cfg := r.ConfigLoader.Config()
+	if cfg == nil {
+		return policy
+	}
+	if cfg.DefaultPasswordLength != nil {
+		policy.FallbackLength = cfg.DefaultPasswordLength
+	}
+	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
+		policy.MaxLengthCap = vp.MaxPasswordLength
+		policy.SpecialChars = vp.SpecialChars
+	}
+	return policy
+}
+
+// resolveManufacturer returns the normalized BMC manufacturer for
+// vendor-specific password handling, preferring BMC.Status.Manufacturer and
+// falling back to the live client's Redfish Manager when it is not yet set.
+// Mirrors BMCUserReconciler.resolveManufacturer.
+func (r *BMCUserSetReconciler) resolveManufacturer(ctx context.Context, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) bmc.Manufacturer {
+	log := ctrl.LoggerFrom(ctx)
+	if bmcObj.Status.Manufacturer != "" {
+		return utils.NormalizeManufacturer(bmcObj.Status.Manufacturer)
+	}
+	manager, err := bmcClient.DiscoverManager(ctx)
+	if err != nil || manager == nil || manager.Manufacturer == "" {
+		if err != nil {
+			log.V(1).Info("Could not discover BMC manufacturer from live client; proceeding with generic defaults", "BMC", bmcObj.Name, "error", err.Error())
+		}
+		return utils.NormalizeManufacturer(bmcObj.Status.Manufacturer)
+	}
+	return utils.NormalizeManufacturer(manager.Manufacturer)
 }
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusersets,verbs=get;list;watch;create;update;patch;delete
@@ -83,6 +133,7 @@ type BMCUserSetReconciler struct {
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 func (r *BMCUserSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	set := &baseboardv1alpha1.BMCUserSet{}
@@ -769,7 +820,8 @@ func (r *BMCUserSetReconciler) handleFactoryAccountDisable(ctx context.Context, 
 			// username) so the account credential is preserved and re-enable is possible.
 			var disablePassword string
 			if retainCredential {
-				newPassword, err := utils.GenerateHTMLSafePassword(utils.NormalizeManufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, r.DefaultPasswordLength)
+				manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
+				newPassword, err := utils.GenerateHTMLSafePasswordWithPolicy(manufacturer, accountService.MaxPasswordLength, accountService.MinPasswordLength, r.DefaultPasswordLength, r.passwordPolicy(manufacturer))
 				if err != nil {
 					return fmt.Errorf("BMC %s: failed to generate password for factory disable: %w", bmcObj.Name, err)
 				}

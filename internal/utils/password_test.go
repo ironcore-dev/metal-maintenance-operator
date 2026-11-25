@@ -279,3 +279,33 @@ func containsRune(s string, r rune) bool {
 	}
 	return false
 }
+
+func TestValidatePasswordAgainstPolicy(t *testing.T) {
+	allowed := "!#$%*.?-@_" // excludes '/'
+	cap16a := uint(16)
+	cap16b := uint(16)
+	cases := []struct {
+		name    string
+		pw      string
+		maxLen  uint
+		policy  PasswordPolicy
+		wantErr bool
+	}{
+		{"within length, no charset policy", "abcDEF12!", 40, PasswordPolicy{}, false},
+		{"charset ok", "abcDEF12!#", 40, PasswordPolicy{SpecialChars: &allowed}, false},
+		{"charset violation (slash)", "abcDEF12/", 40, PasswordPolicy{SpecialChars: &allowed}, true},
+		{"length violation via policy cap", "aaaaaaaaaaaaaaaaaaaaaaaaa", 40, PasswordPolicy{MaxLengthCap: &cap16a}, true},
+		{"charset ok but over cap", "ab!#ab!#ab!#ab!#ab!#", 40, PasswordPolicy{SpecialChars: &allowed, MaxLengthCap: &cap16b}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidatePasswordAgainstPolicy(tc.pw, tc.maxLen, 8, bmc.ManufacturerLenovo, tc.policy)
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidatePasswordAgainstPolicy(%q) = nil, want error", tc.pw)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidatePasswordAgainstPolicy(%q) = %v, want nil", tc.pw, err)
+			}
+		})
+	}
+}

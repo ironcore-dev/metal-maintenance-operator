@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -102,12 +103,25 @@ func ValidateBMCUserConfig(cfg *BMCUserConfig) field.ErrorList {
 			errs = append(errs, field.Invalid(vPath, vendor, "vendor key must not be empty"))
 		}
 		errs = validatePasswordLengthPtr(errs, vPath.Child("maxPasswordLength"), policy.MaxPasswordLength)
-		if policy.SpecialChars != nil && *policy.SpecialChars == "" {
-			errs = append(errs, field.Invalid(vPath.Child("specialChars"), *policy.SpecialChars,
-				"must not be empty; omit the field to keep the vendor default"))
+		if policy.SpecialChars != nil {
+			if *policy.SpecialChars == "" {
+				errs = append(errs, field.Invalid(vPath.Child("specialChars"), *policy.SpecialChars,
+					"must not be empty; omit the field to keep the vendor default"))
+			} else if i := strings.IndexFunc(*policy.SpecialChars, isAlphanumeric); i >= 0 {
+				// Letters and digits are always permitted in generated passwords, so
+				// listing them here is meaningless and likely a mistake. Only the set
+				// of allowed *special* characters belongs in specialChars.
+				errs = append(errs, field.Invalid(vPath.Child("specialChars"), *policy.SpecialChars,
+					"must contain only special (non-alphanumeric) characters"))
+			}
 		}
 	}
 	return errs
+}
+
+// isAlphanumeric reports whether r is an ASCII letter or digit.
+func isAlphanumeric(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 // validatePasswordLengthPtr appends an error if v is non-nil and outside the

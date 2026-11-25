@@ -808,6 +808,7 @@ func main() {
 		DefaultProtocol:    protocol,
 		SkipCertValidation: skipCertValidation,
 		BMCOptions:         bmcOpts,
+		ConfigLoader:       bmcUserConfigLoader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUserSet controller")
 		os.Exit(1)
@@ -819,6 +820,7 @@ func main() {
 		SkipCertValidation: skipCertValidation,
 		BMCOptions:         bmcOpts,
 		ResyncInterval:     resyncInterval,
+		ConfigLoader:       bmcUserConfigLoader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create BMCUserRotation controller")
 		os.Exit(1)

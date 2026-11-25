@@ -18,6 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	baseboardv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/baseboard/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/configloader"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/controller/config"
 	utils "github.com/ironcore-dev/metal-maintenance-operator/internal/utils"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	"github.com/ironcore-dev/metal-operator/bmc"
@@ -39,6 +41,54 @@ type BMCUserRotationReconciler struct {
 	// MaxConnectionTestRetries is the maximum number of times the connection
 	// test is retried before the rotation is moved to Failed. Defaults to 10.
 	MaxConnectionTestRetries int
+	// ConfigLoader, when set, supplies live-reloaded password-policy overrides
+	// (per-vendor max length and special characters, and the global fallback
+	// length) from a ConfigMap, matching the BMCUser controller. When nil the
+	// built-in defaults apply.
+	ConfigLoader *configloader.Loader[config.BMCUserConfig]
+}
+
+// passwordPolicy builds the password policy for the given (already normalized)
+// manufacturer from the live ConfigMap, falling back to built-in defaults for
+// any field the config leaves unset. Mirrors BMCUserReconciler.passwordPolicy so
+// rotation honours the same configured length caps and character sets as initial
+// credential generation.
+func (r *BMCUserRotationReconciler) passwordPolicy(manufacturer bmc.Manufacturer) utils.PasswordPolicy {
+	var policy utils.PasswordPolicy
+	if r.ConfigLoader == nil {
+		return policy
+	}
+	cfg := r.ConfigLoader.Config()
+	if cfg == nil {
+		return policy
+	}
+	if cfg.DefaultPasswordLength != nil {
+		policy.FallbackLength = cfg.DefaultPasswordLength
+	}
+	if vp, ok := cfg.Vendors[string(manufacturer)]; ok {
+		policy.MaxLengthCap = vp.MaxPasswordLength
+		policy.SpecialChars = vp.SpecialChars
+	}
+	return policy
+}
+
+// resolveManufacturer returns the normalized BMC manufacturer for
+// vendor-specific password handling, preferring BMC.Status.Manufacturer and
+// falling back to the live client's Redfish Manager when it is not yet set.
+// Mirrors BMCUserReconciler.resolveManufacturer.
+func (r *BMCUserRotationReconciler) resolveManufacturer(ctx context.Context, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC) bmc.Manufacturer {
+	log := ctrl.LoggerFrom(ctx)
+	if bmcObj.Status.Manufacturer != "" {
+		return utils.NormalizeManufacturer(bmcObj.Status.Manufacturer)
+	}
+	manager, err := bmcClient.DiscoverManager(ctx)
+	if err != nil || manager == nil || manager.Manufacturer == "" {
+		if err != nil {
+			log.V(1).Info("Could not discover BMC manufacturer from live client; proceeding with generic defaults", "BMC", bmcObj.Name, "error", err.Error())
+		}
+		return utils.NormalizeManufacturer(bmcObj.Status.Manufacturer)
+	}
+	return utils.NormalizeManufacturer(manager.Manufacturer)
 }
 
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcuserrotations,verbs=get;list;watch;create;update;patch;delete
@@ -47,6 +97,7 @@ type BMCUserRotationReconciler struct {
 // +kubebuilder:rbac:groups=baseboard.metal.ironcore.dev,resources=bmcusers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=bmcsecrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // maxRetries returns the configured connection-test retry limit, defaulting to 10.
 func (r *BMCUserRotationReconciler) maxRetries() int {
@@ -179,7 +230,8 @@ func (r *BMCUserRotationReconciler) rotateWithClient(ctx context.Context, rotati
 				accountService.MaxPasswordLength, minLength,
 			))
 		}
-		newPassword, err = utils.GenerateHTMLSafePassword(utils.NormalizeManufacturer(bmcObj.Status.Manufacturer), accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback)
+		manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
+		newPassword, err = utils.GenerateHTMLSafePasswordWithPolicy(manufacturer, accountService.MaxPasswordLength, accountService.MinPasswordLength, fallback, r.passwordPolicy(manufacturer))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to generate new password: %w", err)
 		}

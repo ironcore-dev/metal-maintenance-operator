@@ -526,17 +526,19 @@ func (r *BMCUserReconciler) hasPeerRotationInFlight(ctx context.Context, user *b
 // owned by this user so that each reconcile cycle does not accumulate orphans.
 // When the existing Spec.BMCSecretRef already points at a secret owned by user,
 // that secret is reused only when its password is still valid for the BMC's
-// (now-known) manufacturer; otherwise a fresh one is generated. Revalidating on
-// reuse lets a user recover from a credential that was generated before the BMC
-// manufacturer was discovered (wrong character set / over-length), which the
-// immutable secret would otherwise pin forever.
+// (now-known) manufacturer and policy (length and allowed character set);
+// otherwise a fresh one is generated. Revalidating on reuse lets a user recover
+// from a credential that was generated before the BMC manufacturer/policy was
+// known (wrong character set / over-length), which the immutable secret would
+// otherwise pin forever.
 func (r *BMCUserReconciler) ensureNewBMCSecretForUser(ctx context.Context, bmcClient bmc.BMC, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) error {
 	log := ctrl.LoggerFrom(ctx)
 
 	// If Spec.BMCSecretRef already names a secret owned by this user, it was
 	// generated in a prior reconcile. Reuse it only if its password still meets
-	// the BMC's reported length limits for this manufacturer; a secret generated
-	// before Manufacturer was known may violate them and must be regenerated.
+	// the BMC's reported length limits and the policy's allowed character set for
+	// this manufacturer; a secret generated before Manufacturer/policy was known
+	// may violate them and must be regenerated.
 	if user.Spec.BMCSecretRef != nil {
 		existing := &metalv1alpha1.BMCSecret{}
 		if err := r.Get(ctx, client.ObjectKey{Name: user.Spec.BMCSecretRef.Name}, existing); err == nil {
@@ -545,7 +547,7 @@ func (r *BMCUserReconciler) ensureNewBMCSecretForUser(ctx context.Context, bmcCl
 				if credErr == nil {
 					if accountService, svcErr := bmcClient.GetAccountService(); svcErr == nil {
 						manufacturer := r.resolveManufacturer(ctx, bmcObj, bmcClient)
-						if valErr := utils.ValidatePasswordLengthWithPolicy(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, manufacturer, r.passwordPolicy(manufacturer)); valErr != nil {
+						if valErr := utils.ValidatePasswordAgainstPolicy(password, accountService.MaxPasswordLength, accountService.MinPasswordLength, manufacturer, r.passwordPolicy(manufacturer)); valErr != nil {
 							log.Info("Previously generated BMCSecret is invalid for this BMC; regenerating", "BMCSecret", existing.Name, "reason", valErr.Error())
 							return r.ensureBMCSecretForUser(ctx, bmcClient, user, bmcObj)
 						}
@@ -1219,12 +1221,16 @@ func (r *BMCUserReconciler) updateCredentialsBootstrappedCondition(ctx context.C
 	} else {
 		// Distinguish "the account exists on the BMC but its credential was not
 		// accepted by the live-auth check" (LoginFailed) from the generic
-		// "not yet attempted / still in progress" pending state. A set Status.ID
-		// with a nil EffectiveBMCSecretRef means the generated password was applied
-		// but bmcConnectionTest rejected it (HTTP 401/403, swallowed there).
+		// "not yet attempted / still in progress" pending state. LoginFailed only
+		// applies when login actually failed (no EffectiveBMCSecretRef) while the
+		// account exists (Status.ID set): the generated password was applied but
+		// bmcConnectionTest rejected it (HTTP 401/403, swallowed there). When an
+		// effective ref already exists, login succeeded and bootstrapped was only
+		// flipped false because factory-account handling is still pending — that is
+		// not a login failure, so keep the generic pending reason.
 		reason := reasonCredentialsPending
 		message := "Waiting for credential bootstrap to complete"
-		if user.Status.ID != "" {
+		if user.Status.ID != "" && user.Status.EffectiveBMCSecretRef == nil {
 			reason = reasonLoginFailed
 			message = "BMC account exists but its generated credential was rejected (login failed); retrying"
 			if user.Spec.BMCSecretRef != nil {

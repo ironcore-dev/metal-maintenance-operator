@@ -176,6 +176,37 @@ func ValidatePasswordLengthWithPolicy(pw string, maxLen, minLen uint, manufactur
 	return nil
 }
 
+// ValidatePasswordAgainstPolicy checks an existing password against both the
+// BMC's reported length limits (see ValidatePasswordLengthWithPolicy) and the
+// policy's allowed special-character set, when one is configured. It is used to
+// decide whether a previously generated, immutable BMCSecret can still be reused
+// or must be regenerated: a credential produced before the vendor/policy was
+// known may contain a character the BMC rejects (e.g. '/') yet still fit the
+// length limits, so a length-only check would reuse it forever.
+func ValidatePasswordAgainstPolicy(pw string, maxLen, minLen uint, manufacturer bmc.Manufacturer, policy PasswordPolicy) error {
+	if err := ValidatePasswordLengthWithPolicy(pw, maxLen, minLen, manufacturer, policy); err != nil {
+		return err
+	}
+	if policy.SpecialChars != nil && !onlyAllowedSpecialChars(pw, *policy.SpecialChars) {
+		return fmt.Errorf("password contains a special character outside the configured set")
+	}
+	return nil
+}
+
+// onlyAllowedSpecialChars reports whether every non-alphanumeric rune in pw is
+// present in allowed. Letters and digits are always permitted.
+func onlyAllowedSpecialChars(pw, allowed string) bool {
+	for _, c := range pw {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		if !strings.ContainsRune(allowed, c) {
+			return false
+		}
+	}
+	return true
+}
+
 // GenerateHTMLSafePassword generates a password using the built-in defaults (no
 // config override). See GenerateHTMLSafePasswordWithPolicy.
 func GenerateHTMLSafePassword(manufacturer bmc.Manufacturer, maxLen, minLen uint, fallbackLen int) (string, error) {
