@@ -454,6 +454,7 @@ func main() {
 					namedConfigMapRefs(
 						enableTelemetry, telemetryConfigNamespace, telemetryConfigName,
 						firmwareUpdateConfigNamespace, firmwareUpdateConfigName,
+						bmcUserConfigNamespace, bmcUserConfigName,
 					)...,
 				),
 				secretCacheByObject(
@@ -908,6 +909,7 @@ type namedConfigMapRef struct {
 func namedConfigMapRefs(
 	telemetryEnabled bool, telemetryNS, telemetryName string,
 	firmwareUpdateConfigNS, firmwareUpdateConfigName string,
+	bmcUserConfigNS, bmcUserConfigName string,
 ) []namedConfigMapRef {
 	var refs []namedConfigMapRef
 	if telemetryEnabled && telemetryNS != "" && telemetryName != "" {
@@ -915,6 +917,9 @@ func namedConfigMapRefs(
 	}
 	if firmwareUpdateConfigName != "" && firmwareUpdateConfigNS != "" {
 		refs = append(refs, namedConfigMapRef{Namespace: firmwareUpdateConfigNS, Name: firmwareUpdateConfigName})
+	}
+	if bmcUserConfigName != "" && bmcUserConfigNS != "" {
+		refs = append(refs, namedConfigMapRef{Namespace: bmcUserConfigNS, Name: bmcUserConfigName})
 	}
 	return refs
 }
