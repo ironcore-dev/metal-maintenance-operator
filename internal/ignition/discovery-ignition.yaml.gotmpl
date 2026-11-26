@@ -47,7 +47,7 @@ systemd:
 {{- if or .SSHPublicKey .PasswordHash }}
 passwd:
   users:
-    - name: {{ .User }}
+    - name: {{ printf "%q" .User }}
       {{- if .SSHPublicKey }}
       ssh_authorized_keys:
         - {{ .SSHPublicKey }}
