@@ -73,13 +73,11 @@ func VerifySignedDiscoveryToken(signingSecret []byte, tokenString string) (strin
 	}
 
 	// Parse and validate JWT token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-		// Verify signing method is exactly HS256 (HMAC-SHA256)
-		if token.Method != jwt.SigningMethodHS256 {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return signingSecret, nil
-	})
+	token, err := jwt.Parse(tokenString,
+		func(token *jwt.Token) (any, error) { return signingSecret, nil },
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithExpirationRequired(),
+	)
 
 	if err != nil {
 		return "", 0, false, nil // Invalid token, not system error
@@ -114,8 +112,7 @@ func VerifySignedDiscoveryToken(signingSecret []byte, tokenString string) (strin
 			return "", 0, false, nil
 		}
 	} else {
-		// If no iat claim, use current time (backward compatible)
-		issuedAt = time.Now().Unix()
+		return "", 0, false, nil
 	}
 
 	return systemUUID, issuedAt, true, nil

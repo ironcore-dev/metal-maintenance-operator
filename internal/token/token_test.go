@@ -135,7 +135,7 @@ var _ = Describe("VerifySignedDiscoveryToken", func() {
 		})
 
 		It("should reject expired token", func() {
-			systemUUID := "test-uuid-expired"
+			systemUUID := "38947555-7742-3448-3784-823347823834"
 
 			// Create token with expiration in the past
 			claims := jwt.MapClaims{
@@ -218,7 +218,7 @@ var _ = Describe("VerifySignedDiscoveryToken", func() {
 		})
 
 		It("should reject tokens with wrong algorithm", func() {
-			systemUUID := "test-uuid-alg"
+			systemUUID := "49947555-7742-3448-3784-823347823835"
 
 			// Create token with HS512 instead of HS256
 			claims := jwt.MapClaims{

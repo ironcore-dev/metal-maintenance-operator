@@ -23,7 +23,7 @@ type DiscoveryProvider struct {
 	EnableSSH    bool
 	EnablePasswd bool
 	User         string // defaults to "metal" if empty
-	SigningKey    []byte
+	SigningKey   []byte
 	TokenExpiry  time.Duration
 }
 

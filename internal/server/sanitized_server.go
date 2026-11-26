@@ -48,15 +48,16 @@ func (h *SanitizedHandler) HandleSanitized(ctx context.Context, uid string, bear
 		}
 
 		// Cross-check: the token must be bound to the server referenced by this claim.
-		if claim.Spec.ServerRef != nil {
-			server := &metalv1alpha1.Server{}
-			serverKey := client.ObjectKey{Name: claim.Spec.ServerRef.Name}
-			if err := h.Get(ctx, serverKey, server); err != nil {
-				return fmt.Errorf("looking up server for claim: %w", err)
-			}
-			if server.Spec.SystemUUID != systemUUID {
-				return errUnauthorized
-			}
+		if claim.Spec.ServerRef == nil {
+			return errUnauthorized
+		}
+		server := &metalv1alpha1.Server{}
+		serverKey := client.ObjectKey{Name: claim.Spec.ServerRef.Name}
+		if err := h.Get(ctx, serverKey, server); err != nil {
+			return fmt.Errorf("looking up server for claim: %w", err)
+		}
+		if server.Spec.SystemUUID != systemUUID {
+			return errUnauthorized
 		}
 	}
 

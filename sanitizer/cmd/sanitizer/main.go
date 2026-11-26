@@ -102,6 +102,11 @@ func run(ctx context.Context, opts Options) error {
 
 		reportURL = cfg.ReportURL
 		reportToken = cfg.Token
+	} else if opts.ReportURL != "" {
+		cfg, err := config.ReadLocalConfig()
+		if err == nil {
+			reportToken = cfg.Token
+		}
 	}
 
 	s := sanitizer.New([]wiper.Wiper{

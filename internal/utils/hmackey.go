@@ -39,7 +39,7 @@ func EnsureSigningKey(ctx context.Context, c client.Client, namespace, name stri
 		}
 		base := secret.DeepCopy()
 		secret.Data = map[string][]byte{HMACKeyDataKey: raw}
-		if err := c.Patch(ctx, secret, client.MergeFrom(base)); err != nil {
+		if err := c.Patch(ctx, secret, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 			return nil, fmt.Errorf("failed to update signing key Secret %s/%s: %w", namespace, name, err)
 		}
 		return raw, nil
