@@ -21,6 +21,7 @@ import (
 type Agent struct {
 	SystemUUID            string
 	RegistryURL           string
+	RegistryToken         string
 	Duration              time.Duration
 	RegistryClientTimeout time.Duration
 	Server                *registry.Server // Pointer to Server for late initialization.
@@ -30,11 +31,12 @@ type Agent struct {
 }
 
 // NewAgent creates a new Agent with the specified system UUID and registry URL.
-func NewAgent(log logr.Logger, systemUUID, registryURL string, duration, registryClientTimeout, LLDPSyncInterval, LLDPSyncDuration time.Duration) *Agent {
+func NewAgent(log logr.Logger, systemUUID, registryURL, registryToken string, duration, registryClientTimeout, LLDPSyncInterval, LLDPSyncDuration time.Duration) *Agent {
 	return &Agent{
 		log:                   log,
 		SystemUUID:            systemUUID,
 		RegistryURL:           registryURL,
+		RegistryToken:         registryToken,
 		Duration:              duration,
 		RegistryClientTimeout: registryClientTimeout,
 		LLDPSyncInterval:      LLDPSyncInterval,
@@ -212,6 +214,9 @@ func (a *Agent) registerServer(ctx context.Context) error {
 				return false, err
 			}
 			req.Header.Set("Content-Type", "application/json")
+			if a.RegistryToken != "" {
+				req.Header.Set("Authorization", "Bearer "+a.RegistryToken)
+			}
 			resp, err := c.Do(req)
 			if err != nil {
 				a.log.Error(err, "Failed to post registration data", "url", a.RegistryURL)

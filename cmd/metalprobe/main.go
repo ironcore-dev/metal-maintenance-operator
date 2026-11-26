@@ -20,6 +20,7 @@ var (
 func main() {
 	var registryURL string
 	var serverUUID string
+	var registryToken string
 	var duration time.Duration
 	var registryClientTimeout time.Duration
 	var LLDPSyncInterval time.Duration
@@ -27,6 +28,7 @@ func main() {
 
 	flag.StringVar(&registryURL, "registry-url", "", "Registry URL where the probe will register itself.")
 	flag.StringVar(&serverUUID, "server-uuid", "", "Agent UUID to register with the registry.")
+	flag.StringVar(&registryToken, "registry-token", "", "Bearer token for authenticating with the registry.")
 	flag.DurationVar(&duration, "duration", 5*time.Second, "Duration of time to wait between checks.")
 	flag.DurationVar(&registryClientTimeout, "registry-client-timeout", 5*time.Second,
 		"Timeout for HTTP requests to the registry.")
@@ -56,7 +58,7 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 
 	setupLog.Info("starting registry agent")
-	agent := probe.NewAgent(setupLog, serverUUID, registryURL, duration, registryClientTimeout,
+	agent := probe.NewAgent(setupLog, serverUUID, registryURL, registryToken, duration, registryClientTimeout,
 		LLDPSyncInterval, LLDPSyncDuration)
 	if err := agent.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running probe agent")
