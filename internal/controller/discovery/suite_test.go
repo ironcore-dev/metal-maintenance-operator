@@ -13,6 +13,7 @@ import (
 
 	"github.com/ironcore-dev/controller-utils/modutils"
 	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/registry"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -111,8 +112,8 @@ func SetupTest() *corev1.Namespace {
 			Scheme:             k8sManager.GetScheme(),
 			DiscoveryNamespace: ns.Name,
 			ProbeOSImage:       "probe-os",
-			IgnitionProvider: func(_ context.Context, _ *metalv1alpha1.Server) ([]byte, error) {
-				return []byte("ignition-data"), nil
+			IgnitionProvider: func(_ context.Context, _ *metalv1alpha1.Server) ([]byte, *ignition.Credentials, error) {
+				return []byte("ignition-data"), nil, nil
 			},
 			Registry:           testRegistry,
 			RegistryDataMaxAge: time.Minute,

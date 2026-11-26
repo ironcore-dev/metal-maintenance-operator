@@ -106,6 +106,9 @@ func main() {
 	var discoveryNamespace string
 	var probeImage string
 	var probeOSImage string
+	var probeEnableSSH bool
+	var probeEnablePasswd bool
+	var probeUser string
 	var registryURL string
 	var registryBindAddress string
 	var registryDataMaxAge time.Duration
@@ -154,6 +157,15 @@ func main() {
 			"Defaults to --manager-namespace.")
 	flag.StringVar(&probeImage, "probe-image", "", "Image of the metalprobe agent run during discovery.")
 	flag.StringVar(&probeOSImage, "probe-os-image", "", "OS image for the discovery boot of a Server.")
+	flag.BoolVar(&probeEnableSSH, "probe-enable-ssh", false,
+		"Generate a per-server ephemeral ECDSA SSH keypair and inject it into the discovery ignition. "+
+			"The public and private key are stored in the server's ignition secret.")
+	flag.BoolVar(&probeEnablePasswd, "probe-enable-passwd", false,
+		"Generate a per-server random 16-char alphanumeric password and inject it into the discovery ignition. "+
+			"The plaintext password is stored in the server's ignition secret.")
+	flag.StringVar(&probeUser, "probe-user", "metal",
+		"Username created in the discovery ignition when --probe-enable-ssh or --probe-enable-passwd is set. "+
+			"Stored in the server's ignition secret under 'probe-user'.")
 	flag.StringVar(&registryURL, "registry-url", "", "Externally reachable URL of the discovery registry. "+
 		"Falls back to the REGISTRY_ADDRESS env var and --registry-bind-address port.")
 	flag.StringVar(&registryBindAddress, "registry-bind-address", ":10000",
@@ -515,8 +527,11 @@ func main() {
 			DiscoveryNamespace: discoveryNamespace,
 			ProbeOSImage:       probeOSImage,
 			IgnitionProvider: (&ignition.DiscoveryProvider{
-				ProbeImage:  probeImage,
-				RegistryURL: registryURL,
+				ProbeImage:   probeImage,
+				RegistryURL:  registryURL,
+				EnableSSH:    probeEnableSSH,
+				EnablePasswd: probeEnablePasswd,
+				User:         probeUser,
 			}).Ignition,
 			Registry:           registryServer,
 			RegistryDataMaxAge: registryDataMaxAge,

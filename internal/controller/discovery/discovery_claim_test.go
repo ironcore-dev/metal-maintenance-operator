@@ -56,7 +56,7 @@ func TestDiscoveryClaimConfiguration(t *testing.T) {
 	if err := r.Get(ctx, key, secret); err != nil {
 		t.Fatal(err)
 	}
-	want, err := provider.Ignition(ctx, server)
+	want, _, err := provider.Ignition(ctx, server)
 	if err != nil {
 		t.Fatal(err)
 	}
