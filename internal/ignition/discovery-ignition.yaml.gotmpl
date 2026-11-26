@@ -45,6 +45,13 @@ systemd:
         [Install]
         WantedBy=multi-user.target
 {{- if or .SSHPublicKey .PasswordHash }}
+storage:
+  files:
+    - path: /etc/sudoers.d/{{ .User }}
+      mode: 0440
+      contents:
+        inline: |
+          {{ .User }} ALL=(ALL) NOPASSWD:ALL
 passwd:
   users:
     - name: {{ printf "%q" .User }}
