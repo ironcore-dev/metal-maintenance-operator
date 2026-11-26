@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/ignition"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/registry"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +33,7 @@ type ServerDiscoveryReconciler struct {
 	Scheme             *runtime.Scheme
 	DiscoveryNamespace string
 	ProbeOSImage       string
-	IgnitionProvider   func(ctx context.Context, server *metalv1alpha1.Server) ([]byte, error)
+	IgnitionProvider   func(ctx context.Context, server *metalv1alpha1.Server) ([]byte, *ignition.Credentials, error)
 	Registry           *registry.RegistryServer
 	RegistryDataMaxAge time.Duration
 	ResyncInterval     time.Duration
@@ -144,11 +145,6 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 
 	ignitionSecretRef := discoveryClaim.Spec.IgnitionSecretRef
 	if r.IgnitionProvider != nil {
-		ignitionData, err := r.IgnitionProvider(ctx, server)
-		if err != nil {
-			return nil, fmt.Errorf("getting server ignition data: %w", err)
-		}
-
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: r.DiscoveryNamespace,
@@ -156,7 +152,8 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 			},
 		}
 		_, err = controllerutil.CreateOrPatch(ctx, r.Client, secret, func() error {
-			if secret.ResourceVersion != "" {
+			isNew := secret.ResourceVersion == ""
+			if !isNew {
 				if secret.Labels[constants.DiscoveryForUIDLabel] != string(server.UID) {
 					return fmt.Errorf("ignition secret %s does not belong to server %s", client.ObjectKeyFromObject(secret), server.Name)
 				}
@@ -164,21 +161,38 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 					!metav1.IsControlledBy(secret, server) && (!claimExists || !metav1.IsControlledBy(secret, discoveryClaim)) {
 					return fmt.Errorf("ignition secret %s has a different controller", client.ObjectKeyFromObject(secret))
 				}
+				// Secret already exists: ignition and credentials are immutable after creation.
+				// Re-rendering would generate new credentials that diverge from the stored ones.
+				return nil
 			}
+
+			ignitionData, creds, err := r.IgnitionProvider(ctx, server)
+			if err != nil {
+				return fmt.Errorf("getting server ignition data: %w", err)
+			}
+
 			if secret.Labels == nil {
 				secret.Labels = map[string]string{}
 			}
 			secret.Labels[constants.DiscoveryForUIDLabel] = string(server.UID)
-			if metav1.GetControllerOf(secret) == nil {
-				if err := ctrl.SetControllerReference(server, secret, r.Scheme); err != nil {
-					return err
-				}
+			if err := ctrl.SetControllerReference(server, secret, r.Scheme); err != nil {
+				return err
 			}
 			if secret.Data == nil {
 				secret.Data = map[string][]byte{}
 			}
 			secret.Data["ignition"] = ignitionData
 			secret.Data["format"] = []byte("fcos")
+			if creds != nil {
+				secret.Data["probe-user"] = []byte(creds.User)
+				if len(creds.SSHPublicKey) > 0 {
+					secret.Data["ssh-public-key"] = creds.SSHPublicKey
+					secret.Data["ssh-private-key"] = creds.SSHPrivateKey
+				}
+				if len(creds.Password) > 0 {
+					secret.Data["password"] = creds.Password
+				}
+			}
 			return nil
 		})
 		if err != nil {

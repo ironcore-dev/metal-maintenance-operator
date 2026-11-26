@@ -44,3 +44,15 @@ systemd:
         TimeoutSec=600
         [Install]
         WantedBy=multi-user.target
+{{- if or .SSHPublicKey .PasswordHash }}
+passwd:
+  users:
+    - name: {{ printf "%q" .User }}
+      {{- if .SSHPublicKey }}
+      ssh_authorized_keys:
+        - {{ .SSHPublicKey }}
+      {{- end }}
+      {{- if .PasswordHash }}
+      password_hash: {{ .PasswordHash }}
+      {{- end }}
+{{- end }}

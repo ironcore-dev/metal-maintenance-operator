@@ -43,6 +43,8 @@ func TestDiscoveryClaimConfiguration(t *testing.T) {
 	if !metav1.IsControlledBy(secret, server) {
 		t.Fatal("new Secret must be owned before claim creation")
 	}
+	// Capture ignition rendered at creation time, before any mutations.
+	storedIgnition := secret.Data["ignition"]
 	provider.RegistryURL = "http://new-registry"
 	server.Spec.SystemUUID = "new-uuid"
 	r.ProbeOSImage = "new-os"
@@ -56,12 +58,9 @@ func TestDiscoveryClaimConfiguration(t *testing.T) {
 	if err := r.Get(ctx, key, secret); err != nil {
 		t.Fatal(err)
 	}
-	want, err := provider.Ignition(ctx, server)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(secret.Data["ignition"]) != string(want) {
-		t.Fatal("existing Secret did not update its registry URL and UUID")
+	// Ignition is immutable after creation — registry URL and UUID changes do not update the secret.
+	if string(secret.Data["ignition"]) != string(storedIgnition) {
+		t.Fatal("existing Secret ignition must not change after creation")
 	}
 	version := secret.ResourceVersion
 	if _, err := r.getOrCreateDiscoveryClaim(ctx, server); err != nil {
