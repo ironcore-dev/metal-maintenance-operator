@@ -42,7 +42,7 @@ var _ = Describe("ServerDiscoveryReconciler", func() {
 			Namespace: ns.Name,
 			Name:      claim.Spec.IgnitionSecretRef.Name,
 		}}
-		Eventually(Object(secret)).Should(HaveField("Data", HaveKey("ignition")))
+		Eventually(Object(secret)).Should(HaveField("Data", And(HaveKey("ignition"), HaveKeyWithValue("format", []byte("fcos")))))
 
 		By("not completing discovery without registry data")
 		metadata := &discoveryv1alpha1.Metadata{ObjectMeta: metav1.ObjectMeta{
