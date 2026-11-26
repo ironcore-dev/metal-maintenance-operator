@@ -314,6 +314,11 @@ func main() {
 		discoveryNamespace = managerNamespace
 	}
 
+	if resyncInterval <= 0 {
+		setupLog.Error(nil, "Must specify a positive --resync-interval")
+		os.Exit(1)
+	}
+
 	if enableDiscovery {
 		if registryResyncInterval <= 0 {
 			setupLog.Error(nil, "Must specify a positive --registry-resync-interval when discovery is enabled")

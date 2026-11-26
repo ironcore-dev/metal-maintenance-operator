@@ -26,6 +26,7 @@ rules:
   verbs:
   - create
   - delete
+  - deletecollection
   - get
   - list
   - patch
@@ -146,10 +147,22 @@ rules:
   resources:
   - bmcsecrets
   - serverbootconfigurations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - metal.ironcore.dev
+  resources:
   - serverclaims
   verbs:
   - create
   - delete
+  - deletecollection
   - get
   - list
   - patch

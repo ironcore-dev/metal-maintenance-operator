@@ -188,8 +188,8 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	if err := r.Get(ctx, client.ObjectKey{Name: user.Spec.BMCRef.Name}, bmcObj); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update effective BMCSecret: %w", err)
+	if result, requeue, err := r.updateEffectiveSecretOrRequeue(ctx, user, bmcObj); err != nil || requeue {
+		return result, err
 	}
 	if modified, err := clientutils.PatchEnsureFinalizer(ctx, r.Client, user, bmcUserFinalizer); err != nil || modified {
 		return ctrl.Result{}, err
@@ -235,8 +235,8 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	// along but Status.ID was blank on a previous reconcile). Only treat the stored
 	// credential as stale (reOnboard) if EffectiveBMCSecretRef is still nil after
 	// this check.
-	if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to update effective BMCSecret: %w", err)
+	if result, requeue, err := r.updateEffectiveSecretOrRequeue(ctx, user, bmcObj); err != nil || requeue {
+		return result, err
 	}
 
 	// reOnboard is true when the account already exists on the BMC (Status.ID is
@@ -256,20 +256,9 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 	}
 
 	if user.Status.ID == "" || reOnboard {
-		requeue, err := r.ensureBMCAccount(ctx, user, bmcObj, bmcClient, bmcSecret)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if requeue {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-		// The account was just created/updated with the generated credential and
-		// Status.ID is now set. Re-run the prove step in this same reconcile so the
-		// credential is verified immediately, rather than waiting for an incidental
-		// watch event to re-enter reconcile. Without this, EffectiveBMCSecretRef is
-		// never set on the reconcile that creates the account.
-		if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update effective BMCSecret after account creation: %w", err)
+		result, done, err := r.ensureBMCAccountAndProve(ctx, user, bmcObj, bmcClient, bmcSecret)
+		if err != nil || done {
+			return result, err
 		}
 	}
 	if err := r.reconcileSecretRef(ctx, user, bmcSecret, bmcClient, bmcObj); err != nil {
@@ -295,6 +284,29 @@ func (r *BMCUserReconciler) reconcile(ctx context.Context, user *baseboardv1alph
 		return ctrl.Result{RequeueAfter: r.bootstrapRetryDelay()}, nil
 	}
 	return r.ensureBMCUserRotation(ctx, user)
+}
+
+// ensureBMCAccountAndProve creates or updates the BMC account and immediately
+// proves the credential. It returns (result, true, nil) when the caller should
+// return early (password invalid requeue, or unreachable BMC), (zero, false, err)
+// on hard errors, and (zero, false, nil) on success.
+func (r *BMCUserReconciler) ensureBMCAccountAndProve(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC, bmcClient bmc.BMC, bmcSecret *metalv1alpha1.BMCSecret) (ctrl.Result, bool, error) {
+	requeue, err := r.ensureBMCAccount(ctx, user, bmcObj, bmcClient, bmcSecret)
+	if err != nil {
+		return ctrl.Result{}, false, err
+	}
+	if requeue {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, true, nil
+	}
+	// The account was just created/updated with the generated credential and
+	// Status.ID is now set. Re-run the prove step in this same reconcile so the
+	// credential is verified immediately, rather than waiting for an incidental
+	// watch event to re-enter reconcile. Without this, EffectiveBMCSecretRef is
+	// never set on the reconcile that creates the account.
+	if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil && !errors.Is(err, errBMCUnreachable) {
+		return ctrl.Result{}, false, fmt.Errorf("failed to update effective BMCSecret after account creation: %w", err)
+	}
+	return ctrl.Result{}, false, nil
 }
 
 // ensureBMCAccount creates or updates the BMC account for user using the given
@@ -829,6 +841,22 @@ func (r *BMCUserReconciler) getBootstrapBMCClient(ctx context.Context, bmcObj *m
 		address, bmcObj.Spec.Protocol.Port, secret, r.BMCOptions, r.SkipCertValidation)
 }
 
+// updateEffectiveSecretOrRequeue calls updateEffectiveSecret and translates an
+// errBMCUnreachable result into a requeue, returning (result, true, nil).
+// Any other error is wrapped and returned as (zero, false, err). On success it
+// returns (zero, false, nil).
+func (r *BMCUserReconciler) updateEffectiveSecretOrRequeue(ctx context.Context, user *baseboardv1alpha1.BMCUser, bmcObj *metalv1alpha1.BMC) (ctrl.Result, bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if err := r.updateEffectiveSecret(ctx, user, bmcObj); err != nil {
+		if errors.Is(err, errBMCUnreachable) {
+			log.V(1).Info("BMC unreachable during effective-secret check, requeueing", "retryAfter", r.bootstrapRetryDelay())
+			return ctrl.Result{RequeueAfter: r.bootstrapRetryDelay()}, true, nil
+		}
+		return ctrl.Result{}, false, fmt.Errorf("failed to update effective BMCSecret: %w", err)
+	}
+	return ctrl.Result{}, false, nil
+}
+
 // updateEffectiveSecret validates the credentials in the user's referenced
 // BMCSecret against the BMC and promotes it to the effective secret when it
 // works, so the status always points at credentials that authenticate.
@@ -847,7 +875,7 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 	invalidCredentials, err := r.bmcConnectionTest(ctx, secret, bmcObj)
 	if err != nil {
 		if errors.Is(err, errBMCUnreachable) {
-			return nil
+			return errBMCUnreachable
 		}
 		return fmt.Errorf("failed to test BMC connection with BMCSecret %s: %w", secret.Name, err)
 	}
@@ -873,7 +901,7 @@ func (r *BMCUserReconciler) updateEffectiveSecret(ctx context.Context, user *bas
 	invalidCredentials, err = r.bmcConnectionTest(ctx, effSecret, bmcObj)
 	if err != nil {
 		if errors.Is(err, errBMCUnreachable) {
-			return nil
+			return errBMCUnreachable
 		}
 		return fmt.Errorf("failed to test BMC connection with effectiveSecret %s: %w", effSecret.Name, err)
 	}
@@ -901,6 +929,11 @@ func (r *BMCUserReconciler) bmcConnectionTest(ctx context.Context, secret *metal
 			if httpErr.HTTPReturnedStatusCode == 401 || httpErr.HTTPReturnedStatusCode == 403 {
 				return true, nil
 			}
+		}
+		if netErr, ok := errors.AsType[net.Error](err); ok {
+			log := ctrl.LoggerFrom(ctx)
+			log.V(1).Info("Transient network error creating BMC client; will retry", "error", netErr.Error())
+			return false, errBMCUnreachable
 		}
 		return false, fmt.Errorf("failed to create BMC client: %w", err)
 	}
