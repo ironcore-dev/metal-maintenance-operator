@@ -178,6 +178,7 @@ func (r *ServerDiscoveryReconciler) getOrCreateDiscoveryClaim(
 				secret.Data = map[string][]byte{}
 			}
 			secret.Data["ignition"] = ignitionData
+			secret.Data["format"] = []byte("fcos")
 			return nil
 		})
 		if err != nil {
