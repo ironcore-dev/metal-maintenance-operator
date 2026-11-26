@@ -106,7 +106,7 @@ func SetupTest() *corev1.Namespace {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		testRegistry = registry.NewServer(GinkgoLogr, ":0")
+		testRegistry = registry.NewServer(GinkgoLogr, ":0", nil)
 		Expect((&ServerDiscoveryReconciler{
 			Client:             k8sManager.GetClient(),
 			Scheme:             k8sManager.GetScheme(),

@@ -21,6 +21,55 @@ const (
 	HMACKeyLen = 32
 )
 
+// EnsureSigningKey gets or creates a mutable 32-byte signing key Secret.
+// Unlike EnsureHMACKey the secret is not immutable, so an invalid stored key
+// can be regenerated in-place (handles key rotation or corruption).
+func EnsureSigningKey(ctx context.Context, c client.Client, namespace, name string) ([]byte, error) {
+	const signingKeyLen = 32
+	secret := &corev1.Secret{}
+	key := client.ObjectKey{Namespace: namespace, Name: name}
+	if err := c.Get(ctx, key, secret); err == nil {
+		if k, ok := secret.Data[HMACKeyDataKey]; ok && len(k) == signingKeyLen {
+			return k, nil
+		}
+		// Key missing or invalid — regenerate it in-place.
+		raw := make([]byte, signingKeyLen)
+		if _, err := rand.Read(raw); err != nil {
+			return nil, fmt.Errorf("failed to generate signing key: %w", err)
+		}
+		base := secret.DeepCopy()
+		secret.Data = map[string][]byte{HMACKeyDataKey: raw}
+		if err := c.Patch(ctx, secret, client.MergeFrom(base)); err != nil {
+			return nil, fmt.Errorf("failed to update signing key Secret %s/%s: %w", namespace, name, err)
+		}
+		return raw, nil
+	} else if !apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get signing key Secret %s/%s: %w", namespace, name, err)
+	}
+
+	raw := make([]byte, signingKeyLen)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, fmt.Errorf("failed to generate signing key: %w", err)
+	}
+	newSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		Data:       map[string][]byte{HMACKeyDataKey: raw},
+	}
+	if err := c.Create(ctx, newSecret); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			if err2 := c.Get(ctx, key, secret); err2 != nil {
+				return nil, fmt.Errorf("signing key Secret created concurrently but unreadable: %w", err2)
+			}
+			if k, ok := secret.Data[HMACKeyDataKey]; ok && len(k) == signingKeyLen {
+				return k, nil
+			}
+			return nil, fmt.Errorf("concurrently created signing key Secret has no valid %q entry", HMACKeyDataKey)
+		}
+		return nil, fmt.Errorf("failed to create signing key Secret %s/%s: %w", namespace, name, err)
+	}
+	return raw, nil
+}
+
 func EnsureHMACKey(ctx context.Context, c client.Client, namespace, name string) ([]byte, error) {
 	secret := &corev1.Secret{}
 	key := client.ObjectKey{Namespace: namespace, Name: name}

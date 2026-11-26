@@ -15,6 +15,7 @@ import (
 
 type Config struct {
 	ReportURL string `json:"reportURL"`
+	Token     string `json:"token"`
 }
 
 func FetchViaIgnition(ctx context.Context, ignitionURL string) (*Config, error) {

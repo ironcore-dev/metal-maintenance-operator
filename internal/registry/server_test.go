@@ -16,14 +16,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/token"
 )
+
+const testUUID = "12345678-1234-1234-1234-123456789012"
 
 func TestRegisterRoundtrip(t *testing.T) {
 	now := metav1.Now()
-	srv := NewServer(logr.Discard(), ":0")
+	srv := NewServer(logr.Discard(), ":0", nil)
 
 	payload, err := json.Marshal(RegistrationPayload{
-		SystemUUID: "some-uuid",
+		SystemUUID: testUUID,
 		Data: discoveryv1alpha1.Metadata{
 			Timestamp: &now,
 			SystemInfo: discoveryv1alpha1.DMI{
@@ -45,7 +48,7 @@ func TestRegisterRoundtrip(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
 	}
 
-	data, ok := srv.Load("some-uuid")
+	data, ok := srv.Load(testUUID)
 	if !ok {
 		t.Fatal("expected data to be registered")
 	}
@@ -56,8 +59,8 @@ func TestRegisterRoundtrip(t *testing.T) {
 		t.Fatalf("expected 1 network interface, got %d", len(data.NetworkInterfaces))
 	}
 
-	srv.Delete("some-uuid")
-	if _, ok := srv.Load("some-uuid"); ok {
+	srv.Delete(testUUID)
+	if _, ok := srv.Load(testUUID); ok {
 		t.Fatal("expected data to be deleted")
 	}
 }
@@ -91,7 +94,7 @@ func TestIsFresh(t *testing.T) {
 }
 
 func TestSweep(t *testing.T) {
-	srv := NewServer(logr.Discard(), ":0")
+	srv := NewServer(logr.Discard(), ":0", nil)
 
 	fresh := metav1.Now()
 	stale := metav1.NewTime(time.Now().Add(-srv.staleEntryTTL - time.Minute))
@@ -123,10 +126,10 @@ func TestSweep(t *testing.T) {
 }
 
 func TestRegisterBodyLimit(t *testing.T) {
-	const prefix = `{"systemUUID":"test-uuid","data":{},"padding":"`
+	const prefix = `{"systemUUID":"` + testUUID + `","data":{},"padding":"`
 	const suffix = `"}`
 	for _, extra := range []int{0, 1} {
-		srv := NewServer(logr.Discard(), ":0")
+		srv := NewServer(logr.Discard(), ":0", nil)
 		body := prefix + strings.Repeat("x", maxRegistryBodyBytes-len(prefix)-len(suffix)+extra) + suffix
 		rec := httptest.NewRecorder()
 		srv.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body)))
@@ -137,7 +140,7 @@ func TestRegisterBodyLimit(t *testing.T) {
 		if rec.Code != want {
 			t.Fatalf("body size %d: status = %d, want %d", len(body), rec.Code, want)
 		}
-		_, stored := srv.Load("test-uuid")
+		_, stored := srv.Load(testUUID)
 		if stored != (extra == 0) {
 			t.Fatalf("body size %d: stored = %v", len(body), stored)
 		}
@@ -145,7 +148,7 @@ func TestRegisterBodyLimit(t *testing.T) {
 }
 
 func TestRegisterValidation(t *testing.T) {
-	srv := NewServer(logr.Discard(), ":0")
+	srv := NewServer(logr.Discard(), ":0", nil)
 
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader([]byte(`{"data":{}}`))))
@@ -157,5 +160,65 @@ func TestRegisterValidation(t *testing.T) {
 	srv.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/register", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected status %d for GET, got %d", http.StatusMethodNotAllowed, rec.Code)
+	}
+}
+
+func TestRegisterJWTAuth(t *testing.T) {
+	signingKey := bytes.Repeat([]byte{0xAB}, 32)
+	srv := NewServer(logr.Discard(), ":0", signingKey)
+
+	payload, err := json.Marshal(RegistrationPayload{
+		SystemUUID: testUUID,
+		Data:       discoveryv1alpha1.Metadata{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Missing Authorization header -> 401
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(payload))
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing token: expected %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+
+	// Invalid token -> 401
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer notavalidtoken")
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid token: expected %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+
+	// Token for a different UUID -> 401
+	otherUUID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	wrongTok, err := token.GenerateSignedDiscoveryToken(signingKey, otherUUID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+wrongTok)
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong UUID token: expected %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+
+	// Valid token for correct UUID -> 201
+	tok, err := token.GenerateSignedDiscoveryToken(signingKey, testUUID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("valid token: expected %d, got %d", http.StatusCreated, rec.Code)
+	}
+	if _, ok := srv.Load(testUUID); !ok {
+		t.Fatal("expected data to be stored after valid auth")
 	}
 }
