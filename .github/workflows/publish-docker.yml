@@ -51,7 +51,7 @@ jobs:
           type=ref,event=branch
           type=ref,event=tag
           type=ref,event=pr
-          type=sha
+          type=sha,prefix=${{ matrix.image.tag-prefix }}sha-
         flavor: |
           prefix=${{ matrix.image.tag-prefix }}
           latest=${{ matrix.image.target == 'manager' && github.ref == 'refs/heads/main' }}
