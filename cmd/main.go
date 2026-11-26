@@ -184,9 +184,9 @@ func main() {
 	flag.StringVar(&sanitizedServerAddress, "sanitized-server-address", ":8082",
 		"Address the sanitization callback HTTP server binds to. "+
 			"Sanitizers running on bare metal POST here to report completion.")
-	flag.DurationVar(&sanitizationTokenExpiry, "sanitization-token-expiry", time.Hour,
+	flag.DurationVar(&sanitizationTokenExpiry, "sanitization-token-expiry", 24*time.Hour,
 		"How long a sanitization JWT token is valid. "+
-			"Should be longer than the maximum expected sanitization duration.")
+			"Must exceed the longest expected sanitization (wipe) duration.")
 	flag.DurationVar(&discoveryTokenExpiry, "discovery-token-expiry", 10*time.Minute,
 		"How long a discovery JWT token is valid. "+
 			"Should be longer than the maximum expected discovery boot duration.")
@@ -593,6 +593,8 @@ func main() {
 		SanitizationNamespace:   sanitizationNamespace,
 		SanitizationImage:       sanitizationImage,
 		SanitizationTolerations: sanitizationTolerations,
+		SigningKey:              sanitizationSigningKey,
+		TokenExpiry:             sanitizationTokenExpiry,
 		SanitizationIgnitionProvider: (&ignition.SanitizationProvider{
 			ReportBaseURL: reportBaseURL,
 			SigningKey:    sanitizationSigningKey,

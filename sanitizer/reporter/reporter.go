@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type Reporter struct {
@@ -51,6 +52,9 @@ func (r *Reporter) ReportResult(ctx context.Context, err error) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	if r.token != "" {
+		if !strings.HasPrefix(r.reportURL, "https://") {
+			return fmt.Errorf("refusing to send bearer token over non-HTTPS URL: %s", r.reportURL)
+		}
 		req.Header.Set("Authorization", "Bearer "+r.token)
 	}
 	resp, err := http.DefaultClient.Do(req)
