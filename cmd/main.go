@@ -109,6 +109,7 @@ func main() {
 	var probeEnableSSH bool
 	var probeEnablePasswd bool
 	var probeUser string
+	var probeNTPServers string
 	var registryURL string
 	var registryBindAddress string
 	var registryDataMaxAge time.Duration
@@ -166,6 +167,8 @@ func main() {
 	flag.StringVar(&probeUser, "probe-user", "metal",
 		"Username created in the discovery ignition when --probe-enable-ssh or --probe-enable-passwd is set. "+
 			"Stored in the server's ignition secret under 'probe-user'.")
+	flag.StringVar(&probeNTPServers, "probe-ntp-servers", "",
+		"Space-separated NTP server hostnames to configure in the discovery ignition via systemd-timesyncd.")
 	flag.StringVar(&registryURL, "registry-url", "", "Externally reachable URL of the discovery registry. "+
 		"Falls back to the REGISTRY_ADDRESS env var and --registry-bind-address port.")
 	flag.StringVar(&registryBindAddress, "registry-bind-address", ":10000",
@@ -532,6 +535,7 @@ func main() {
 				EnableSSH:    probeEnableSSH,
 				EnablePasswd: probeEnablePasswd,
 				User:         probeUser,
+				NTPServers:   probeNTPServers,
 			}).Ignition,
 			Registry:           registryServer,
 			RegistryDataMaxAge: registryDataMaxAge,

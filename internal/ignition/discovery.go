@@ -21,6 +21,7 @@ type DiscoveryProvider struct {
 	EnableSSH    bool
 	EnablePasswd bool
 	User         string // defaults to "metal" if empty
+	NTPServers   string // space-separated NTP server hostnames
 }
 
 // Ignition renders the discovery ignition for the given server and returns
@@ -68,12 +69,14 @@ func (p *DiscoveryProvider) Ignition(_ context.Context, server *metalv1alpha1.Se
 		User         string
 		SSHPublicKey string
 		PasswordHash string
+		NTPServers   string
 	}{
 		Image:        p.ProbeImage,
 		Flags:        fmt.Sprintf("--registry-url=%s --server-uuid=%s", p.RegistryURL, server.Spec.SystemUUID),
 		User:         user,
 		SSHPublicKey: sshPublicKey,
 		PasswordHash: passwordHash,
+		NTPServers:   p.NTPServers,
 	}); err != nil {
 		return nil, nil, fmt.Errorf("render discovery ignition: %w", err)
 	}
