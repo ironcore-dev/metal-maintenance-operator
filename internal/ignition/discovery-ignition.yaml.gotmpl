@@ -26,6 +26,8 @@ systemd:
             [Unit]
             After=var-lib-containerd.mount
             Requires=var-lib-containerd.mount
+    - name: systemd-time-wait-sync.service
+      enabled: true
     - name: metalprobe.service
       enabled: true
       contents: |-
