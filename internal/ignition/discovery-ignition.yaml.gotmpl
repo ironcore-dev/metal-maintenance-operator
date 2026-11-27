@@ -31,7 +31,7 @@ systemd:
       contents: |-
         [Unit]
         Description=Run Metalprobe Container
-        After=containerd.service
+        After=containerd.service time-sync.target
         Requires=containerd.service
         [Service]
         Restart=on-failure
@@ -44,14 +44,26 @@ systemd:
         TimeoutSec=600
         [Install]
         WantedBy=multi-user.target
-{{- if or .SSHPublicKey .PasswordHash }}
+{{- if or .NTPServers .SSHPublicKey .PasswordHash }}
 storage:
   files:
+{{- if .NTPServers }}
+    - path: /etc/systemd/timesyncd.conf.d/ntp.conf
+      mode: 0644
+      contents:
+        inline: |
+          [Time]
+          NTP={{ .NTPServers }}
+{{- end }}
+{{- if or .SSHPublicKey .PasswordHash }}
     - path: /etc/sudoers.d/{{ .User }}
       mode: 0440
       contents:
         inline: |
           {{ .User }} ALL=(ALL) NOPASSWD:ALL
+{{- end }}
+{{- end }}
+{{- if or .SSHPublicKey .PasswordHash }}
 passwd:
   users:
     - name: {{ printf "%q" .User }}
