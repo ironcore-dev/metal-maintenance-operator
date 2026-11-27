@@ -255,10 +255,19 @@ func (r *FirmwareUpdateReconciler) cleanupServerMaintenanceReferences(ctx contex
 	}
 
 	serverMaintenance, err := r.getServerMaintenanceForRef(ctx, fw.Status.ServerMaintenanceRef)
-	if err != nil && !apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
+		// Object is confirmed gone — safe to clear the ref now.
+		log.V(1).Info("Cleaning up ServerMaintenance ref in FirmwareUpdate as the object is gone")
+		if err := r.patchServerMaintenanceRef(ctx, fw, nil); err != nil {
+			return fmt.Errorf("failed to clean up serverMaintenance ref in FirmwareUpdate status: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("failed to get referred ServerMaintenance: %w", err)
 	}
 
+	// Object still exists. Issue Delete if we own it and deletion hasn't started.
 	if serverMaintenance.DeletionTimestamp.IsZero() {
 		if metav1.IsControlledBy(serverMaintenance, fw) {
 			log.V(1).Info("Deleting ServerMaintenance", "ServerMaintenance", client.ObjectKeyFromObject(serverMaintenance))
@@ -269,14 +278,8 @@ func (r *FirmwareUpdateReconciler) cleanupServerMaintenanceReferences(ctx contex
 			log.V(1).Info("ServerMaintenance is controlled by somebody else", "ServerMaintenance", client.ObjectKeyFromObject(serverMaintenance))
 		}
 	}
-
-	// Remove the reference if the object is gone.
-	if apierrors.IsNotFound(err) || err == nil {
-		log.V(1).Info("Cleaning up ServerMaintenance ref in FirmwareUpdate as the object is gone")
-		if err := r.patchServerMaintenanceRef(ctx, fw, nil); err != nil {
-			return fmt.Errorf("failed to clean up serverMaintenance ref in FirmwareUpdate status: %w", err)
-		}
-	}
+	// Don't clear the ref yet — wait for the finalizer to be removed before confirming deletion.
+	log.V(1).Info("Waiting for ServerMaintenance to be fully deleted", "ServerMaintenance", client.ObjectKeyFromObject(serverMaintenance))
 	return nil
 }
 
@@ -379,6 +382,13 @@ func (r *FirmwareUpdateReconciler) transitionState(ctx context.Context, fw *syst
 		}
 		if err := r.markFirmwareUpdateReadinessGatesSatisfied(ctx, fw, systemv1alpha1.FirmwareUpdateStateCompleted); err != nil {
 			return true, err
+		}
+		// Drive ServerMaintenance cleanup on every Completed reconcile. The periodic
+		// repository drift-check may defer without calling cleanupServerMaintenanceReferences,
+		// so we call it here to ensure the ServerMaintenance is released promptly once
+		// the object is fully gone (finalizer removed), not after the drift-check interval.
+		if err := r.cleanupServerMaintenanceReferences(ctx, fw); err != nil {
+			return false, err
 		}
 		return h.handleCompleted(ctx, fw, bmcClient, r, server)
 	case systemv1alpha1.FirmwareUpdateStateInProgress:
