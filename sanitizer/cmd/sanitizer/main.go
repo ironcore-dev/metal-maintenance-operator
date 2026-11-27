@@ -92,6 +92,7 @@ func run(ctx context.Context, opts Options) error {
 	}
 
 	reportURL := opts.ReportURL
+	var reportToken string
 
 	if opts.IgnitionURL != "" {
 		cfg, err := config.FetchViaIgnition(ctx, opts.IgnitionURL)
@@ -100,6 +101,12 @@ func run(ctx context.Context, opts Options) error {
 		}
 
 		reportURL = cfg.ReportURL
+		reportToken = cfg.Token
+	} else if opts.ReportURL != "" {
+		cfg, err := config.ReadLocalConfig()
+		if err == nil {
+			reportToken = cfg.Token
+		}
 	}
 
 	s := sanitizer.New([]wiper.Wiper{
@@ -108,7 +115,7 @@ func run(ctx context.Context, opts Options) error {
 	})
 	err := s.Sanitize(ctx)
 	if reportURL != "" {
-		r := reporter.New(reportURL)
+		r := reporter.New(reportURL, reportToken)
 		if reportErr := r.ReportResult(ctx, err); reportErr != nil {
 			err = errors.Join(err, reportErr)
 		}

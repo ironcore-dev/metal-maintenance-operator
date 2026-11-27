@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/token"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 )
 
@@ -21,7 +23,10 @@ type DiscoveryProvider struct {
 	EnableSSH    bool
 	EnablePasswd bool
 	User         string // defaults to "metal" if empty
+	SigningKey   []byte
+	TokenExpiry  time.Duration
 	NTPServers   string // space-separated NTP server hostnames
+
 }
 
 // Ignition renders the discovery ignition for the given server and returns
@@ -62,6 +67,19 @@ func (p *DiscoveryProvider) Ignition(_ context.Context, server *metalv1alpha1.Se
 		passwordHash = string(creds.PasswordHash)
 	}
 
+	flags := fmt.Sprintf("--registry-url=%s --server-uuid=%s", p.RegistryURL, server.Spec.SystemUUID)
+	if len(p.SigningKey) > 0 {
+		expiry := p.TokenExpiry
+		if expiry <= 0 {
+			expiry = 10 * time.Minute
+		}
+		tok, err := token.GenerateSignedDiscoveryToken(p.SigningKey, server.Spec.SystemUUID, expiry)
+		if err != nil {
+			return nil, nil, fmt.Errorf("generate discovery token: %w", err)
+		}
+		flags += " --registry-token=" + tok
+	}
+
 	var buf bytes.Buffer
 	if err := discoveryIgnitionYAMLTemplate.Execute(&buf, struct {
 		Image        string
@@ -72,7 +90,7 @@ func (p *DiscoveryProvider) Ignition(_ context.Context, server *metalv1alpha1.Se
 		NTPServers   string
 	}{
 		Image:        p.ProbeImage,
-		Flags:        fmt.Sprintf("--registry-url=%s --server-uuid=%s", p.RegistryURL, server.Spec.SystemUUID),
+		Flags:        flags,
 		User:         user,
 		SSHPublicKey: sshPublicKey,
 		PasswordHash: passwordHash,

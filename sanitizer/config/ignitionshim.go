@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/vincent-petithory/dataurl"
 )
 
 type Config struct {
 	ReportURL string `json:"reportURL"`
+	Token     string `json:"token"`
 }
 
 func FetchViaIgnition(ctx context.Context, ignitionURL string) (*Config, error) {
@@ -57,6 +59,20 @@ type IgnitionShimFile struct {
 
 type IgnitionShimContents struct {
 	Source string `json:"source"`
+}
+
+// ReadLocalConfig reads the sanitizer config from /sanitizer/config on disk.
+// This is used when the report URL is known but no ignition URL is configured.
+func ReadLocalConfig() (*Config, error) {
+	data, err := os.ReadFile("/sanitizer/config")
+	if err != nil {
+		return nil, fmt.Errorf("reading local config: %w", err)
+	}
+	cfg := &Config{}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parsing local config: %w", err)
+	}
+	return cfg, nil
 }
 
 func decodeIgnitionConfig(ignitionData []byte) (*Config, error) {

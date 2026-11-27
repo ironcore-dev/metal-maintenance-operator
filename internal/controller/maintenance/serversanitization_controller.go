@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/constants"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/token"
 	metalv1alpha1 "github.com/ironcore-dev/metal-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +43,10 @@ type ServerSanitizationReconciler struct {
 		server *metalv1alpha1.Server,
 		sanitizationUID string,
 	) ([]byte, error)
+	// SigningKey is used to verify embedded tokens in existing ignition secrets.
+	// When set, claims with expired tokens are deleted so reconciliation issues fresh ones.
+	SigningKey  []byte
+	TokenExpiry time.Duration
 }
 
 // +kubebuilder:rbac:groups=metal.ironcore.dev,resources=servers,verbs=get;list;watch;update;patch
@@ -124,6 +131,10 @@ func (r *ServerSanitizationReconciler) reconcileAvailable(ctx context.Context, s
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("getting or creating sanitization claim: %w", err)
 	}
+	if sanitizationClaim == nil {
+		// Stale claim was deleted; requeue to create a fresh one.
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
 
 	_, ok := sanitizationClaim.Labels[constants.SanitizedLabel]
 	if !ok {
@@ -183,6 +194,24 @@ func (r *ServerSanitizationReconciler) getOrCreateSanitizationClaim(ctx context.
 				}
 			}()
 		}
+
+		// When signing is enabled, verify the embedded token is still valid.
+		// If expired, delete the stale claim (and its owned secret) so the next
+		// reconcile creates fresh resources with a new token.
+		if len(r.SigningKey) > 0 {
+			if stale, err := r.isIgnitionTokenExpired(ctx, matchingClaim); err != nil {
+				log.Error(err, "Could not check ignition token expiry; reusing existing claim")
+			} else if stale {
+				log.Info("Sanitization token expired; deleting stale claim to trigger refresh",
+					"claim", klog.KObj(matchingClaim))
+				if err := r.Delete(ctx, matchingClaim); client.IgnoreNotFound(err) != nil {
+					return nil, fmt.Errorf("deleting expired sanitization claim: %w", err)
+				}
+				// Return a not-found-style nil so reconcileAvailable retries next tick.
+				return nil, nil
+			}
+		}
+
 		log.V(1).Info("Found matching sanitization claim", "MatchingSanitizationClaim", klog.KObj(matchingClaim))
 		return matchingClaim, nil
 	}
@@ -251,6 +280,55 @@ func (r *ServerSanitizationReconciler) getOrCreateSanitizationClaim(ctx context.
 		}
 	}
 	return sanitizationClaim, nil
+}
+
+// isIgnitionTokenExpired fetches the ignition secret owned by the claim and
+// checks whether the embedded JWT token is expired. Returns false (fail-open)
+// if no secret is found or the token cannot be extracted.
+func (r *ServerSanitizationReconciler) isIgnitionTokenExpired(ctx context.Context, claim *metalv1alpha1.ServerClaim) (bool, error) {
+	secret := &corev1.Secret{}
+	secretKey := client.ObjectKey{Namespace: claim.Namespace, Name: claim.Name}
+	if err := r.Get(ctx, secretKey, secret); err != nil {
+		return false, client.IgnoreNotFound(err)
+	}
+	ignitionData, ok := secret.Data["ignition"]
+	if !ok {
+		return false, nil
+	}
+	// The sanitization ignition embeds the JWT as `"token": "<jwt>"` in the
+	// /sanitizer/config JSON block. Extract it with a simple string search so
+	// we avoid a full YAML+JSON parse of the ignition document.
+	rawIgnition := string(ignitionData)
+	const marker = `"token": "`
+	idx := strings.Index(rawIgnition, marker)
+	if idx < 0 {
+		return false, nil
+	}
+	start := idx + len(marker)
+	end := strings.IndexByte(rawIgnition[start:], '"')
+	if end < 0 {
+		return false, nil
+	}
+	tok := rawIgnition[start : start+end]
+	if tok == "" {
+		return false, nil
+	}
+	_, issuedAt, valid, err := token.VerifySignedDiscoveryToken(r.SigningKey, tok)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		// Token invalid (e.g. expired); treat as stale.
+		return true, nil
+	}
+	// Proactively refresh when less than 10% of the token lifetime remains.
+	if r.TokenExpiry > 0 {
+		expiry := time.Unix(issuedAt, 0).Add(r.TokenExpiry)
+		if time.Until(expiry) < r.TokenExpiry/10 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *ServerSanitizationReconciler) cleanupOutdatedSanitizationResources(

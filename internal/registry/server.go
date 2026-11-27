@@ -13,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/ironcore-dev/metal-maintenance-operator/internal/token"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	discoveryv1alpha1 "github.com/ironcore-dev/metal-maintenance-operator/api/discovery/v1alpha1"
@@ -49,16 +51,18 @@ type RegistryServer struct {
 	data map[string]discoveryv1alpha1.Metadata
 
 	staleEntryTTL time.Duration
+	signingKey    []byte
 }
 
 // NewServer initializes and returns a new Server instance.
-func NewServer(logger logr.Logger, addr string) *RegistryServer {
+func NewServer(logger logr.Logger, addr string, signingKey []byte) *RegistryServer {
 	server := &RegistryServer{
 		addr:          addr,
 		mux:           http.NewServeMux(),
 		log:           logger,
 		data:          map[string]discoveryv1alpha1.Metadata{},
 		staleEntryTTL: DefaultStaleEntryTTL,
+		signingKey:    signingKey,
 	}
 	server.mux.HandleFunc("POST /register", server.registerHandler)
 	return server
@@ -74,6 +78,27 @@ func (s *RegistryServer) registerHandler(w http.ResponseWriter, r *http.Request)
 	if reg.SystemUUID == "" {
 		http.Error(w, "systemUUID must not be empty", http.StatusBadRequest)
 		return
+	}
+
+	if len(s.signingKey) > 0 {
+		authHeader := r.Header.Get("Authorization")
+		bearerToken := strings.TrimPrefix(authHeader, "Bearer ")
+		if bearerToken == "" || bearerToken == authHeader {
+			http.Error(w, "missing or malformed Authorization header", http.StatusUnauthorized)
+			return
+		}
+		claimedUUID, _, valid, err := token.VerifySignedDiscoveryToken(s.signingKey, bearerToken)
+		if err != nil || !valid {
+			s.log.V(1).Info("Rejected registration with invalid token", "uuid", reg.SystemUUID)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		if claimedUUID != reg.SystemUUID {
+			s.log.V(1).Info("Rejected registration: token UUID mismatch",
+				"tokenUUID", claimedUUID, "bodyUUID", reg.SystemUUID)
+			http.Error(w, "token does not match systemUUID", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	s.Store(reg.SystemUUID, reg.Data)
