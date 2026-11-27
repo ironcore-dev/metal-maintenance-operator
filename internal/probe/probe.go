@@ -16,6 +16,7 @@ import (
 	"github.com/ironcore-dev/metal-maintenance-operator/internal/registry"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 )
 
 type Agent struct {
@@ -201,7 +202,7 @@ func (a *Agent) registerServer(ctx context.Context) error {
 			Jitter:   0.1,
 		},
 		func(ctx context.Context) (bool, error) {
-			a.log.Info("Sending registration payload", "uuid", payload.SystemUUID, "timestamp", payload.Data.Timestamp)
+			a.log.Info("Sending registration payload", "uuid", payload.SystemUUID, "timestamp", klog.SafePtr(payload.Data.Timestamp))
 			jsonData, err := json.Marshal(payload)
 			if err != nil {
 				return false, err
