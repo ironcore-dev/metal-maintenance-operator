@@ -201,6 +201,7 @@ func (a *Agent) registerServer(ctx context.Context) error {
 			Jitter:   0.1,
 		},
 		func(ctx context.Context) (bool, error) {
+			a.log.Info("Sending registration payload", "uuid", payload.SystemUUID, "timestamp", payload.Data.Timestamp)
 			jsonData, err := json.Marshal(payload)
 			if err != nil {
 				return false, err
