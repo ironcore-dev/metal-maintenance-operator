@@ -25,6 +25,8 @@ type DiscoveryProvider struct {
 	User         string // defaults to "metal" if empty
 	SigningKey   []byte
 	TokenExpiry  time.Duration
+	NTPServers   string // space-separated NTP server hostnames
+
 }
 
 // Ignition renders the discovery ignition for the given server and returns
@@ -85,12 +87,14 @@ func (p *DiscoveryProvider) Ignition(_ context.Context, server *metalv1alpha1.Se
 		User         string
 		SSHPublicKey string
 		PasswordHash string
+		NTPServers   string
 	}{
 		Image:        p.ProbeImage,
 		Flags:        flags,
 		User:         user,
 		SSHPublicKey: sshPublicKey,
 		PasswordHash: passwordHash,
+		NTPServers:   p.NTPServers,
 	}); err != nil {
 		return nil, nil, fmt.Errorf("render discovery ignition: %w", err)
 	}
